@@ -1,5 +1,5 @@
 
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { useRouter, useSegments } from 'expo-router';
 import { View, ActivityIndicator, StyleSheet, Text } from 'react-native';
 import { useAuth } from '@/contexts/AuthContext';
@@ -9,6 +9,7 @@ export default function Index() {
   const router = useRouter();
   const segments = useSegments();
   const { user, loading } = useAuth();
+  const [isNavigating, setIsNavigating] = useState(false);
 
   useEffect(() => {
     // Wrap navigation logic in try/catch to prevent silent crashes
@@ -19,8 +20,18 @@ export default function Index() {
           return;
         }
 
+        if (isNavigating) {
+          console.log('[Index] Already navigating, skipping...');
+          return;
+        }
+
         console.log('[Index] Auth loaded, user:', user ? user.email : 'not authenticated');
         console.log('[Index] Current segments:', segments);
+
+        setIsNavigating(true);
+
+        // Small delay to ensure state is fully updated
+        await new Promise(resolve => setTimeout(resolve, 100));
 
         if (user) {
           console.log('[Index] User is authenticated, redirecting to home');
@@ -32,6 +43,7 @@ export default function Index() {
         }
       } catch (error) {
         console.error('[Index] Navigation error:', error);
+        setIsNavigating(false);
         // Fallback: try to navigate to onboarding if there's an error
         try {
           router.replace('/auth/onboarding');
@@ -52,6 +64,7 @@ export default function Index() {
         <Text style={styles.tagline}>Cada cliente regresa</Text>
       </View>
       <ActivityIndicator size="large" color={colors.primary} style={styles.loader} />
+      <Text style={styles.loadingText}>Cargando...</Text>
     </View>
   );
 }
@@ -81,5 +94,10 @@ const styles = StyleSheet.create({
   },
   loader: {
     marginTop: 20,
+  },
+  loadingText: {
+    marginTop: 12,
+    fontSize: 16,
+    color: '#FFFFFF',
   },
 });

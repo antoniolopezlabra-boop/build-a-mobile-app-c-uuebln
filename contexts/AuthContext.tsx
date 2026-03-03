@@ -204,6 +204,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         email: data.user?.email || params.email,
         name: data.user?.name || params.name,
       };
+      
+      // Update state synchronously
       setUser(newUser);
       console.log('[Auth] User state updated:', newUser.email);
 
@@ -217,6 +219,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       }
       
       console.log("[Auth] Registration complete for:", params.email);
+      
+      // Force a small delay to ensure state propagates
+      await new Promise(resolve => setTimeout(resolve, 100));
     } catch (error) {
       console.error('[Auth] Registration error:', error);
       throw error;
@@ -273,6 +278,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       }
       
       console.log("[Auth] Login complete for:", email);
+      
+      // Force a small delay to ensure state propagates
+      await new Promise(resolve => setTimeout(resolve, 100));
     } catch (error) {
       console.error('[Auth] Login error:', error);
       throw error;

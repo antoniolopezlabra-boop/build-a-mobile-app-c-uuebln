@@ -1,42 +1,54 @@
 
 import React from 'react';
-import { Href } from 'expo-router';
+import { Href, Stack } from 'expo-router';
 import FloatingTabBar from '@/components/FloatingTabBar';
 import { colors } from '@/styles/commonStyles';
 
 export default function TabLayout() {
   const tabs = [
     {
-      name: 'Inicio',
+      name: 'home',
       route: '/(tabs)/(home)' as Href,
-      ios_icon_name: 'house.fill',
-      android_material_icon_name: 'home' as const,
+      icon: 'home' as const,
+      label: 'Inicio',
     },
     {
-      name: 'Citas',
+      name: 'appointments',
       route: '/(tabs)/appointments' as Href,
-      ios_icon_name: 'calendar',
-      android_material_icon_name: 'calendar-today' as const,
+      icon: 'calendar-today' as const,
+      label: 'Citas',
     },
     {
-      name: 'Clientes',
+      name: 'clients',
       route: '/(tabs)/clients' as Href,
-      ios_icon_name: 'person.2.fill',
-      android_material_icon_name: 'group' as const,
+      icon: 'group' as const,
+      label: 'Clientes',
     },
     {
-      name: 'Reportes',
+      name: 'reports',
       route: '/(tabs)/reports' as Href,
-      ios_icon_name: 'chart.bar.fill',
-      android_material_icon_name: 'assessment' as const,
+      icon: 'assessment' as const,
+      label: 'Reportes',
     },
     {
-      name: 'Ajustes',
+      name: 'settings',
       route: '/(tabs)/settings' as Href,
-      ios_icon_name: 'gearshape.fill',
-      android_material_icon_name: 'settings' as const,
+      icon: 'settings' as const,
+      label: 'Ajustes',
     },
   ];
 
-  return <FloatingTabBar tabs={tabs} />;
+  return (
+    <>
+      <Stack screenOptions={{ headerShown: false }}>
+        <Stack.Screen name="(home)" options={{ headerShown: false }} />
+        <Stack.Screen name="appointments" options={{ headerShown: false }} />
+        <Stack.Screen name="clients" options={{ headerShown: false }} />
+        <Stack.Screen name="reports" options={{ headerShown: false }} />
+        <Stack.Screen name="settings" options={{ headerShown: false }} />
+        <Stack.Screen name="profile" options={{ headerShown: false }} />
+      </Stack>
+      <FloatingTabBar tabs={tabs} />
+    </>
+  );
 }

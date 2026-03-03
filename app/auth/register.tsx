@@ -66,9 +66,12 @@ export default function RegisterScreen() {
     try {
       await register({ email, password, name, businessName, businessType });
       console.log('Registration successful, navigating to home');
-      // Navigation will be handled by app/index.tsx when user state updates
-      // But we also explicitly navigate here to ensure it happens
-      router.replace('/(tabs)/(home)');
+      
+      // Wait a bit for state to update, then navigate
+      setTimeout(() => {
+        console.log('[Register] Executing navigation to home');
+        router.replace('/(tabs)/(home)');
+      }, 500);
     } catch (error: any) {
       console.error('Registration failed:', error);
       const message = error?.message?.includes('already exists') || error?.message?.includes('409')
