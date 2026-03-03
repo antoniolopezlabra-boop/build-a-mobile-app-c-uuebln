@@ -14,6 +14,11 @@ interface BusinessProfile {
   userId: string;
   businessName: string;
   businessType: string;
+  address?: string | null;
+  phone?: string | null;
+  alternativePhone?: string | null;
+  logoUrl?: string | null;
+  weeklySchedule?: any;
 }
 
 interface AuthContextType {

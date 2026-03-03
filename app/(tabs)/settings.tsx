@@ -1,14 +1,12 @@
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View,
   Text,
   StyleSheet,
   ScrollView,
   TouchableOpacity,
-  TextInput,
   ActivityIndicator,
-  Modal,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
@@ -16,37 +14,48 @@ import { colors } from '@/styles/commonStyles';
 import { IconSymbol } from '@/components/IconSymbol';
 import { ConfirmModal } from '@/components/button';
 import { useAuth } from '@/contexts/AuthContext';
-import { apiPut } from '@/utils/api';
+import { apiGet } from '@/utils/api';
 
-const BUSINESS_TYPES = [
-  'Spa',
-  'Salón de belleza',
-  'Uñas',
-  'Barbería',
-  'Consultorio médico',
-  'Odontología',
-  'Veterinaria',
-  'Fotografía',
-  'Tutorías',
-  'Otro',
-];
+interface WhatsAppConfig {
+  isConnected: boolean;
+  phoneNumber?: string;
+}
+
+interface Subscription {
+  planType: 'Básico' | 'Premium';
+  price: string;
+}
 
 export default function SettingsScreen() {
   const router = useRouter();
-  const { user, businessProfile, signOut, refreshBusinessProfile } = useAuth();
+  const { user, businessProfile, signOut } = useAuth();
   const [logoutModal, setLogoutModal] = useState(false);
-  const [showBusinessForm, setShowBusinessForm] = useState(false);
-  const [showTypePicker, setShowTypePicker] = useState(false);
-  const [saving, setSaving] = useState(false);
-  const [errorModal, setErrorModal] = useState<{ visible: boolean; message: string }>({
-    visible: false,
-    message: '',
-  });
-  const [successModal, setSuccessModal] = useState(false);
+  const [whatsappConfig, setWhatsappConfig] = useState<WhatsAppConfig | null>(null);
+  const [subscription, setSubscription] = useState<Subscription | null>(null);
+  const [loading, setLoading] = useState(true);
 
-  // Business form state
-  const [formBusinessName, setFormBusinessName] = useState(businessProfile?.businessName || '');
-  const [formBusinessType, setFormBusinessType] = useState(businessProfile?.businessType || '');
+  useEffect(() => {
+    loadSettings();
+  }, []);
+
+  const loadSettings = async () => {
+    console.log('[Settings] Loading settings');
+    setLoading(true);
+    try {
+      const [whatsappData, subscriptionData] = await Promise.all([
+        apiGet<WhatsAppConfig | null>('/api/whatsapp-config').catch(() => null),
+        apiGet<Subscription>('/api/subscription').catch(() => null),
+      ]);
+      
+      setWhatsappConfig(whatsappData);
+      setSubscription(subscriptionData);
+      console.log('[Settings] Settings loaded');
+    } catch (error) {
+      console.error('[Settings] Failed to load settings:', error);
+    } finally {
+      setLoading(false);
+    }
+  };
 
   const handleLogout = async () => {
     setLogoutModal(false);
@@ -58,36 +67,10 @@ export default function SettingsScreen() {
     }
   };
 
-  const openBusinessForm = () => {
-    setFormBusinessName(businessProfile?.businessName || '');
-    setFormBusinessType(businessProfile?.businessType || '');
-    setShowBusinessForm(true);
-  };
-
-  const handleSaveBusiness = async () => {
-    if (!formBusinessName || !formBusinessType) {
-      setErrorModal({ visible: true, message: 'Por favor completa todos los campos' });
-      return;
-    }
-
-    setSaving(true);
-    try {
-      console.log('[Settings] Updating business profile');
-      await apiPut('/api/business-profile', {
-        businessName: formBusinessName,
-        businessType: formBusinessType,
-      });
-      await refreshBusinessProfile();
-      setShowBusinessForm(false);
-      setSuccessModal(true);
-      console.log('[Settings] Business profile updated');
-    } catch (error: any) {
-      console.error('[Settings] Failed to update business profile:', error);
-      setErrorModal({ visible: true, message: error?.message || 'Error al actualizar el negocio' });
-    } finally {
-      setSaving(false);
-    }
-  };
+  const whatsappStatusText = whatsappConfig?.isConnected ? 'Conectado' : 'No configurado';
+  const whatsappStatusColor = whatsappConfig?.isConnected ? colors.primary : colors.warning;
+  const currentPlan = subscription?.planType || 'Básico';
+  const currentPrice = subscription?.price || '$990 MXN';
 
   return (
     <SafeAreaView style={styles.container}>
@@ -110,244 +93,187 @@ export default function SettingsScreen() {
         onDismiss={() => setLogoutModal(false)}
       />
 
-      <ConfirmModal
-        visible={errorModal.visible}
-        title="Error"
-        message={errorModal.message}
-        buttons={[
-          {
-            text: 'Aceptar',
-            onPress: () => setErrorModal({ visible: false, message: '' }),
-            style: 'cancel',
-          },
-        ]}
-        onDismiss={() => setErrorModal({ visible: false, message: '' })}
-      />
-
-      <ConfirmModal
-        visible={successModal}
-        title="¡Listo!"
-        message="La información del negocio se actualizó correctamente."
-        buttons={[
-          {
-            text: 'Aceptar',
-            onPress: () => setSuccessModal(false),
-            style: 'default',
-          },
-        ]}
-        onDismiss={() => setSuccessModal(false)}
-      />
-
       <View style={styles.header}>
         <Text style={styles.title}>Configuración</Text>
       </View>
 
-      <ScrollView contentContainerStyle={styles.scrollContent}>
-        {/* User info card */}
-        {user ? (
-          <View style={styles.userCard}>
-            <View style={styles.userAvatar}>
-              <Text style={styles.userAvatarText}>
-                {user.name?.charAt(0).toUpperCase() || 'U'}
-              </Text>
-            </View>
-            <View style={styles.userInfo}>
-              <Text style={styles.userName}>{user.name}</Text>
-              <Text style={styles.userEmail}>{user.email}</Text>
-              {businessProfile ? (
-                <Text style={styles.userBusiness}>{businessProfile.businessName}</Text>
-              ) : null}
-            </View>
-          </View>
-        ) : null}
-
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Negocio</Text>
-          
-          <TouchableOpacity style={styles.settingItem} onPress={openBusinessForm}>
-            <View style={styles.settingLeft}>
-              <IconSymbol
-                android_material_icon_name="store"
-                size={24}
-                color={colors.text}
-              />
-              <Text style={styles.settingText}>Información del negocio</Text>
-            </View>
-            <IconSymbol
-              android_material_icon_name="arrow-forward"
-              size={24}
-              color={colors.textSecondary}
-            />
-          </TouchableOpacity>
-
-          <TouchableOpacity style={styles.settingItem}>
-            <View style={styles.settingLeft}>
-              <IconSymbol
-                android_material_icon_name="schedule"
-                size={24}
-                color={colors.text}
-              />
-              <Text style={styles.settingText}>Horarios de atención</Text>
-            </View>
-            <IconSymbol
-              android_material_icon_name="arrow-forward"
-              size={24}
-              color={colors.textSecondary}
-            />
-          </TouchableOpacity>
+      {loading ? (
+        <View style={styles.loadingContainer}>
+          <ActivityIndicator size="large" color={colors.primary} />
         </View>
-
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Notificaciones</Text>
-          
-          <TouchableOpacity style={styles.settingItem}>
-            <View style={styles.settingLeft}>
-              <IconSymbol
-                android_material_icon_name="message"
-                size={24}
-                color={colors.text}
-              />
-              <Text style={styles.settingText}>WhatsApp</Text>
-            </View>
-            <View style={styles.statusBadge}>
-              <Text style={styles.statusText}>No configurado</Text>
-            </View>
-          </TouchableOpacity>
-
-          <TouchableOpacity style={styles.settingItem}>
-            <View style={styles.settingLeft}>
-              <IconSymbol
-                android_material_icon_name="notifications"
-                size={24}
-                color={colors.text}
-              />
-              <Text style={styles.settingText}>Recordatorios</Text>
-            </View>
-            <IconSymbol
-              android_material_icon_name="arrow-forward"
-              size={24}
-              color={colors.textSecondary}
-            />
-          </TouchableOpacity>
-        </View>
-
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Cuenta</Text>
-
-          <TouchableOpacity
-            style={styles.settingItem}
-            onPress={() => {
-              console.log('User tapped logout');
-              setLogoutModal(true);
-            }}
-          >
-            <View style={styles.settingLeft}>
-              <IconSymbol
-                android_material_icon_name="logout"
-                size={24}
-                color={colors.error}
-              />
-              <Text style={[styles.settingText, styles.logoutText]}>
-                Cerrar sesión
-              </Text>
-            </View>
-          </TouchableOpacity>
-        </View>
-
-        <View style={styles.footer}>
-          <Text style={styles.footerText}>VYLTA v1.0.0</Text>
-          <Text style={styles.footerSubtext}>Cada cliente regresa</Text>
-        </View>
-      </ScrollView>
-
-      {/* Business Profile Edit Modal */}
-      <Modal
-        visible={showBusinessForm}
-        animationType="slide"
-        transparent
-        onRequestClose={() => setShowBusinessForm(false)}
-      >
-        <View style={styles.formOverlay}>
-          <View style={styles.formContainer}>
-            <View style={styles.formHeader}>
-              <Text style={styles.formTitle}>Información del negocio</Text>
-              <TouchableOpacity onPress={() => setShowBusinessForm(false)}>
-                <IconSymbol android_material_icon_name="close" size={24} color={colors.text} />
-              </TouchableOpacity>
-            </View>
-
-            <ScrollView style={styles.formScroll}>
-              <Text style={styles.fieldLabel}>Nombre del negocio</Text>
-              <TextInput
-                style={styles.input}
-                value={formBusinessName}
-                onChangeText={setFormBusinessName}
-                placeholder="Nombre de tu negocio"
-                placeholderTextColor={colors.textSecondary}
-              />
-
-              <Text style={styles.fieldLabel}>Tipo de negocio</Text>
-              <TouchableOpacity
-                style={styles.pickerButton}
-                onPress={() => setShowTypePicker(true)}
-              >
-                <Text style={[styles.pickerText, !formBusinessType && styles.pickerPlaceholder]}>
-                  {formBusinessType || 'Seleccionar tipo'}
+      ) : (
+        <ScrollView contentContainerStyle={styles.scrollContent}>
+          {/* User info card */}
+          {user ? (
+            <View style={styles.userCard}>
+              <View style={styles.userAvatar}>
+                <Text style={styles.userAvatarText}>
+                  {user.name?.charAt(0).toUpperCase() || 'U'}
                 </Text>
-                <IconSymbol android_material_icon_name="arrow-drop-down" size={24} color={colors.textSecondary} />
-              </TouchableOpacity>
-
-              <TouchableOpacity
-                style={[styles.saveButton, saving && styles.saveButtonDisabled]}
-                onPress={handleSaveBusiness}
-                disabled={saving}
-              >
-                {saving ? (
-                  <ActivityIndicator color="#FFFFFF" />
-                ) : (
-                  <Text style={styles.saveButtonText}>Guardar cambios</Text>
-                )}
-              </TouchableOpacity>
-            </ScrollView>
-          </View>
-        </View>
-      </Modal>
-
-      {/* Business Type Picker */}
-      <Modal
-        visible={showTypePicker}
-        animationType="slide"
-        transparent
-        onRequestClose={() => setShowTypePicker(false)}
-      >
-        <View style={styles.formOverlay}>
-          <View style={styles.pickerContainer}>
-            <View style={styles.formHeader}>
-              <Text style={styles.formTitle}>Tipo de negocio</Text>
-              <TouchableOpacity onPress={() => setShowTypePicker(false)}>
-                <IconSymbol android_material_icon_name="close" size={24} color={colors.text} />
-              </TouchableOpacity>
+              </View>
+              <View style={styles.userInfo}>
+                <Text style={styles.userName}>{user.name}</Text>
+                <Text style={styles.userEmail}>{user.email}</Text>
+                {businessProfile ? (
+                  <Text style={styles.userBusiness}>{businessProfile.businessName}</Text>
+                ) : null}
+              </View>
             </View>
-            <ScrollView>
-              {BUSINESS_TYPES.map((type) => (
-                <TouchableOpacity
-                  key={type}
-                  style={styles.typeOption}
-                  onPress={() => {
-                    setFormBusinessType(type);
-                    setShowTypePicker(false);
-                  }}
-                >
-                  <Text style={styles.typeText}>{type}</Text>
-                  {formBusinessType === type && (
-                    <IconSymbol android_material_icon_name="check" size={20} color={colors.primary} />
-                  )}
-                </TouchableOpacity>
-              ))}
-            </ScrollView>
+          ) : null}
+
+          {/* MI NEGOCIO */}
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>MI NEGOCIO</Text>
+
+            <TouchableOpacity
+              style={styles.settingItem}
+              onPress={() => {
+                console.log('User tapped business info');
+                router.push('/settings/business');
+              }}
+            >
+              <View style={styles.settingLeft}>
+                <IconSymbol android_material_icon_name="store" size={24} color={colors.text} />
+                <Text style={styles.settingText}>Información del negocio</Text>
+              </View>
+              <IconSymbol
+                android_material_icon_name="arrow-forward"
+                size={24}
+                color={colors.textSecondary}
+              />
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={styles.settingItem}
+              onPress={() => {
+                console.log('User tapped schedule');
+                router.push('/settings/schedule');
+              }}
+            >
+              <View style={styles.settingLeft}>
+                <IconSymbol android_material_icon_name="schedule" size={24} color={colors.text} />
+                <Text style={styles.settingText}>Horarios de atención</Text>
+              </View>
+              <IconSymbol
+                android_material_icon_name="arrow-forward"
+                size={24}
+                color={colors.textSecondary}
+              />
+            </TouchableOpacity>
           </View>
-        </View>
-      </Modal>
+
+          {/* WHATSAPP BUSINESS */}
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>WHATSAPP BUSINESS</Text>
+
+            <TouchableOpacity
+              style={styles.settingItem}
+              onPress={() => {
+                console.log('User tapped WhatsApp setup');
+                router.push('/settings/whatsapp');
+              }}
+            >
+              <View style={styles.settingLeft}>
+                <IconSymbol android_material_icon_name="message" size={24} color={colors.text} />
+                <View style={styles.settingTextContainer}>
+                  <Text style={styles.settingText}>Configuración de WhatsApp</Text>
+                  <Text style={styles.settingSubtext}>
+                    {whatsappConfig?.phoneNumber || 'Sin configurar'}
+                  </Text>
+                </View>
+              </View>
+              <View style={[styles.statusBadge, { backgroundColor: whatsappStatusColor }]}>
+                <Text style={styles.statusText}>{whatsappStatusText}</Text>
+              </View>
+            </TouchableOpacity>
+          </View>
+
+          {/* PLAN Y SUSCRIPCIÓN */}
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>PLAN Y SUSCRIPCIÓN</Text>
+
+            <TouchableOpacity
+              style={styles.settingItem}
+              onPress={() => {
+                console.log('User tapped subscription');
+                router.push('/settings/subscription');
+              }}
+            >
+              <View style={styles.settingLeft}>
+                <IconSymbol android_material_icon_name="star" size={24} color={colors.accent} />
+                <View style={styles.settingTextContainer}>
+                  <Text style={styles.settingText}>Plan {currentPlan}</Text>
+                  <Text style={styles.settingSubtext}>{currentPrice} / mes</Text>
+                </View>
+              </View>
+              <IconSymbol
+                android_material_icon_name="arrow-forward"
+                size={24}
+                color={colors.textSecondary}
+              />
+            </TouchableOpacity>
+          </View>
+
+          {/* CUENTA */}
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>CUENTA</Text>
+
+            <TouchableOpacity
+              style={styles.settingItem}
+              onPress={() => {
+                console.log('User tapped edit profile');
+                router.push('/settings/profile');
+              }}
+            >
+              <View style={styles.settingLeft}>
+                <IconSymbol android_material_icon_name="person" size={24} color={colors.text} />
+                <Text style={styles.settingText}>Editar perfil</Text>
+              </View>
+              <IconSymbol
+                android_material_icon_name="arrow-forward"
+                size={24}
+                color={colors.textSecondary}
+              />
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={styles.settingItem}
+              onPress={() => {
+                console.log('User tapped change password');
+                router.push('/settings/password');
+              }}
+            >
+              <View style={styles.settingLeft}>
+                <IconSymbol android_material_icon_name="lock" size={24} color={colors.text} />
+                <Text style={styles.settingText}>Cambiar contraseña</Text>
+              </View>
+              <IconSymbol
+                android_material_icon_name="arrow-forward"
+                size={24}
+                color={colors.textSecondary}
+              />
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={styles.settingItem}
+              onPress={() => {
+                console.log('User tapped logout');
+                setLogoutModal(true);
+              }}
+            >
+              <View style={styles.settingLeft}>
+                <IconSymbol android_material_icon_name="logout" size={24} color={colors.error} />
+                <Text style={[styles.settingText, styles.logoutText]}>Cerrar sesión</Text>
+              </View>
+            </TouchableOpacity>
+          </View>
+
+          <View style={styles.footer}>
+            <Text style={styles.footerText}>VYLTA v1.0.0</Text>
+            <Text style={styles.footerSubtext}>Cada cliente regresa</Text>
+          </View>
+        </ScrollView>
+      )}
     </SafeAreaView>
   );
 }
@@ -356,6 +282,11 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: colors.background,
+  },
+  loadingContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
   },
   header: {
     padding: 20,
@@ -423,11 +354,11 @@ const styles = StyleSheet.create({
     marginBottom: 32,
   },
   sectionTitle: {
-    fontSize: 14,
-    fontWeight: '600',
+    fontSize: 12,
+    fontWeight: '700',
     color: colors.textSecondary,
     marginBottom: 12,
-    textTransform: 'uppercase',
+    letterSpacing: 0.5,
   },
   settingItem: {
     backgroundColor: colors.card,
@@ -448,22 +379,30 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     flex: 1,
   },
+  settingTextContainer: {
+    marginLeft: 12,
+    flex: 1,
+  },
   settingText: {
     fontSize: 16,
     color: colors.text,
     marginLeft: 12,
   },
+  settingSubtext: {
+    fontSize: 13,
+    color: colors.textSecondary,
+    marginTop: 2,
+  },
   logoutText: {
     color: colors.error,
   },
   statusBadge: {
-    backgroundColor: colors.warning,
     paddingHorizontal: 12,
     paddingVertical: 4,
     borderRadius: 12,
   },
   statusText: {
-    fontSize: 12,
+    fontSize: 11,
     color: '#FFFFFF',
     fontWeight: '600',
   },
@@ -479,100 +418,5 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: colors.textSecondary,
     marginTop: 4,
-  },
-  formOverlay: {
-    flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.5)',
-    justifyContent: 'flex-end',
-  },
-  formContainer: {
-    backgroundColor: colors.card,
-    borderTopLeftRadius: 24,
-    borderTopRightRadius: 24,
-    maxHeight: '70%',
-  },
-  pickerContainer: {
-    backgroundColor: colors.card,
-    borderTopLeftRadius: 24,
-    borderTopRightRadius: 24,
-    maxHeight: '70%',
-    paddingBottom: 32,
-  },
-  formHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    padding: 20,
-    borderBottomWidth: 1,
-    borderBottomColor: colors.border,
-  },
-  formTitle: {
-    fontSize: 20,
-    fontWeight: 'bold',
-    color: colors.text,
-  },
-  formScroll: {
-    padding: 20,
-  },
-  fieldLabel: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: colors.text,
-    marginBottom: 8,
-    marginTop: 16,
-  },
-  input: {
-    backgroundColor: colors.background,
-    borderRadius: 12,
-    padding: 14,
-    fontSize: 16,
-    color: colors.text,
-    borderWidth: 1,
-    borderColor: colors.border,
-  },
-  pickerButton: {
-    backgroundColor: colors.background,
-    borderRadius: 12,
-    padding: 14,
-    borderWidth: 1,
-    borderColor: colors.border,
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-  },
-  pickerText: {
-    fontSize: 16,
-    color: colors.text,
-  },
-  pickerPlaceholder: {
-    color: colors.textSecondary,
-  },
-  typeOption: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    padding: 18,
-    borderBottomWidth: 1,
-    borderBottomColor: colors.border,
-  },
-  typeText: {
-    fontSize: 16,
-    color: colors.text,
-  },
-  saveButton: {
-    backgroundColor: colors.primary,
-    borderRadius: 12,
-    padding: 16,
-    alignItems: 'center',
-    marginTop: 24,
-    marginBottom: 32,
-  },
-  saveButtonDisabled: {
-    opacity: 0.6,
-  },
-  saveButtonText: {
-    color: '#FFFFFF',
-    fontSize: 18,
-    fontWeight: '600',
   },
 });

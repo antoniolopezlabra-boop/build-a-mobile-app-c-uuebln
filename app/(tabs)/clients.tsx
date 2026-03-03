@@ -11,10 +11,11 @@ import {
   Modal,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { useRouter } from 'expo-router';
 import { colors } from '@/styles/commonStyles';
 import { IconSymbol } from '@/components/IconSymbol';
 import { ConfirmModal } from '@/components/button';
-import { apiGet, apiPost, apiPut, apiDelete } from '@/utils/api';
+import { apiGet } from '@/utils/api';
 
 interface Client {
   id: string;
@@ -24,39 +25,46 @@ interface Client {
   notes?: string | null;
   lastVisit?: string | null;
   totalVisits: number;
+  isActive?: boolean;
+  birthday?: string | null;
   createdAt: string;
 }
 
+type FilterType = 'Todos' | 'Activos' | 'Inactivos';
+
 export default function ClientsScreen() {
+  const router = useRouter();
   const [loading, setLoading] = useState(true);
   const [clients, setClients] = useState<Client[]>([]);
-  const [showForm, setShowForm] = useState(false);
-  const [editingClient, setEditingClient] = useState<Client | null>(null);
-  const [saving, setSaving] = useState(false);
-  const [deleteModal, setDeleteModal] = useState<{ visible: boolean; id: string | null }>({
-    visible: false,
-    id: null,
-  });
+  const [searchQuery, setSearchQuery] = useState('');
+  const [filter, setFilter] = useState<FilterType>('Todos');
   const [errorModal, setErrorModal] = useState<{ visible: boolean; message: string }>({
     visible: false,
     message: '',
   });
 
-  // Form state
-  const [formName, setFormName] = useState('');
-  const [formPhone, setFormPhone] = useState('');
-  const [formEmail, setFormEmail] = useState('');
-  const [formNotes, setFormNotes] = useState('');
+  const [initialLoad, setInitialLoad] = useState(true);
 
   useEffect(() => {
-    loadClients();
+    loadClients().then(() => setInitialLoad(false));
   }, []);
 
-  const loadClients = async () => {
-    console.log('[Clients] Loading clients');
+  useEffect(() => {
+    if (initialLoad) return;
+    const timer = setTimeout(() => {
+      loadClients(searchQuery || undefined);
+    }, 400);
+    return () => clearTimeout(timer);
+  }, [searchQuery]);
+
+  const loadClients = async (search?: string) => {
+    console.log('[Clients] Loading clients', search ? `with search: ${search}` : '');
     setLoading(true);
     try {
-      const data = await apiGet<Client[]>('/api/clients');
+      const endpoint = search
+        ? `/api/clients?search=${encodeURIComponent(search)}`
+        : '/api/clients';
+      const data = await apiGet<Client[]>(endpoint);
       console.log('[Clients] Loaded:', data.length, 'clients');
       setClients(data);
     } catch (error) {
@@ -67,77 +75,42 @@ export default function ClientsScreen() {
     }
   };
 
-  const openCreateForm = () => {
-    setEditingClient(null);
-    setFormName('');
-    setFormPhone('');
-    setFormEmail('');
-    setFormNotes('');
-    setShowForm(true);
-  };
+  const getFilteredClients = () => {
+    let filtered = clients;
 
-  const openEditForm = (client: Client) => {
-    setEditingClient(client);
-    setFormName(client.name);
-    setFormPhone(client.phone);
-    setFormEmail(client.email || '');
-    setFormNotes(client.notes || '');
-    setShowForm(true);
-  };
-
-  const handleSave = async () => {
-    if (!formName || !formPhone) {
-      setErrorModal({ visible: true, message: 'El nombre y teléfono son requeridos' });
-      return;
+    // Apply status filter (client-side, search is handled server-side)
+    if (filter === 'Activos') {
+      filtered = filtered.filter((c) => c.isActive !== false);
+    } else if (filter === 'Inactivos') {
+      filtered = filtered.filter((c) => c.isActive === false);
     }
 
-    setSaving(true);
-    try {
-      const body = {
-        name: formName,
-        phone: formPhone,
-        email: formEmail || undefined,
-        notes: formNotes || undefined,
-      };
-
-      if (editingClient) {
-        console.log('[Clients] Updating client:', editingClient.id);
-        await apiPut(`/api/clients/${editingClient.id}`, body);
-        console.log('[Clients] Client updated');
-      } else {
-        console.log('[Clients] Creating client');
-        await apiPost('/api/clients', body);
-        console.log('[Clients] Client created');
-      }
-
-      setShowForm(false);
-      await loadClients();
-    } catch (error: any) {
-      console.error('[Clients] Save failed:', error);
-      setErrorModal({ visible: true, message: error?.message || 'Error al guardar el cliente' });
-    } finally {
-      setSaving(false);
-    }
+    return filtered;
   };
 
-  const confirmDelete = (id: string) => {
-    setDeleteModal({ visible: true, id });
+  const filteredClients = getFilteredClients();
+
+  const getInitials = (name: string) => {
+    const parts = name.trim().split(' ');
+    if (parts.length >= 2) {
+      return (parts[0][0] + parts[1][0]).toUpperCase();
+    }
+    return name.substring(0, 2).toUpperCase();
   };
 
-  const handleDelete = async () => {
-    if (!deleteModal.id) return;
-    const id = deleteModal.id;
-    setDeleteModal({ visible: false, id: null });
-
-    try {
-      console.log('[Clients] Deleting client:', id);
-      await apiDelete(`/api/clients/${id}`);
-      console.log('[Clients] Client deleted');
-      setClients((prev) => prev.filter((c) => c.id !== id));
-    } catch (error: any) {
-      console.error('[Clients] Delete failed:', error);
-      setErrorModal({ visible: true, message: error?.message || 'Error al eliminar el cliente' });
-    }
+  const formatLastVisit = (lastVisit: string | null | undefined) => {
+    if (!lastVisit) return 'Sin visitas';
+    const date = new Date(lastVisit);
+    const now = new Date();
+    const diffTime = Math.abs(now.getTime() - date.getTime());
+    const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+    
+    if (diffDays === 0) return 'Hoy';
+    if (diffDays === 1) return 'Ayer';
+    if (diffDays < 7) return `Hace ${diffDays} días`;
+    if (diffDays < 30) return `Hace ${Math.floor(diffDays / 7)} semanas`;
+    if (diffDays < 365) return `Hace ${Math.floor(diffDays / 30)} meses`;
+    return `Hace ${Math.floor(diffDays / 365)} años`;
   };
 
   if (loading) {
@@ -152,25 +125,6 @@ export default function ClientsScreen() {
 
   return (
     <SafeAreaView style={styles.container}>
-      <ConfirmModal
-        visible={deleteModal.visible}
-        title="Eliminar cliente"
-        message="¿Estás seguro de que deseas eliminar este cliente? Esta acción no se puede deshacer."
-        buttons={[
-          {
-            text: 'Eliminar',
-            onPress: handleDelete,
-            style: 'destructive',
-          },
-          {
-            text: 'Cancelar',
-            onPress: () => setDeleteModal({ visible: false, id: null }),
-            style: 'cancel',
-          },
-        ]}
-        onDismiss={() => setDeleteModal({ visible: false, id: null })}
-      />
-
       <ConfirmModal
         visible={errorModal.visible}
         title="Error"
@@ -187,70 +141,155 @@ export default function ClientsScreen() {
 
       <View style={styles.header}>
         <Text style={styles.title}>Clientes</Text>
+        
+        {/* Search bar */}
+        <View style={styles.searchContainer}>
+          <IconSymbol
+            android_material_icon_name="search"
+            size={20}
+            color={colors.textSecondary}
+          />
+          <TextInput
+            style={styles.searchInput}
+            value={searchQuery}
+            onChangeText={setSearchQuery}
+            placeholder="Buscar cliente..."
+            placeholderTextColor={colors.textSecondary}
+          />
+          {searchQuery ? (
+            <TouchableOpacity onPress={() => setSearchQuery('')}>
+              <IconSymbol
+                android_material_icon_name="close"
+                size={20}
+                color={colors.textSecondary}
+              />
+            </TouchableOpacity>
+          ) : null}
+        </View>
+
+        {/* Filter tabs */}
+        <View style={styles.filterContainer}>
+          {(['Todos', 'Activos', 'Inactivos'] as FilterType[]).map((f) => (
+            <TouchableOpacity
+              key={f}
+              style={[styles.filterTab, filter === f && styles.filterTabActive]}
+              onPress={() => setFilter(f)}
+            >
+              <Text style={[styles.filterText, filter === f && styles.filterTextActive]}>
+                {f}
+              </Text>
+            </TouchableOpacity>
+          ))}
+        </View>
       </View>
 
       <ScrollView contentContainerStyle={styles.scrollContent}>
-        {clients.length === 0 ? (
+        {filteredClients.length === 0 ? (
           <View style={styles.emptyState}>
             <IconSymbol
               android_material_icon_name="group"
               size={64}
               color={colors.textSecondary}
             />
-            <Text style={styles.emptyStateText}>No tienes clientes registrados</Text>
-            <Text style={styles.emptyStateSubtext}>
-              Agrega tu primer cliente para comenzar
+            <Text style={styles.emptyStateText}>
+              {searchQuery
+                ? 'No se encontraron clientes'
+                : filter === 'Inactivos'
+                ? 'No hay clientes inactivos'
+                : 'No tienes clientes registrados'}
             </Text>
-            <TouchableOpacity
-              style={styles.emptyStateButton}
-              onPress={() => {
-                console.log('User tapped Nuevo Cliente button');
-                openCreateForm();
-              }}
-            >
-              <Text style={styles.emptyStateButtonText}>Nuevo Cliente</Text>
-            </TouchableOpacity>
+            <Text style={styles.emptyStateSubtext}>
+              {searchQuery
+                ? 'Intenta con otro término de búsqueda'
+                : 'Agrega tu primer cliente para comenzar'}
+            </Text>
+            {!searchQuery && (
+              <TouchableOpacity
+                style={styles.emptyStateButton}
+                onPress={() => {
+                  console.log('User tapped Nuevo Cliente button');
+                  router.push('/clients/new');
+                }}
+              >
+                <Text style={styles.emptyStateButtonText}>Nuevo Cliente</Text>
+              </TouchableOpacity>
+            )}
           </View>
         ) : (
-          clients.map((client) => (
-            <View key={client.id} style={styles.clientCard}>
-              <View style={styles.clientAvatar}>
-                <Text style={styles.clientAvatarText}>
-                  {client.name.charAt(0).toUpperCase()}
-                </Text>
-              </View>
-              <View style={styles.clientInfo}>
-                <Text style={styles.clientName}>{client.name}</Text>
-                <Text style={styles.clientPhone}>{client.phone}</Text>
-                {client.email ? (
-                  <Text style={styles.clientEmail}>{client.email}</Text>
-                ) : null}
-                <Text style={styles.clientVisits}>
-                  {client.totalVisits} {client.totalVisits === 1 ? 'visita' : 'visitas'}
-                </Text>
-              </View>
-              <View style={styles.clientActions}>
+          <>
+            {filter === 'Inactivos' && (
+              <TouchableOpacity
+                style={styles.inactivesBanner}
+                onPress={() => {
+                  console.log('User tapped view inactive clients');
+                  router.push('/clients/inactive');
+                }}
+              >
+                <IconSymbol
+                  android_material_icon_name="warning"
+                  size={24}
+                  color={colors.warning}
+                />
+                <View style={styles.inactivesBannerText}>
+                  <Text style={styles.inactivesBannerTitle}>Clientes Inactivos</Text>
+                  <Text style={styles.inactivesBannerSubtitle}>
+                    Ver clientes sin visita en 90+ días
+                  </Text>
+                </View>
+                <IconSymbol
+                  android_material_icon_name="arrow-forward"
+                  size={24}
+                  color={colors.textSecondary}
+                />
+              </TouchableOpacity>
+            )}
+
+            {filteredClients.map((client) => {
+              const isActive = client.isActive !== false;
+              const initials = getInitials(client.name);
+              const lastVisitText = formatLastVisit(client.lastVisit);
+              const totalAppointmentsText = `${client.totalVisits} ${
+                client.totalVisits === 1 ? 'cita' : 'citas'
+              }`;
+
+              return (
                 <TouchableOpacity
-                  style={styles.actionBtn}
+                  key={client.id}
+                  style={styles.clientCard}
                   onPress={() => {
-                    console.log('User tapped edit client:', client.id);
-                    openEditForm(client);
+                    console.log('User tapped client:', client.id);
+                    router.push(`/clients/${client.id}`);
                   }}
                 >
-                  <IconSymbol android_material_icon_name="edit" size={20} color={colors.primary} />
+                  <View style={styles.clientAvatar}>
+                    <Text style={styles.clientAvatarText}>{initials}</Text>
+                  </View>
+                  <View style={styles.clientInfo}>
+                    <View style={styles.clientNameRow}>
+                      <Text style={styles.clientName}>{client.name}</Text>
+                      <View
+                        style={[
+                          styles.statusDot,
+                          isActive ? styles.statusDotActive : styles.statusDotInactive,
+                        ]}
+                      />
+                    </View>
+                    <Text style={styles.clientPhone}>{client.phone}</Text>
+                    <View style={styles.clientStats}>
+                      <Text style={styles.clientStatsText}>{lastVisitText}</Text>
+                      <Text style={styles.clientStatsSeparator}>•</Text>
+                      <Text style={styles.clientStatsText}>{totalAppointmentsText}</Text>
+                    </View>
+                  </View>
+                  <IconSymbol
+                    android_material_icon_name="arrow-forward"
+                    size={24}
+                    color={colors.textSecondary}
+                  />
                 </TouchableOpacity>
-                <TouchableOpacity
-                  style={styles.actionBtn}
-                  onPress={() => {
-                    console.log('User tapped delete client:', client.id);
-                    confirmDelete(client.id);
-                  }}
-                >
-                  <IconSymbol android_material_icon_name="delete" size={20} color={colors.error} />
-                </TouchableOpacity>
-              </View>
-            </View>
-          ))
+              );
+            })}
+          </>
         )}
       </ScrollView>
 
@@ -258,94 +297,11 @@ export default function ClientsScreen() {
         style={styles.fab}
         onPress={() => {
           console.log('User tapped FAB to create client');
-          openCreateForm();
+          router.push('/clients/new');
         }}
       >
-        <IconSymbol
-          android_material_icon_name="person-add"
-          size={32}
-          color="#FFFFFF"
-        />
+        <IconSymbol android_material_icon_name="add" size={32} color="#FFFFFF" />
       </TouchableOpacity>
-
-      {/* Client Form Modal */}
-      <Modal
-        visible={showForm}
-        animationType="slide"
-        transparent
-        onRequestClose={() => setShowForm(false)}
-      >
-        <View style={styles.formOverlay}>
-          <View style={styles.formContainer}>
-            <View style={styles.formHeader}>
-              <Text style={styles.formTitle}>
-                {editingClient ? 'Editar Cliente' : 'Nuevo Cliente'}
-              </Text>
-              <TouchableOpacity onPress={() => setShowForm(false)}>
-                <IconSymbol android_material_icon_name="close" size={24} color={colors.text} />
-              </TouchableOpacity>
-            </View>
-
-            <ScrollView style={styles.formScroll}>
-              <Text style={styles.fieldLabel}>Nombre *</Text>
-              <TextInput
-                style={styles.input}
-                value={formName}
-                onChangeText={setFormName}
-                placeholder="Nombre completo"
-                placeholderTextColor={colors.textSecondary}
-                autoCapitalize="words"
-              />
-
-              <Text style={styles.fieldLabel}>Teléfono *</Text>
-              <TextInput
-                style={styles.input}
-                value={formPhone}
-                onChangeText={setFormPhone}
-                placeholder="+52 55 1234 5678"
-                placeholderTextColor={colors.textSecondary}
-                keyboardType="phone-pad"
-              />
-
-              <Text style={styles.fieldLabel}>Correo electrónico (opcional)</Text>
-              <TextInput
-                style={styles.input}
-                value={formEmail}
-                onChangeText={setFormEmail}
-                placeholder="cliente@email.com"
-                placeholderTextColor={colors.textSecondary}
-                keyboardType="email-address"
-                autoCapitalize="none"
-              />
-
-              <Text style={styles.fieldLabel}>Notas (opcional)</Text>
-              <TextInput
-                style={[styles.input, styles.textArea]}
-                value={formNotes}
-                onChangeText={setFormNotes}
-                placeholder="Notas sobre el cliente..."
-                placeholderTextColor={colors.textSecondary}
-                multiline
-                numberOfLines={3}
-              />
-
-              <TouchableOpacity
-                style={[styles.saveButton, saving && styles.saveButtonDisabled]}
-                onPress={handleSave}
-                disabled={saving}
-              >
-                {saving ? (
-                  <ActivityIndicator color="#FFFFFF" />
-                ) : (
-                  <Text style={styles.saveButtonText}>
-                    {editingClient ? 'Guardar cambios' : 'Agregar cliente'}
-                  </Text>
-                )}
-              </TouchableOpacity>
-            </ScrollView>
-          </View>
-        </View>
-      </Modal>
     </SafeAreaView>
   );
 }
@@ -371,6 +327,43 @@ const styles = StyleSheet.create({
     fontSize: 28,
     fontWeight: 'bold',
     color: colors.text,
+    marginBottom: 16,
+  },
+  searchContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: colors.background,
+    borderRadius: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    marginBottom: 16,
+  },
+  searchInput: {
+    flex: 1,
+    fontSize: 16,
+    color: colors.text,
+    marginLeft: 8,
+  },
+  filterContainer: {
+    flexDirection: 'row',
+    gap: 8,
+  },
+  filterTab: {
+    paddingVertical: 8,
+    paddingHorizontal: 16,
+    borderRadius: 20,
+    backgroundColor: colors.background,
+  },
+  filterTabActive: {
+    backgroundColor: colors.primary,
+  },
+  filterText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: colors.textSecondary,
+  },
+  filterTextActive: {
+    color: '#FFFFFF',
   },
   scrollContent: {
     flexGrow: 1,
@@ -394,6 +387,7 @@ const styles = StyleSheet.create({
     color: colors.textSecondary,
     marginTop: 8,
     marginBottom: 24,
+    textAlign: 'center',
   },
   emptyStateButton: {
     backgroundColor: colors.primary,
@@ -405,6 +399,30 @@ const styles = StyleSheet.create({
     color: '#FFFFFF',
     fontSize: 16,
     fontWeight: '600',
+  },
+  inactivesBanner: {
+    backgroundColor: colors.card,
+    borderRadius: 12,
+    padding: 16,
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 16,
+    borderWidth: 1,
+    borderColor: colors.warning,
+  },
+  inactivesBannerText: {
+    flex: 1,
+    marginLeft: 12,
+  },
+  inactivesBannerTitle: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: colors.text,
+  },
+  inactivesBannerSubtitle: {
+    fontSize: 13,
+    color: colors.textSecondary,
+    marginTop: 2,
   },
   fab: {
     position: 'absolute',
@@ -445,104 +463,51 @@ const styles = StyleSheet.create({
     marginRight: 12,
   },
   clientAvatarText: {
-    fontSize: 20,
+    fontSize: 18,
     fontWeight: 'bold',
     color: '#FFFFFF',
   },
   clientInfo: {
     flex: 1,
   },
+  clientNameRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
   clientName: {
     fontSize: 16,
     fontWeight: '700',
     color: colors.text,
+    marginRight: 8,
+  },
+  statusDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+  },
+  statusDotActive: {
+    backgroundColor: colors.primary,
+  },
+  statusDotInactive: {
+    backgroundColor: colors.textSecondary,
   },
   clientPhone: {
     fontSize: 14,
     color: colors.textSecondary,
     marginTop: 2,
   },
-  clientEmail: {
-    fontSize: 13,
-    color: colors.textSecondary,
-    marginTop: 1,
-  },
-  clientVisits: {
-    fontSize: 12,
-    color: colors.primary,
-    fontWeight: '600',
+  clientStats: {
+    flexDirection: 'row',
+    alignItems: 'center',
     marginTop: 4,
   },
-  clientActions: {
-    flexDirection: 'row',
-    gap: 8,
+  clientStatsText: {
+    fontSize: 12,
+    color: colors.textSecondary,
   },
-  actionBtn: {
-    padding: 8,
-    borderRadius: 8,
-    backgroundColor: colors.background,
-  },
-  formOverlay: {
-    flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.5)',
-    justifyContent: 'flex-end',
-  },
-  formContainer: {
-    backgroundColor: colors.card,
-    borderTopLeftRadius: 24,
-    borderTopRightRadius: 24,
-    maxHeight: '85%',
-  },
-  formHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    padding: 20,
-    borderBottomWidth: 1,
-    borderBottomColor: colors.border,
-  },
-  formTitle: {
-    fontSize: 20,
-    fontWeight: 'bold',
-    color: colors.text,
-  },
-  formScroll: {
-    padding: 20,
-  },
-  fieldLabel: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: colors.text,
-    marginBottom: 8,
-    marginTop: 16,
-  },
-  input: {
-    backgroundColor: colors.background,
-    borderRadius: 12,
-    padding: 14,
-    fontSize: 16,
-    color: colors.text,
-    borderWidth: 1,
-    borderColor: colors.border,
-  },
-  textArea: {
-    height: 80,
-    textAlignVertical: 'top',
-  },
-  saveButton: {
-    backgroundColor: colors.primary,
-    borderRadius: 12,
-    padding: 16,
-    alignItems: 'center',
-    marginTop: 24,
-    marginBottom: 32,
-  },
-  saveButtonDisabled: {
-    opacity: 0.6,
-  },
-  saveButtonText: {
-    color: '#FFFFFF',
-    fontSize: 18,
-    fontWeight: '600',
+  clientStatsSeparator: {
+    fontSize: 12,
+    color: colors.textSecondary,
+    marginHorizontal: 6,
   },
 });
