@@ -1,0 +1,13 @@
+{
+  "version": "7",
+  "dialect": "postgresql",
+  "entries": [
+    {
+      "idx": 0,
+      "version": "7",
+      "when": 1772506988169,
+      "tag": "20260303030308_previous_thanos",
+      "breakpoints": true
+    }
+  ]
+}
