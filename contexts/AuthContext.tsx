@@ -1,7 +1,6 @@
 import React, { createContext, useContext, useState, useEffect, ReactNode } from "react";
 import { Platform } from "react-native";
-import * as SecureStore from "expo-secure-store";
-import { apiPost, apiGet, getBearerToken } from "@/utils/api";
+import { apiGet, getBearerToken, BACKEND_URL } from "@/utils/api";
 import { BEARER_TOKEN_KEY, setBearerToken, clearAuthTokens } from "@/lib/auth";
 
 interface User {
@@ -54,11 +53,38 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         setBusinessProfile(null);
         return;
       }
-      console.log("[Auth] Checking session with /api/auth/me");
-      const data = await apiGet<{ user: User; businessProfile: BusinessProfile }>("/api/auth/me");
-      setUser(data.user);
-      setBusinessProfile(data.businessProfile || null);
-      console.log("[Auth] Session restored for:", data.user.email);
+      console.log("[Auth] Checking session with /api/auth/get-session");
+      // Use better-auth's get-session endpoint
+      const response = await fetch(`${BACKEND_URL}/api/auth/get-session`, {
+        method: "GET",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${token}`,
+        },
+      });
+      if (!response.ok) {
+        throw new Error(`Session check failed: ${response.status}`);
+      }
+      const sessionData = await response.json();
+      if (sessionData?.user) {
+        setUser({
+          id: sessionData.user.id,
+          email: sessionData.user.email,
+          name: sessionData.user.name,
+        });
+        // Fetch business profile
+        try {
+          const bp = await apiGet<BusinessProfile>("/api/business-profile");
+          setBusinessProfile(bp);
+        } catch {
+          setBusinessProfile(null);
+        }
+        console.log("[Auth] Session restored for:", sessionData.user.email);
+      } else {
+        setUser(null);
+        setBusinessProfile(null);
+        await clearAuthTokens();
+      }
     } catch (error) {
       console.error("[Auth] Session check failed:", error);
       setUser(null);
@@ -87,9 +113,39 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     businessType: string;
   }) => {
     console.log("[Auth] Registering user:", params.email);
-    const data = await apiPost<{ user: User; token: string }>("/api/auth/register", params);
-    await setBearerToken(data.token);
-    setUser(data.user);
+    // Use better-auth's sign-up/email endpoint
+    // Pass businessName and businessType as extra fields for the afterHook
+    const response = await fetch(`${BACKEND_URL}/api/auth/sign-up/email`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        name: params.name,
+        email: params.email,
+        password: params.password,
+        businessName: params.businessName,
+        businessType: params.businessType,
+      }),
+    });
+
+    const data = await response.json();
+    if (!response.ok) {
+      const errorMsg = data?.message || data?.error || `Registration failed: ${response.status}`;
+      throw new Error(errorMsg);
+    }
+
+    // Extract token from better-auth response
+    const token = data?.token || data?.session?.token;
+    if (!token) {
+      throw new Error("No session token received from server");
+    }
+
+    await setBearerToken(token);
+    setUser({
+      id: data.user?.id || data?.session?.userId,
+      email: data.user?.email || params.email,
+      name: data.user?.name || params.name,
+    });
+
     // Fetch business profile after registration
     try {
       const bp = await apiGet<BusinessProfile>("/api/business-profile");
@@ -97,14 +153,37 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     } catch {
       // Business profile may not be immediately available
     }
-    console.log("[Auth] Registration successful:", data.user.email);
+    console.log("[Auth] Registration successful:", params.email);
   };
 
   const login = async (email: string, password: string) => {
     console.log("[Auth] Logging in:", email);
-    const data = await apiPost<{ user: User; token: string }>("/api/auth/login", { email, password });
-    await setBearerToken(data.token);
-    setUser(data.user);
+    // Use better-auth's sign-in/email endpoint
+    const response = await fetch(`${BACKEND_URL}/api/auth/sign-in/email`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email, password }),
+    });
+
+    const data = await response.json();
+    if (!response.ok) {
+      const errorMsg = data?.message || data?.error || `Login failed: ${response.status}`;
+      throw new Error(errorMsg);
+    }
+
+    // Extract token from better-auth response
+    const token = data?.token || data?.session?.token;
+    if (!token) {
+      throw new Error("No session token received from server");
+    }
+
+    await setBearerToken(token);
+    setUser({
+      id: data.user?.id || data?.session?.userId,
+      email: data.user?.email || email,
+      name: data.user?.name || email,
+    });
+
     // Fetch business profile after login
     try {
       const bp = await apiGet<BusinessProfile>("/api/business-profile");
@@ -112,12 +191,25 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     } catch {
       // Business profile may not be available
     }
-    console.log("[Auth] Login successful:", data.user.email);
+    console.log("[Auth] Login successful:", email);
   };
 
   const signOut = async () => {
     try {
       console.log("[Auth] Signing out");
+      // Call better-auth sign-out endpoint
+      const token = await getBearerToken();
+      if (token) {
+        await fetch(`${BACKEND_URL}/api/auth/sign-out`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "Authorization": `Bearer ${token}`,
+          },
+        }).catch(() => {
+          // Ignore sign-out errors - clear local state regardless
+        });
+      }
     } catch (error) {
       console.error("[Auth] Sign out error:", error);
     } finally {
