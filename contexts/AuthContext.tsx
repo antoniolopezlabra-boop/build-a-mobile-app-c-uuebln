@@ -219,9 +219,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       }
       
       console.log("[Auth] Registration complete for:", params.email);
-      
-      // Force a small delay to ensure state propagates
-      await new Promise(resolve => setTimeout(resolve, 100));
     } catch (error) {
       console.error('[Auth] Registration error:', error);
       throw error;
@@ -278,9 +275,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       }
       
       console.log("[Auth] Login complete for:", email);
-      
-      // Force a small delay to ensure state propagates
-      await new Promise(resolve => setTimeout(resolve, 100));
     } catch (error) {
       console.error('[Auth] Login error:', error);
       throw error;

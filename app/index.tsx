@@ -1,60 +1,29 @@
 
-import { useEffect, useState } from 'react';
-import { useRouter, useSegments } from 'expo-router';
+import { useEffect } from 'react';
+import { useRouter } from 'expo-router';
 import { View, ActivityIndicator, StyleSheet, Text } from 'react-native';
 import { useAuth } from '@/contexts/AuthContext';
 import { colors } from '@/styles/commonStyles';
 
 export default function Index() {
   const router = useRouter();
-  const segments = useSegments();
   const { user, loading } = useAuth();
-  const [isNavigating, setIsNavigating] = useState(false);
 
   useEffect(() => {
-    // Wrap navigation logic in try/catch to prevent silent crashes
-    const handleNavigation = async () => {
-      try {
-        if (loading) {
-          console.log('[Index] Auth still loading, waiting...');
-          return;
-        }
-
-        if (isNavigating) {
-          console.log('[Index] Already navigating, skipping...');
-          return;
-        }
-
-        console.log('[Index] Auth loaded, user:', user ? user.email : 'not authenticated');
-        console.log('[Index] Current segments:', segments);
-
-        setIsNavigating(true);
-
-        // Small delay to ensure state is fully updated
-        await new Promise(resolve => setTimeout(resolve, 100));
-
-        if (user) {
-          console.log('[Index] User is authenticated, redirecting to home');
-          // Use replace to prevent back navigation to index
-          router.replace('/(tabs)/(home)');
-        } else {
-          console.log('[Index] User is not authenticated, redirecting to onboarding');
-          router.replace('/auth/onboarding');
-        }
-      } catch (error) {
-        console.error('[Index] Navigation error:', error);
-        setIsNavigating(false);
-        // Fallback: try to navigate to onboarding if there's an error
-        try {
-          router.replace('/auth/onboarding');
-        } catch (fallbackError) {
-          console.error('[Index] Fallback navigation failed:', fallbackError);
-        }
+    // Only navigate ONCE when loading is complete
+    // Do NOT re-trigger on user state changes to prevent loops
+    if (!loading) {
+      console.log('[Index] Auth loaded, user:', user ? user.email : 'not authenticated');
+      
+      if (user) {
+        console.log('[Index] User is authenticated, redirecting to home');
+        router.replace('/(tabs)/(home)');
+      } else {
+        console.log('[Index] User is not authenticated, redirecting to onboarding');
+        router.replace('/auth/onboarding');
       }
-    };
-
-    handleNavigation();
-  }, [user, loading]);
+    }
+  }, [loading]); // ONLY depend on loading, NOT on user
 
   // Show loading screen while determining auth state
   return (

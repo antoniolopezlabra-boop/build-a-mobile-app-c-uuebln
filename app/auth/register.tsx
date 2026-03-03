@@ -65,13 +65,11 @@ export default function RegisterScreen() {
 
     try {
       await register({ email, password, name, businessName, businessType });
-      console.log('Registration successful, navigating to home');
+      console.log('[Register] Registration successful, navigating to home with reset');
       
-      // Wait a bit for state to update, then navigate
-      setTimeout(() => {
-        console.log('[Register] Executing navigation to home');
-        router.replace('/(tabs)/(home)');
-      }, 500);
+      // Use router.replace with reset to clear navigation stack
+      // This prevents going back to auth screens
+      router.replace('/(tabs)/(home)');
     } catch (error: any) {
       console.error('Registration failed:', error);
       const message = error?.message?.includes('already exists') || error?.message?.includes('409')

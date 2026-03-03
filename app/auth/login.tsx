@@ -40,9 +40,10 @@ export default function LoginScreen() {
 
     try {
       await login(email, password);
-      console.log('Login successful, navigating to home');
-      // Navigation will be handled by app/index.tsx when user state updates
-      // But we also explicitly navigate here to ensure it happens
+      console.log('[Login] Login successful, navigating to home with reset');
+      
+      // Use router.replace to clear navigation stack
+      // This prevents going back to auth screens
       router.replace('/(tabs)/(home)');
     } catch (error: any) {
       console.error('Login failed:', error);
