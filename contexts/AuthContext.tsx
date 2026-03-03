@@ -90,6 +90,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           headers: {
             "Content-Type": "application/json",
             "Authorization": `Bearer ${token}`,
+            "Origin": BACKEND_URL,
           },
           signal: controller.signal,
         });
@@ -170,7 +171,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       
       const response = await fetch(`${BACKEND_URL}/api/auth/sign-up/email`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          "Origin": BACKEND_URL,
+        },
         body: JSON.stringify({
           name: params.name,
           email: params.email,
@@ -234,7 +238,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       
       const response = await fetch(`${BACKEND_URL}/api/auth/sign-in/email`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          "Origin": BACKEND_URL,
+        },
         body: JSON.stringify({ email, password }),
       });
 
@@ -297,6 +304,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             headers: {
               "Content-Type": "application/json",
               "Authorization": `Bearer ${token}`,
+              "Origin": BACKEND_URL,
             },
           });
         } catch (signOutError) {

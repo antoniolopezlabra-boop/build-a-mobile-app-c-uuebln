@@ -60,6 +60,7 @@ export const apiCall = async <T = any>(
       ...options,
       headers: {
         "Content-Type": "application/json",
+        "Origin": BACKEND_URL,
         ...options?.headers,
       },
     };
