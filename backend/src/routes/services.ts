@@ -1,21 +1,15 @@
 import type { App } from '../index.js';
 import type { FastifyRequest, FastifyReply } from 'fastify';
-import { eq, like, and } from 'drizzle-orm';
+import { eq } from 'drizzle-orm';
 import * as schema from '../db/schema/schema.js';
 
-export function registerClientsRoutes(app: App) {
+export function registerServicesRoutes(app: App) {
   const requireAuth = app.requireAuth();
 
-  app.fastify.get('/api/clients', {
+  app.fastify.get('/api/services', {
     schema: {
-      description: 'Get all clients for current user, with optional search',
-      tags: ['clients'],
-      querystring: {
-        type: 'object',
-        properties: {
-          search: { type: 'string', description: 'Search by client name' },
-        },
-      },
+      description: 'Get all services for current user',
+      tags: ['services'],
       response: {
         200: {
           type: 'array',
@@ -25,11 +19,9 @@ export function registerClientsRoutes(app: App) {
               id: { type: 'string', format: 'uuid' },
               userId: { type: 'string' },
               name: { type: 'string' },
-              phone: { type: 'string' },
-              email: { type: ['string', 'null'] },
-              notes: { type: ['string', 'null'] },
-              lastVisit: { type: ['string', 'null'] },
-              totalVisits: { type: 'integer' },
+              duration: { type: 'integer' },
+              price: { type: ['string', 'null'] },
+              description: { type: ['string', 'null'] },
               createdAt: { type: 'string', format: 'date-time' },
               updatedAt: { type: 'string', format: 'date-time' },
             },
@@ -43,61 +35,46 @@ export function registerClientsRoutes(app: App) {
         },
       },
     },
-  }, async (
-    request: FastifyRequest<{ Querystring: { search?: string } }>,
-    reply: FastifyReply
-  ) => {
+  }, async (request: FastifyRequest, reply: FastifyReply) => {
     const session = await requireAuth(request, reply);
     if (!session) return;
 
-    const search = request.query.search;
-
     app.logger.info(
-      { userId: session.user.id, search },
-      'Fetching clients'
+      { userId: session.user.id },
+      'Fetching all services'
     );
 
-    let clients;
-    if (search) {
-      clients = await app.db.query.clients.findMany({
-        where: and(
-          eq(schema.clients.userId, session.user.id),
-          like(schema.clients.name, `%${search}%`)
-        ),
-      });
-    } else {
-      clients = await app.db.query.clients.findMany({
-        where: eq(schema.clients.userId, session.user.id),
-      });
-    }
+    const services = await app.db.query.services.findMany({
+      where: eq(schema.services.userId, session.user.id),
+    });
 
     app.logger.info(
-      { userId: session.user.id, count: clients.length },
-      'Clients retrieved successfully'
+      { userId: session.user.id, count: services.length },
+      'Services retrieved successfully'
     );
 
-    return clients;
+    return services;
   });
 
-  interface CreateClientBody {
+  interface CreateServiceBody {
     name: string;
-    phone: string;
-    email?: string;
-    notes?: string;
+    duration: number;
+    price?: string;
+    description?: string;
   }
 
-  app.fastify.post('/api/clients', {
+  app.fastify.post('/api/services', {
     schema: {
-      description: 'Create a new client',
-      tags: ['clients'],
+      description: 'Create a new service',
+      tags: ['services'],
       body: {
         type: 'object',
-        required: ['name', 'phone'],
+        required: ['name', 'duration'],
         properties: {
           name: { type: 'string' },
-          phone: { type: 'string' },
-          email: { type: 'string' },
-          notes: { type: 'string' },
+          duration: { type: 'integer' },
+          price: { type: 'string' },
+          description: { type: 'string' },
         },
       },
       response: {
@@ -107,11 +84,9 @@ export function registerClientsRoutes(app: App) {
             id: { type: 'string', format: 'uuid' },
             userId: { type: 'string' },
             name: { type: 'string' },
-            phone: { type: 'string' },
-            email: { type: ['string', 'null'] },
-            notes: { type: ['string', 'null'] },
-            lastVisit: { type: ['string', 'null'] },
-            totalVisits: { type: 'integer' },
+            duration: { type: 'integer' },
+            price: { type: ['string', 'null'] },
+            description: { type: ['string', 'null'] },
             createdAt: { type: 'string', format: 'date-time' },
             updatedAt: { type: 'string', format: 'date-time' },
           },
@@ -125,7 +100,7 @@ export function registerClientsRoutes(app: App) {
       },
     },
   }, async (
-    request: FastifyRequest<{ Body: CreateClientBody }>,
+    request: FastifyRequest<{ Body: CreateServiceBody }>,
     reply: FastifyReply
   ) => {
     const session = await requireAuth(request, reply);
@@ -133,36 +108,36 @@ export function registerClientsRoutes(app: App) {
 
     app.logger.info(
       { userId: session.user.id, name: request.body.name },
-      'Creating client'
+      'Creating service'
     );
 
-    const [client] = await app.db.insert(schema.clients).values({
+    const [service] = await app.db.insert(schema.services).values({
       userId: session.user.id,
       name: request.body.name,
-      phone: request.body.phone,
-      email: request.body.email || null,
-      notes: request.body.notes || null,
+      duration: request.body.duration,
+      price: request.body.price || null,
+      description: request.body.description || null,
     }).returning();
 
     app.logger.info(
-      { clientId: client.id },
-      'Client created successfully'
+      { serviceId: service.id },
+      'Service created successfully'
     );
 
-    return reply.status(201).send(client);
+    return reply.status(201).send(service);
   });
 
-  interface UpdateClientBody {
+  interface UpdateServiceBody {
     name?: string;
-    phone?: string;
-    email?: string;
-    notes?: string;
+    duration?: number;
+    price?: string;
+    description?: string;
   }
 
-  app.fastify.put('/api/clients/:id', {
+  app.fastify.put('/api/services/:id', {
     schema: {
-      description: 'Update a client',
-      tags: ['clients'],
+      description: 'Update a service',
+      tags: ['services'],
       params: {
         type: 'object',
         required: ['id'],
@@ -174,9 +149,9 @@ export function registerClientsRoutes(app: App) {
         type: 'object',
         properties: {
           name: { type: 'string' },
-          phone: { type: 'string' },
-          email: { type: 'string' },
-          notes: { type: 'string' },
+          duration: { type: 'integer' },
+          price: { type: 'string' },
+          description: { type: 'string' },
         },
       },
       response: {
@@ -184,15 +159,8 @@ export function registerClientsRoutes(app: App) {
           type: 'object',
           properties: {
             id: { type: 'string', format: 'uuid' },
-            userId: { type: 'string' },
             name: { type: 'string' },
-            phone: { type: 'string' },
-            email: { type: ['string', 'null'] },
-            notes: { type: ['string', 'null'] },
-            lastVisit: { type: ['string', 'null'] },
-            totalVisits: { type: 'integer' },
-            createdAt: { type: 'string', format: 'date-time' },
-            updatedAt: { type: 'string', format: 'date-time' },
+            duration: { type: 'integer' },
           },
         },
         401: {
@@ -216,7 +184,7 @@ export function registerClientsRoutes(app: App) {
       },
     },
   }, async (
-    request: FastifyRequest<{ Params: { id: string }; Body: UpdateClientBody }>,
+    request: FastifyRequest<{ Params: { id: string }; Body: UpdateServiceBody }>,
     reply: FastifyReply
   ) => {
     const session = await requireAuth(request, reply);
@@ -225,54 +193,54 @@ export function registerClientsRoutes(app: App) {
     const { id } = request.params;
 
     app.logger.info(
-      { userId: session.user.id, clientId: id, body: request.body },
-      'Updating client'
+      { userId: session.user.id, serviceId: id, body: request.body },
+      'Updating service'
     );
 
-    const client = await app.db.query.clients.findFirst({
-      where: eq(schema.clients.id, id),
+    const service = await app.db.query.services.findFirst({
+      where: eq(schema.services.id, id),
     });
 
-    if (!client) {
+    if (!service) {
       app.logger.warn(
-        { clientId: id },
-        'Client not found'
+        { serviceId: id },
+        'Service not found'
       );
-      return reply.status(404).send({ error: 'Client not found' });
+      return reply.status(404).send({ error: 'Service not found' });
     }
 
-    if (client.userId !== session.user.id) {
+    if (service.userId !== session.user.id) {
       app.logger.warn(
-        { clientId: id, userId: session.user.id },
-        'Unauthorized client access'
+        { serviceId: id, userId: session.user.id },
+        'Unauthorized service access'
       );
       return reply.status(403).send({ error: 'Unauthorized' });
     }
 
     const updates: Record<string, unknown> = {};
     if (request.body.name !== undefined) updates.name = request.body.name;
-    if (request.body.phone !== undefined) updates.phone = request.body.phone;
-    if (request.body.email !== undefined) updates.email = request.body.email;
-    if (request.body.notes !== undefined) updates.notes = request.body.notes;
+    if (request.body.duration !== undefined) updates.duration = request.body.duration;
+    if (request.body.price !== undefined) updates.price = request.body.price;
+    if (request.body.description !== undefined) updates.description = request.body.description;
 
     const [updated] = await app.db
-      .update(schema.clients)
+      .update(schema.services)
       .set({ ...updates, updatedAt: new Date() })
-      .where(eq(schema.clients.id, id))
+      .where(eq(schema.services.id, id))
       .returning();
 
     app.logger.info(
-      { clientId: id },
-      'Client updated successfully'
+      { serviceId: id },
+      'Service updated successfully'
     );
 
     return updated;
   });
 
-  app.fastify.delete('/api/clients/:id', {
+  app.fastify.delete('/api/services/:id', {
     schema: {
-      description: 'Delete a client',
-      tags: ['clients'],
+      description: 'Delete a service',
+      tags: ['services'],
       params: {
         type: 'object',
         required: ['id'],
@@ -317,35 +285,35 @@ export function registerClientsRoutes(app: App) {
     const { id } = request.params;
 
     app.logger.info(
-      { userId: session.user.id, clientId: id },
-      'Deleting client'
+      { userId: session.user.id, serviceId: id },
+      'Deleting service'
     );
 
-    const client = await app.db.query.clients.findFirst({
-      where: eq(schema.clients.id, id),
+    const service = await app.db.query.services.findFirst({
+      where: eq(schema.services.id, id),
     });
 
-    if (!client) {
+    if (!service) {
       app.logger.warn(
-        { clientId: id },
-        'Client not found'
+        { serviceId: id },
+        'Service not found'
       );
-      return reply.status(404).send({ error: 'Client not found' });
+      return reply.status(404).send({ error: 'Service not found' });
     }
 
-    if (client.userId !== session.user.id) {
+    if (service.userId !== session.user.id) {
       app.logger.warn(
-        { clientId: id, userId: session.user.id },
-        'Unauthorized client deletion'
+        { serviceId: id, userId: session.user.id },
+        'Unauthorized service deletion'
       );
       return reply.status(403).send({ error: 'Unauthorized' });
     }
 
-    await app.db.delete(schema.clients).where(eq(schema.clients.id, id));
+    await app.db.delete(schema.services).where(eq(schema.services.id, id));
 
     app.logger.info(
-      { clientId: id },
-      'Client deleted successfully'
+      { serviceId: id },
+      'Service deleted successfully'
     );
 
     return { success: true };

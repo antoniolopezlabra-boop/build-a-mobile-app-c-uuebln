@@ -8,6 +8,13 @@
       "when": 1772506988169,
       "tag": "20260303030308_previous_thanos",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1772512750615,
+      "tag": "20260303043910_useful_genesis",
+      "breakpoints": true
     }
   ]
 }
