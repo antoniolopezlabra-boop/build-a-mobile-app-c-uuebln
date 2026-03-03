@@ -47,28 +47,47 @@ export default function HomeScreen() {
   const [todayAppointments, setTodayAppointments] = useState<TodayAppointment[]>([]);
 
   useEffect(() => {
-    loadDashboardData();
+    // Wrap data loading in try/catch to prevent silent crashes
+    const initializeData = async () => {
+      try {
+        await loadDashboardData();
+      } catch (error) {
+        console.error('[Home] Failed to initialize dashboard:', error);
+        setLoading(false);
+      }
+    };
+
+    initializeData();
   }, []);
 
   const loadDashboardData = async () => {
-    console.log('[Home] Loading dashboard data');
-    setLoading(true);
-
     try {
-      const [statsData, todayData] = await Promise.all([
-        apiGet<DashboardStats>('/api/stats/dashboard').catch(() => ({
-          todayAppointments: 0,
-          confirmedToday: 0,
-          unconfirmedToday: 0,
-          totalClients: 0,
-          totalAppointments: 0,
-        })),
-        apiGet<TodayAppointment[]>('/api/appointments/today').catch(() => []),
+      console.log('[Home] Loading dashboard data');
+      setLoading(true);
+
+      // Use Promise.allSettled to handle partial failures gracefully
+      const results = await Promise.allSettled([
+        apiGet<DashboardStats>('/api/stats/dashboard'),
+        apiGet<TodayAppointment[]>('/api/appointments/today'),
       ]);
-      console.log('[Home] Stats loaded:', statsData);
-      console.log('[Home] Today appointments loaded:', todayData.length);
-      setStats(statsData);
-      setTodayAppointments(todayData);
+
+      // Handle stats result
+      if (results[0].status === 'fulfilled') {
+        console.log('[Home] Stats loaded:', results[0].value);
+        setStats(results[0].value);
+      } else {
+        console.warn('[Home] Failed to load stats:', results[0].reason);
+        // Keep default empty stats
+      }
+
+      // Handle appointments result
+      if (results[1].status === 'fulfilled') {
+        console.log('[Home] Today appointments loaded:', results[1].value.length);
+        setTodayAppointments(results[1].value);
+      } else {
+        console.warn('[Home] Failed to load appointments:', results[1].reason);
+        // Keep empty appointments array
+      }
     } catch (error) {
       console.error('[Home] Failed to load dashboard data:', error);
     } finally {
@@ -80,26 +99,36 @@ export default function HomeScreen() {
   const businessName = businessProfile?.businessName || '';
 
   const getGreeting = () => {
-    const hour = new Date().getHours();
-    if (hour < 12) {
-      return 'Buenos días';
+    try {
+      const hour = new Date().getHours();
+      if (hour < 12) {
+        return 'Buenos días';
+      }
+      if (hour < 19) {
+        return 'Buenas tardes';
+      }
+      return 'Buenas noches';
+    } catch (error) {
+      console.error('[Home] Error getting greeting:', error);
+      return 'Hola';
     }
-    if (hour < 19) {
-      return 'Buenas tardes';
-    }
-    return 'Buenas noches';
   };
 
   const getTodayDate = () => {
-    const today = new Date();
-    const options: Intl.DateTimeFormatOptions = {
-      weekday: 'long',
-      year: 'numeric',
-      month: 'long',
-      day: 'numeric',
-    };
-    const formatted = today.toLocaleDateString('es-MX', options);
-    return formatted.charAt(0).toUpperCase() + formatted.slice(1);
+    try {
+      const today = new Date();
+      const options: Intl.DateTimeFormatOptions = {
+        weekday: 'long',
+        year: 'numeric',
+        month: 'long',
+        day: 'numeric',
+      };
+      const formatted = today.toLocaleDateString('es-MX', options);
+      return formatted.charAt(0).toUpperCase() + formatted.slice(1);
+    } catch (error) {
+      console.error('[Home] Error formatting date:', error);
+      return '';
+    }
   };
 
   const greeting = getGreeting();

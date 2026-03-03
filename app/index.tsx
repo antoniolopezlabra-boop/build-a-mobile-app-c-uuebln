@@ -1,30 +1,48 @@
 
 import { useEffect } from 'react';
 import { useRouter } from 'expo-router';
-import { View, ActivityIndicator, StyleSheet } from 'react-native';
+import { View, ActivityIndicator, StyleSheet, Text } from 'react-native';
 import { useAuth } from '@/contexts/AuthContext';
 import { colors } from '@/styles/commonStyles';
-
 
 export default function Index() {
   const router = useRouter();
   const { user, loading } = useAuth();
 
   useEffect(() => {
-    if (!loading) {
-      if (user) {
-        console.log('User is authenticated, redirecting to home');
-        router.replace('/(tabs)/(home)');
-      } else {
-        console.log('User is not authenticated, redirecting to onboarding');
-        router.replace('/auth/onboarding');
+    // Wrap navigation logic in try/catch to prevent silent crashes
+    const handleNavigation = async () => {
+      try {
+        if (!loading) {
+          if (user) {
+            console.log('[Index] User is authenticated, redirecting to home');
+            router.replace('/(tabs)/(home)');
+          } else {
+            console.log('[Index] User is not authenticated, redirecting to onboarding');
+            router.replace('/auth/onboarding');
+          }
+        }
+      } catch (error) {
+        console.error('[Index] Navigation error:', error);
+        // Fallback: try to navigate to onboarding if there's an error
+        try {
+          router.replace('/auth/onboarding');
+        } catch (fallbackError) {
+          console.error('[Index] Fallback navigation failed:', fallbackError);
+        }
       }
-    }
+    };
+
+    handleNavigation();
   }, [user, loading]);
 
   return (
     <View style={styles.container}>
-      <ActivityIndicator size="large" color={colors.primary} />
+      <View style={styles.logoContainer}>
+        <Text style={styles.logoText}>VYLTA</Text>
+        <Text style={styles.tagline}>Cada cliente regresa</Text>
+      </View>
+      <ActivityIndicator size="large" color={colors.primary} style={styles.loader} />
     </View>
   );
 }
@@ -34,6 +52,25 @@ const styles = StyleSheet.create({
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
-    backgroundColor: colors.background,
+    backgroundColor: '#0F172A', // VYLTA dark blue
+  },
+  logoContainer: {
+    alignItems: 'center',
+    marginBottom: 40,
+  },
+  logoText: {
+    fontSize: 48,
+    fontWeight: 'bold',
+    color: '#10B981', // VYLTA green
+    letterSpacing: 4,
+  },
+  tagline: {
+    fontSize: 16,
+    color: '#FFFFFF',
+    marginTop: 8,
+    fontStyle: 'italic',
+  },
+  loader: {
+    marginTop: 20,
   },
 });
