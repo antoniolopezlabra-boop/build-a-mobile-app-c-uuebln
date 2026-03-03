@@ -1,6 +1,6 @@
 import type { App } from '../index.js';
 import type { FastifyRequest, FastifyReply } from 'fastify';
-import { eq, like, and } from 'drizzle-orm';
+import { eq, like, and, gte } from 'drizzle-orm';
 import * as schema from '../db/schema/schema.js';
 
 export function registerClientsRoutes(app: App) {
@@ -83,6 +83,7 @@ export function registerClientsRoutes(app: App) {
     name: string;
     phone: string;
     email?: string;
+    birthday?: string;
     notes?: string;
   }
 
@@ -97,6 +98,7 @@ export function registerClientsRoutes(app: App) {
           name: { type: 'string' },
           phone: { type: 'string' },
           email: { type: 'string' },
+          birthday: { type: 'string' },
           notes: { type: 'string' },
         },
       },
@@ -141,6 +143,7 @@ export function registerClientsRoutes(app: App) {
       name: request.body.name,
       phone: request.body.phone,
       email: request.body.email || null,
+      birthday: request.body.birthday || null,
       notes: request.body.notes || null,
     }).returning();
 
@@ -156,7 +159,9 @@ export function registerClientsRoutes(app: App) {
     name?: string;
     phone?: string;
     email?: string;
+    birthday?: string;
     notes?: string;
+    isActive?: boolean;
   }
 
   app.fastify.put('/api/clients/:id', {
@@ -176,7 +181,9 @@ export function registerClientsRoutes(app: App) {
           name: { type: 'string' },
           phone: { type: 'string' },
           email: { type: 'string' },
+          birthday: { type: 'string' },
           notes: { type: 'string' },
+          isActive: { type: 'boolean' },
         },
       },
       response: {
@@ -253,7 +260,9 @@ export function registerClientsRoutes(app: App) {
     if (request.body.name !== undefined) updates.name = request.body.name;
     if (request.body.phone !== undefined) updates.phone = request.body.phone;
     if (request.body.email !== undefined) updates.email = request.body.email;
+    if (request.body.birthday !== undefined) updates.birthday = request.body.birthday;
     if (request.body.notes !== undefined) updates.notes = request.body.notes;
+    if (request.body.isActive !== undefined) updates.isActive = request.body.isActive;
 
     const [updated] = await app.db
       .update(schema.clients)
@@ -349,5 +358,265 @@ export function registerClientsRoutes(app: App) {
     );
 
     return { success: true };
+  });
+
+  app.fastify.get('/api/clients/inactive', {
+    schema: {
+      description: 'Get inactive clients (no visit in 90+ days)',
+      tags: ['clients'],
+      response: {
+        200: {
+          type: 'array',
+          items: {
+            type: 'object',
+            properties: {
+              id: { type: 'string', format: 'uuid' },
+              name: { type: 'string' },
+              phone: { type: 'string' },
+              email: { type: ['string', 'null'] },
+              lastVisit: { type: ['string', 'null'] },
+              totalVisits: { type: 'integer' },
+              daysSinceLastVisit: { type: 'integer' },
+            },
+          },
+        },
+        401: {
+          type: 'object',
+          properties: {
+            error: { type: 'string' },
+          },
+        },
+      },
+    },
+  }, async (request: FastifyRequest, reply: FastifyReply) => {
+    const session = await requireAuth(request, reply);
+    if (!session) return;
+
+    app.logger.info(
+      { userId: session.user.id },
+      'Fetching inactive clients'
+    );
+
+    const allClients = await app.db.query.clients.findMany({
+      where: eq(schema.clients.userId, session.user.id),
+    });
+
+    const now = new Date();
+    const ninetyDaysAgo = new Date(now.getTime() - 90 * 24 * 60 * 60 * 1000);
+
+    const inactiveClients = allClients
+      .filter(client => {
+        if (!client.lastVisit) return true;
+        const lastVisitDate = new Date(client.lastVisit);
+        return lastVisitDate < ninetyDaysAgo;
+      })
+      .map(client => {
+        const lastVisitDate = client.lastVisit ? new Date(client.lastVisit) : null;
+        const daysSinceLastVisit = lastVisitDate
+          ? Math.floor((now.getTime() - lastVisitDate.getTime()) / (24 * 60 * 60 * 1000))
+          : -1;
+
+        return {
+          id: client.id,
+          name: client.name,
+          phone: client.phone,
+          email: client.email,
+          lastVisit: client.lastVisit,
+          totalVisits: client.totalVisits,
+          daysSinceLastVisit,
+        };
+      });
+
+    app.logger.info(
+      { userId: session.user.id, count: inactiveClients.length },
+      'Inactive clients retrieved successfully'
+    );
+
+    return inactiveClients;
+  });
+
+  app.fastify.get('/api/clients/:id/appointments', {
+    schema: {
+      description: 'Get appointment history for a client',
+      tags: ['clients'],
+      params: {
+        type: 'object',
+        required: ['id'],
+        properties: {
+          id: { type: 'string', format: 'uuid' },
+        },
+      },
+      response: {
+        200: {
+          type: 'array',
+          items: {
+            type: 'object',
+            properties: {
+              id: { type: 'string', format: 'uuid' },
+              date: { type: 'string' },
+              startTime: { type: 'string' },
+              endTime: { type: 'string' },
+              service: { type: 'string' },
+              status: { type: 'string' },
+            },
+          },
+        },
+        401: {
+          type: 'object',
+          properties: {
+            error: { type: 'string' },
+          },
+        },
+        404: {
+          type: 'object',
+          properties: {
+            error: { type: 'string' },
+          },
+        },
+      },
+    },
+  }, async (
+    request: FastifyRequest<{ Params: { id: string } }>,
+    reply: FastifyReply
+  ) => {
+    const session = await requireAuth(request, reply);
+    if (!session) return;
+
+    const { id } = request.params;
+
+    app.logger.info(
+      { userId: session.user.id, clientId: id },
+      'Fetching client appointments'
+    );
+
+    const client = await app.db.query.clients.findFirst({
+      where: and(
+        eq(schema.clients.id, id),
+        eq(schema.clients.userId, session.user.id)
+      ),
+    });
+
+    if (!client) {
+      app.logger.warn(
+        { clientId: id },
+        'Client not found'
+      );
+      return reply.status(404).send({ error: 'Client not found' });
+    }
+
+    const appointments = await app.db.query.appointments.findMany({
+      where: eq(schema.appointments.clientId, id),
+      with: {
+        service: {
+          columns: { name: true },
+        },
+      },
+    });
+
+    const result = appointments.map(apt => ({
+      id: apt.id,
+      date: apt.date,
+      startTime: apt.startTime,
+      endTime: apt.endTime,
+      service: apt.service?.name || 'Unknown',
+      status: apt.status,
+    }));
+
+    app.logger.info(
+      { clientId: id, count: result.length },
+      'Client appointments retrieved successfully'
+    );
+
+    return result;
+  });
+
+  app.fastify.get('/api/clients/:id/stats', {
+    schema: {
+      description: 'Get statistics for a client',
+      tags: ['clients'],
+      params: {
+        type: 'object',
+        required: ['id'],
+        properties: {
+          id: { type: 'string', format: 'uuid' },
+        },
+      },
+      response: {
+        200: {
+          type: 'object',
+          properties: {
+            totalAppointments: { type: 'integer' },
+            attendanceRate: { type: 'number' },
+            lastVisit: { type: ['string', 'null'] },
+            noShowCount: { type: 'integer' },
+          },
+        },
+        401: {
+          type: 'object',
+          properties: {
+            error: { type: 'string' },
+          },
+        },
+        404: {
+          type: 'object',
+          properties: {
+            error: { type: 'string' },
+          },
+        },
+      },
+    },
+  }, async (
+    request: FastifyRequest<{ Params: { id: string } }>,
+    reply: FastifyReply
+  ) => {
+    const session = await requireAuth(request, reply);
+    if (!session) return;
+
+    const { id } = request.params;
+
+    app.logger.info(
+      { userId: session.user.id, clientId: id },
+      'Fetching client stats'
+    );
+
+    const client = await app.db.query.clients.findFirst({
+      where: and(
+        eq(schema.clients.id, id),
+        eq(schema.clients.userId, session.user.id)
+      ),
+    });
+
+    if (!client) {
+      app.logger.warn(
+        { clientId: id },
+        'Client not found'
+      );
+      return reply.status(404).send({ error: 'Client not found' });
+    }
+
+    const appointments = await app.db.query.appointments.findMany({
+      where: eq(schema.appointments.clientId, id),
+    });
+
+    const totalAppointments = appointments.length;
+    const completedAppointments = appointments.filter(a => a.status === 'Completada').length;
+    const noShowCount = appointments.filter(a => a.status === 'No-show').length;
+    const attendanceRate = totalAppointments > 0
+      ? ((completedAppointments / totalAppointments) * 100)
+      : 0;
+
+    const stats = {
+      totalAppointments,
+      attendanceRate: Math.round(attendanceRate * 100) / 100,
+      lastVisit: client.lastVisit,
+      noShowCount,
+    };
+
+    app.logger.info(
+      { clientId: id, stats },
+      'Client stats retrieved successfully'
+    );
+
+    return stats;
   });
 }

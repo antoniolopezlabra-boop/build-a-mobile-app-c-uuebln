@@ -68,6 +68,11 @@ export function registerBusinessProfileRoutes(app: App) {
   interface UpdateBusinessProfileBody {
     businessName?: string;
     businessType?: string;
+    address?: string;
+    phone?: string;
+    alternativePhone?: string;
+    logoUrl?: string;
+    weeklySchedule?: Record<string, unknown>;
   }
 
   app.fastify.put('/api/business-profile', {
@@ -79,6 +84,11 @@ export function registerBusinessProfileRoutes(app: App) {
         properties: {
           businessName: { type: 'string' },
           businessType: { type: 'string' },
+          address: { type: 'string' },
+          phone: { type: 'string' },
+          alternativePhone: { type: 'string' },
+          logoUrl: { type: 'string' },
+          weeklySchedule: { type: 'object' },
         },
       },
       response: {
@@ -126,6 +136,21 @@ export function registerBusinessProfileRoutes(app: App) {
       if (request.body.businessType !== undefined) {
         updates.businessType = request.body.businessType;
       }
+      if (request.body.address !== undefined) {
+        updates.address = request.body.address;
+      }
+      if (request.body.phone !== undefined) {
+        updates.phone = request.body.phone;
+      }
+      if (request.body.alternativePhone !== undefined) {
+        updates.alternativePhone = request.body.alternativePhone;
+      }
+      if (request.body.logoUrl !== undefined) {
+        updates.logoUrl = request.body.logoUrl;
+      }
+      if (request.body.weeklySchedule !== undefined) {
+        updates.weeklySchedule = request.body.weeklySchedule;
+      }
 
       const [result] = await app.db
         .update(schema.businessProfiles)
@@ -142,6 +167,11 @@ export function registerBusinessProfileRoutes(app: App) {
           userId: session.user.id,
           businessName: request.body.businessName || 'My Business',
           businessType: request.body.businessType || 'Otro',
+          address: request.body.address || null,
+          phone: request.body.phone || null,
+          alternativePhone: request.body.alternativePhone || null,
+          logoUrl: request.body.logoUrl || null,
+          weeklySchedule: request.body.weeklySchedule || null,
         })
         .returning();
 
@@ -154,5 +184,86 @@ export function registerBusinessProfileRoutes(app: App) {
     );
 
     return updated;
+  });
+
+  app.fastify.post('/api/business-profile/upload-logo', {
+    schema: {
+      description: 'Upload business logo',
+      tags: ['business-profile'],
+      response: {
+        200: {
+          type: 'object',
+          properties: {
+            logoUrl: { type: 'string' },
+          },
+        },
+        400: {
+          type: 'object',
+          properties: {
+            error: { type: 'string' },
+          },
+        },
+        401: {
+          type: 'object',
+          properties: {
+            error: { type: 'string' },
+          },
+        },
+        413: {
+          type: 'object',
+          properties: {
+            error: { type: 'string' },
+          },
+        },
+      },
+    },
+  }, async (request: FastifyRequest, reply: FastifyReply) => {
+    const session = await requireAuth(request, reply);
+    if (!session) return;
+
+    app.logger.info(
+      { userId: session.user.id },
+      'Uploading business logo'
+    );
+
+    const data = await request.file({ limits: { fileSize: 5 * 1024 * 1024 } }); // 5MB limit
+    if (!data) {
+      app.logger.warn(
+        { userId: session.user.id },
+        'No file provided for logo upload'
+      );
+      return reply.status(400).send({ error: 'No file provided' });
+    }
+
+    let buffer: Buffer;
+    try {
+      buffer = await data.toBuffer();
+    } catch (err) {
+      app.logger.error(
+        { err, userId: session.user.id },
+        'File too large for logo upload'
+      );
+      return reply.status(413).send({ error: 'File too large' });
+    }
+
+    const logoKey = `logos/${session.user.id}-${Date.now()}-${data.filename}`;
+
+    try {
+      const uploadedKey = await app.storage.upload(logoKey, buffer);
+      const { url } = await app.storage.getSignedUrl(uploadedKey);
+
+      app.logger.info(
+        { userId: session.user.id, logoKey: uploadedKey },
+        'Logo uploaded successfully'
+      );
+
+      return { logoUrl: url };
+    } catch (error) {
+      app.logger.error(
+        { err: error, userId: session.user.id },
+        'Failed to upload logo'
+      );
+      throw error;
+    }
   });
 }

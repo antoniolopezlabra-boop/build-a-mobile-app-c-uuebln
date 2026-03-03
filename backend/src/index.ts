@@ -7,6 +7,8 @@ import { registerAppointmentsRoutes } from './routes/appointments.js';
 import { registerClientsRoutes } from './routes/clients.js';
 import { registerServicesRoutes } from './routes/services.js';
 import { registerBusinessHoursRoutes } from './routes/business-hours.js';
+import { registerWhatsappConfigRoutes } from './routes/whatsapp-config.js';
+import { registerSubscriptionRoutes } from './routes/subscription.js';
 import { registerStatsRoutes } from './routes/stats.js';
 
 const schema = { ...appSchema, ...authSchema };
@@ -55,6 +57,8 @@ app.withAuth({
   hooks: { after: afterHook },
 });
 
+app.withStorage();
+
 // Register routes
 registerAuthRoutes(app);
 registerBusinessProfileRoutes(app);
@@ -62,6 +66,8 @@ registerClientsRoutes(app);
 registerServicesRoutes(app);
 registerBusinessHoursRoutes(app);
 registerAppointmentsRoutes(app);
+registerWhatsappConfigRoutes(app);
+registerSubscriptionRoutes(app);
 registerStatsRoutes(app);
 
 await app.run();
