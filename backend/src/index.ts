@@ -1,4 +1,5 @@
 import { createApplication, createAuthMiddleware } from "@specific-dev/framework";
+import cors from "@fastify/cors";
 import * as appSchema from './db/schema/schema.js';
 import * as authSchema from './db/schema/auth-schema.js';
 import { registerAuthRoutes } from './routes/auth.js';
@@ -15,6 +16,22 @@ const schema = { ...appSchema, ...authSchema };
 
 export const app = await createApplication(schema);
 export type App = typeof app;
+
+// Configure CORS for mobile app and development
+app.fastify.register(cors, {
+  origin: [
+    'https://vylta.expo.dev',
+    /^exp:\/\//,
+    'http://localhost:3000',
+    'http://localhost:8081',
+    'http://localhost:19006',
+    'http://localhost:19007',
+    /^http:\/\/localhost:\d+$/,
+  ],
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'Origin'],
+});
 
 // Create auth hooks for handling signup with business profile creation
 const afterHook = createAuthMiddleware(async (ctx) => {
@@ -55,6 +72,14 @@ const afterHook = createAuthMiddleware(async (ctx) => {
 
 app.withAuth({
   hooks: { after: afterHook },
+  trustedOrigins: [
+    'https://vylta.expo.dev',
+    'exp://*',
+    'http://localhost:3000',
+    'http://localhost:8081',
+    'http://localhost:19006',
+    'http://localhost:19007',
+  ],
 });
 
 app.withStorage();
