@@ -26,6 +26,7 @@ interface AuthContextType {
   user: User | null;
   businessProfile: BusinessProfile | null;
   loading: boolean;
+  authLoading: boolean;
   register: (params: {
     email: string;
     password: string;
@@ -45,6 +46,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [businessProfile, setBusinessProfile] = useState<BusinessProfile | null>(null);
   const [loading, setLoading] = useState(true);
+  const [authLoading, setAuthLoading] = useState(false);
 
   useEffect(() => {
     // Wrap initial fetch in try/catch to prevent silent crashes
@@ -163,6 +165,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     businessType: string;
   }) => {
     try {
+      setAuthLoading(true);
       console.log("[Auth] Registering user:", params.email);
       
       const response = await fetch(`${BACKEND_URL}/api/auth/sign-up/email`, {
@@ -192,30 +195,39 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         throw new Error("No session token received from server");
       }
 
+      console.log('[Auth] Registration successful, setting token and user state');
       await setBearerToken(token);
-      setUser({
+      
+      // Set user state immediately to trigger navigation
+      const newUser = {
         id: data.user?.id || data?.session?.userId,
         email: data.user?.email || params.email,
         name: data.user?.name || params.name,
-      });
+      };
+      setUser(newUser);
+      console.log('[Auth] User state updated:', newUser.email);
 
       // Fetch business profile after registration
       try {
         const bp = await apiGet<BusinessProfile>("/api/business-profile");
         setBusinessProfile(bp);
+        console.log('[Auth] Business profile loaded after registration');
       } catch (bpError) {
         console.warn('[Auth] Business profile not available yet:', bpError);
       }
       
-      console.log("[Auth] Registration successful:", params.email);
+      console.log("[Auth] Registration complete for:", params.email);
     } catch (error) {
       console.error('[Auth] Registration error:', error);
       throw error;
+    } finally {
+      setAuthLoading(false);
     }
   };
 
   const login = async (email: string, password: string) => {
     try {
+      setAuthLoading(true);
       console.log("[Auth] Logging in:", email);
       
       const response = await fetch(`${BACKEND_URL}/api/auth/sign-in/email`, {
@@ -239,30 +251,39 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         throw new Error("No session token received from server");
       }
 
+      console.log('[Auth] Login successful, setting token and user state');
       await setBearerToken(token);
-      setUser({
+      
+      // Set user state immediately to trigger navigation
+      const newUser = {
         id: data.user?.id || data?.session?.userId,
         email: data.user?.email || email,
         name: data.user?.name || email,
-      });
+      };
+      setUser(newUser);
+      console.log('[Auth] User state updated:', newUser.email);
 
       // Fetch business profile after login
       try {
         const bp = await apiGet<BusinessProfile>("/api/business-profile");
         setBusinessProfile(bp);
+        console.log('[Auth] Business profile loaded after login');
       } catch (bpError) {
         console.warn('[Auth] Business profile not available:', bpError);
       }
       
-      console.log("[Auth] Login successful:", email);
+      console.log("[Auth] Login complete for:", email);
     } catch (error) {
       console.error('[Auth] Login error:', error);
       throw error;
+    } finally {
+      setAuthLoading(false);
     }
   };
 
   const signOut = async () => {
     try {
+      setAuthLoading(true);
       console.log("[Auth] Signing out");
       
       // Call better-auth sign-out endpoint
@@ -287,6 +308,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setUser(null);
       setBusinessProfile(null);
       await clearAuthTokens();
+      setAuthLoading(false);
       console.log("[Auth] Signed out, tokens cleared");
     }
   };
@@ -297,6 +319,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         user,
         businessProfile,
         loading,
+        authLoading,
         register,
         login,
         signOut,

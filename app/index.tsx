@@ -1,26 +1,34 @@
 
 import { useEffect } from 'react';
-import { useRouter } from 'expo-router';
+import { useRouter, useSegments } from 'expo-router';
 import { View, ActivityIndicator, StyleSheet, Text } from 'react-native';
 import { useAuth } from '@/contexts/AuthContext';
 import { colors } from '@/styles/commonStyles';
 
 export default function Index() {
   const router = useRouter();
+  const segments = useSegments();
   const { user, loading } = useAuth();
 
   useEffect(() => {
     // Wrap navigation logic in try/catch to prevent silent crashes
     const handleNavigation = async () => {
       try {
-        if (!loading) {
-          if (user) {
-            console.log('[Index] User is authenticated, redirecting to home');
-            router.replace('/(tabs)/(home)');
-          } else {
-            console.log('[Index] User is not authenticated, redirecting to onboarding');
-            router.replace('/auth/onboarding');
-          }
+        if (loading) {
+          console.log('[Index] Auth still loading, waiting...');
+          return;
+        }
+
+        console.log('[Index] Auth loaded, user:', user ? user.email : 'not authenticated');
+        console.log('[Index] Current segments:', segments);
+
+        if (user) {
+          console.log('[Index] User is authenticated, redirecting to home');
+          // Use replace to prevent back navigation to index
+          router.replace('/(tabs)/(home)');
+        } else {
+          console.log('[Index] User is not authenticated, redirecting to onboarding');
+          router.replace('/auth/onboarding');
         }
       } catch (error) {
         console.error('[Index] Navigation error:', error);
@@ -36,6 +44,7 @@ export default function Index() {
     handleNavigation();
   }, [user, loading]);
 
+  // Show loading screen while determining auth state
   return (
     <View style={styles.container}>
       <View style={styles.logoContainer}>

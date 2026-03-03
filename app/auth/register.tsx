@@ -32,14 +32,13 @@ const businessTypes = [
 
 export default function RegisterScreen() {
   const router = useRouter();
-  const { register } = useAuth();
+  const { register, authLoading } = useAuth();
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [businessName, setBusinessName] = useState('');
   const [businessType, setBusinessType] = useState('');
   const [showTypePicker, setShowTypePicker] = useState(false);
-  const [loading, setLoading] = useState(false);
   const [errorModal, setErrorModal] = useState<{ visible: boolean; message: string }>({
     visible: false,
     message: '',
@@ -62,12 +61,13 @@ export default function RegisterScreen() {
       return;
     }
 
-    setLoading(true);
     console.log('Submitting registration:', { name, email, businessName, businessType });
 
     try {
       await register({ email, password, name, businessName, businessType });
       console.log('Registration successful, navigating to home');
+      // Navigation will be handled by app/index.tsx when user state updates
+      // But we also explicitly navigate here to ensure it happens
       router.replace('/(tabs)/(home)');
     } catch (error: any) {
       console.error('Registration failed:', error);
@@ -75,8 +75,6 @@ export default function RegisterScreen() {
         ? 'Ya existe una cuenta con este correo electrónico'
         : error?.message || 'Error al registrarse. Intenta de nuevo.';
       showError(message);
-    } finally {
-      setLoading(false);
     }
   };
 
@@ -108,6 +106,7 @@ export default function RegisterScreen() {
               placeholder="Tu nombre"
               placeholderTextColor={colors.textSecondary}
               autoCapitalize="words"
+              editable={!authLoading}
             />
           </View>
 
@@ -121,6 +120,7 @@ export default function RegisterScreen() {
               placeholderTextColor={colors.textSecondary}
               keyboardType="email-address"
               autoCapitalize="none"
+              editable={!authLoading}
             />
           </View>
 
@@ -133,6 +133,7 @@ export default function RegisterScreen() {
               placeholder="Mínimo 6 caracteres"
               placeholderTextColor={colors.textSecondary}
               secureTextEntry
+              editable={!authLoading}
             />
           </View>
 
@@ -144,6 +145,7 @@ export default function RegisterScreen() {
               onChangeText={setBusinessName}
               placeholder="Nombre de tu negocio"
               placeholderTextColor={colors.textSecondary}
+              editable={!authLoading}
             />
           </View>
 
@@ -152,6 +154,7 @@ export default function RegisterScreen() {
             <TouchableOpacity
               style={styles.picker}
               onPress={() => setShowTypePicker(true)}
+              disabled={authLoading}
             >
               <Text style={[styles.pickerText, !businessType && styles.pickerPlaceholder]}>
                 {displayBusinessType}
@@ -165,12 +168,15 @@ export default function RegisterScreen() {
           </View>
 
           <TouchableOpacity
-            style={[styles.button, loading && styles.buttonDisabled]}
+            style={[styles.button, authLoading && styles.buttonDisabled]}
             onPress={handleRegister}
-            disabled={loading}
+            disabled={authLoading}
           >
-            {loading ? (
-              <ActivityIndicator color="#FFFFFF" />
+            {authLoading ? (
+              <View style={styles.loadingContainer}>
+                <ActivityIndicator color="#FFFFFF" size="small" />
+                <Text style={styles.loadingText}>Registrando...</Text>
+              </View>
             ) : (
               <Text style={styles.buttonText}>Registrarse</Text>
             )}
@@ -182,6 +188,7 @@ export default function RegisterScreen() {
               console.log('User tapped login link');
               router.push('/auth/login');
             }}
+            disabled={authLoading}
           >
             <Text style={styles.linkText}>¿Ya tienes cuenta? Inicia sesión</Text>
           </TouchableOpacity>
@@ -324,6 +331,16 @@ const styles = StyleSheet.create({
     opacity: 0.6,
   },
   buttonText: {
+    color: '#FFFFFF',
+    fontSize: 18,
+    fontWeight: '600',
+  },
+  loadingContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
+  loadingText: {
     color: '#FFFFFF',
     fontSize: 18,
     fontWeight: '600',

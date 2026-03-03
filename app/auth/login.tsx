@@ -16,10 +16,9 @@ import { useAuth } from '@/contexts/AuthContext';
 
 export default function LoginScreen() {
   const router = useRouter();
-  const { login } = useAuth();
+  const { login, authLoading } = useAuth();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
-  const [loading, setLoading] = useState(false);
   const [errorModal, setErrorModal] = useState<{ visible: boolean; message: string }>({
     visible: false,
     message: '',
@@ -37,12 +36,13 @@ export default function LoginScreen() {
       return;
     }
 
-    setLoading(true);
     console.log('Submitting login:', { email });
 
     try {
       await login(email, password);
       console.log('Login successful, navigating to home');
+      // Navigation will be handled by app/index.tsx when user state updates
+      // But we also explicitly navigate here to ensure it happens
       router.replace('/(tabs)/(home)');
     } catch (error: any) {
       console.error('Login failed:', error);
@@ -50,8 +50,6 @@ export default function LoginScreen() {
         ? 'Correo o contraseña incorrectos'
         : error?.message || 'Error al iniciar sesión. Intenta de nuevo.';
       showError(message);
-    } finally {
-      setLoading(false);
     }
   };
 
@@ -89,6 +87,7 @@ export default function LoginScreen() {
               placeholderTextColor={colors.textSecondary}
               keyboardType="email-address"
               autoCapitalize="none"
+              editable={!authLoading}
             />
           </View>
 
@@ -101,16 +100,20 @@ export default function LoginScreen() {
               placeholder="Tu contraseña"
               placeholderTextColor={colors.textSecondary}
               secureTextEntry
+              editable={!authLoading}
             />
           </View>
 
           <TouchableOpacity
-            style={[styles.button, loading && styles.buttonDisabled]}
+            style={[styles.button, authLoading && styles.buttonDisabled]}
             onPress={handleLogin}
-            disabled={loading}
+            disabled={authLoading}
           >
-            {loading ? (
-              <ActivityIndicator color="#FFFFFF" />
+            {authLoading ? (
+              <View style={styles.loadingContainer}>
+                <ActivityIndicator color="#FFFFFF" size="small" />
+                <Text style={styles.loadingText}>Iniciando sesión...</Text>
+              </View>
             ) : (
               <Text style={styles.buttonText}>Iniciar sesión</Text>
             )}
@@ -122,6 +125,7 @@ export default function LoginScreen() {
               console.log('User tapped register link');
               router.push('/auth/register');
             }}
+            disabled={authLoading}
           >
             <Text style={styles.linkText}>¿No tienes cuenta? Regístrate</Text>
           </TouchableOpacity>
@@ -194,6 +198,16 @@ const styles = StyleSheet.create({
     opacity: 0.6,
   },
   buttonText: {
+    color: '#FFFFFF',
+    fontSize: 18,
+    fontWeight: '600',
+  },
+  loadingContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
+  loadingText: {
     color: '#FFFFFF',
     fontSize: 18,
     fontWeight: '600',
