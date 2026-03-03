@@ -36,7 +36,7 @@
       "expo-router",
       "expo-web-browser"
     ],
-    "scheme": "build-a-mobile-app-c",
+    "scheme": "buildamobileappc",
     "experiments": {
       "typedRoutes": true
     },
