@@ -8,6 +8,7 @@ import {
   TouchableOpacity,
   TextInput,
   ActivityIndicator,
+  Keyboard,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
@@ -34,6 +35,8 @@ export default function NewClientScreen() {
   const [notes, setNotes] = useState('');
 
   const handleSave = async () => {
+    Keyboard.dismiss();
+    
     if (!fullName.trim()) {
       setErrorModal({ visible: true, message: 'El nombre completo es requerido' });
       return;
@@ -41,6 +44,12 @@ export default function NewClientScreen() {
 
     if (!phone.trim() || phone.trim() === '+52') {
       setErrorModal({ visible: true, message: 'El teléfono es requerido' });
+      return;
+    }
+
+    // Validate email format if provided
+    if (email.trim() && !email.includes('@')) {
+      setErrorModal({ visible: true, message: 'El correo electrónico no es válido' });
       return;
     }
 
@@ -67,12 +76,16 @@ export default function NewClientScreen() {
   };
 
   const formatBirthday = (date: Date | null) => {
-    if (!date) return '';
+    if (!date) {
+      return '';
+    }
     const day = date.getDate().toString().padStart(2, '0');
     const month = (date.getMonth() + 1).toString().padStart(2, '0');
     const year = date.getFullYear();
     return `${day}/${month}/${year}`;
   };
+
+  const birthdayDisplay = formatBirthday(birthday);
 
   return (
     <SafeAreaView style={styles.container}>
@@ -98,7 +111,7 @@ export default function NewClientScreen() {
         <View style={styles.placeholder} />
       </View>
 
-      <ScrollView contentContainerStyle={styles.scrollContent}>
+      <ScrollView contentContainerStyle={styles.scrollContent} keyboardShouldPersistTaps="handled">
         <Text style={styles.fieldLabel}>Nombre completo *</Text>
         <TextInput
           style={styles.input}
@@ -107,6 +120,7 @@ export default function NewClientScreen() {
           placeholder="Ej: María González"
           placeholderTextColor={colors.textSecondary}
           autoCapitalize="words"
+          returnKeyType="next"
         />
 
         <Text style={styles.fieldLabel}>Teléfono *</Text>
@@ -117,6 +131,7 @@ export default function NewClientScreen() {
           placeholder="+52 55 1234 5678"
           placeholderTextColor={colors.textSecondary}
           keyboardType="phone-pad"
+          returnKeyType="next"
         />
 
         <Text style={styles.fieldLabel}>Correo electrónico (opcional)</Text>
@@ -128,6 +143,7 @@ export default function NewClientScreen() {
           placeholderTextColor={colors.textSecondary}
           keyboardType="email-address"
           autoCapitalize="none"
+          returnKeyType="next"
         />
 
         <Text style={styles.fieldLabel}>Fecha de nacimiento (opcional)</Text>
@@ -136,7 +152,7 @@ export default function NewClientScreen() {
           onPress={() => setShowDatePicker(true)}
         >
           <Text style={[styles.dateText, !birthday && styles.datePlaceholder]}>
-            {birthday ? formatBirthday(birthday) : 'Seleccionar fecha'}
+            {birthday ? birthdayDisplay : 'Seleccionar fecha'}
           </Text>
           <IconSymbol
             android_material_icon_name="calendar-today"
@@ -170,6 +186,8 @@ export default function NewClientScreen() {
           multiline
           numberOfLines={4}
           textAlignVertical="top"
+          returnKeyType="done"
+          onSubmitEditing={() => Keyboard.dismiss()}
         />
 
         <TouchableOpacity

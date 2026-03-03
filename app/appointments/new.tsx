@@ -10,6 +10,7 @@ import {
   ActivityIndicator,
   Modal,
   Switch,
+  Keyboard,
 } from 'react-native';
 import { colors } from '@/styles/commonStyles';
 import { apiGet, apiPost } from '@/utils/api';
@@ -64,6 +65,7 @@ export default function NewAppointmentScreen() {
       setClients(data);
     } catch (error) {
       console.error('[NewAppointment] Error loading clients:', error);
+      setErrorModal({ visible: true, message: 'Error al cargar los clientes' });
     }
   };
 
@@ -111,6 +113,7 @@ export default function NewAppointmentScreen() {
 
   const handleSave = async () => {
     console.log('[NewAppointment] Saving new appointment');
+    Keyboard.dismiss();
     
     if (!selectedClient) {
       setErrorModal({ visible: true, message: 'Por favor selecciona un cliente' });
@@ -171,7 +174,6 @@ export default function NewAppointmentScreen() {
       <View style={styles.header}>
         <TouchableOpacity onPress={() => router.back()} style={styles.backButton}>
           <IconSymbol
-            ios_icon_name="chevron.left"
             android_material_icon_name="arrow-back"
             size={24}
             color={colors.text}
@@ -181,7 +183,7 @@ export default function NewAppointmentScreen() {
         <View style={styles.placeholder} />
       </View>
 
-      <ScrollView style={styles.content} showsVerticalScrollIndicator={false}>
+      <ScrollView style={styles.content} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
         {/* Client selector */}
         <View style={styles.section}>
           <Text style={styles.label}>Cliente *</Text>
@@ -193,8 +195,7 @@ export default function NewAppointmentScreen() {
               {selectedClient ? selectedClient.name : 'Seleccionar cliente'}
             </Text>
             <IconSymbol
-              ios_icon_name="chevron.down"
-              android_material_icon_name="arrow-downward"
+              android_material_icon_name="arrow-drop-down"
               size={20}
               color={colors.textSecondary}
             />
@@ -210,6 +211,8 @@ export default function NewAppointmentScreen() {
             onChangeText={setService}
             placeholder="Ej: Corte de cabello, Manicure, etc."
             placeholderTextColor={colors.textSecondary}
+            returnKeyType="done"
+            onSubmitEditing={() => Keyboard.dismiss()}
           />
         </View>
 
@@ -222,7 +225,6 @@ export default function NewAppointmentScreen() {
           >
             <Text style={styles.inputText}>{formattedDate}</Text>
             <IconSymbol
-              ios_icon_name="calendar"
               android_material_icon_name="event"
               size={20}
               color={colors.primary}
@@ -266,7 +268,7 @@ export default function NewAppointmentScreen() {
 
         {/* Notes */}
         <View style={styles.section}>
-          <Text style={styles.label}>Notas</Text>
+          <Text style={styles.label}>Notas (opcional)</Text>
           <TextInput
             style={[styles.textInput, styles.textArea]}
             value={notes}
@@ -276,6 +278,8 @@ export default function NewAppointmentScreen() {
             multiline
             numberOfLines={4}
             textAlignVertical="top"
+            returnKeyType="done"
+            onSubmitEditing={() => Keyboard.dismiss()}
           />
         </View>
 
@@ -284,12 +288,11 @@ export default function NewAppointmentScreen() {
           <View style={styles.switchRow}>
             <View style={styles.switchLabel}>
               <IconSymbol
-                ios_icon_name="message"
                 android_material_icon_name="message"
                 size={20}
                 color={colors.primary}
               />
-              <Text style={styles.label}>Enviar confirmación por WhatsApp</Text>
+              <Text style={styles.switchText}>Enviar confirmación por WhatsApp</Text>
             </View>
             <Switch
               value={sendWhatsApp}
@@ -326,7 +329,6 @@ export default function NewAppointmentScreen() {
               <Text style={styles.modalTitle}>Seleccionar Cliente</Text>
               <TouchableOpacity onPress={() => setShowClientPicker(false)}>
                 <IconSymbol
-                  ios_icon_name="xmark"
                   android_material_icon_name="close"
                   size={24}
                   color={colors.text}
@@ -340,13 +342,27 @@ export default function NewAppointmentScreen() {
               onChangeText={setSearchQuery}
               placeholder="Buscar cliente..."
               placeholderTextColor={colors.textSecondary}
+              autoFocus
             />
 
             <ScrollView style={styles.clientsList}>
               {filteredClients.length === 0 ? (
-                <Text style={[styles.hintText, { padding: 20 }]}>
-                  {searchQuery ? 'No se encontraron clientes' : 'No tienes clientes registrados'}
-                </Text>
+                <View style={styles.emptyClientState}>
+                  <Text style={styles.emptyClientText}>
+                    {searchQuery ? 'No se encontraron clientes' : 'No tienes clientes registrados'}
+                  </Text>
+                  {!searchQuery && (
+                    <TouchableOpacity
+                      style={styles.addClientButton}
+                      onPress={() => {
+                        setShowClientPicker(false);
+                        router.push('/clients/new');
+                      }}
+                    >
+                      <Text style={styles.addClientButtonText}>Agregar cliente</Text>
+                    </TouchableOpacity>
+                  )}
+                </View>
               ) : (
                 filteredClients.map((client) => (
                   <TouchableOpacity
@@ -369,7 +385,6 @@ export default function NewAppointmentScreen() {
                     </View>
                     {selectedClient?.id === client.id && (
                       <IconSymbol
-                        ios_icon_name="checkmark"
                         android_material_icon_name="check"
                         size={24}
                         color={colors.primary}
@@ -404,7 +419,7 @@ export default function NewAppointmentScreen() {
         message={errorModal.message}
         buttons={[
           {
-            text: 'OK',
+            text: 'Aceptar',
             onPress: () => setErrorModal({ visible: false, message: '' }),
             style: 'default',
           },
@@ -529,6 +544,11 @@ const styles = StyleSheet.create({
     gap: 8,
     flex: 1,
   },
+  switchText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: colors.text,
+  },
   saveButton: {
     backgroundColor: colors.primary,
     borderRadius: 12,
@@ -581,6 +601,26 @@ const styles = StyleSheet.create({
   clientsList: {
     padding: 20,
   },
+  emptyClientState: {
+    alignItems: 'center',
+    paddingVertical: 40,
+  },
+  emptyClientText: {
+    fontSize: 16,
+    color: colors.textSecondary,
+    marginBottom: 16,
+  },
+  addClientButton: {
+    backgroundColor: colors.primary,
+    borderRadius: 12,
+    paddingVertical: 12,
+    paddingHorizontal: 24,
+  },
+  addClientButtonText: {
+    color: '#FFFFFF',
+    fontSize: 16,
+    fontWeight: '600',
+  },
   clientItem: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -612,11 +652,5 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: colors.textSecondary,
     marginTop: 2,
-  },
-  hintText: {
-    fontSize: 14,
-    color: colors.textSecondary,
-    fontStyle: 'italic',
-    marginTop: 4,
   },
 });

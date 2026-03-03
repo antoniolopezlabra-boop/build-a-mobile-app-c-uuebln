@@ -7,6 +7,7 @@ import {
   ScrollView,
   TouchableOpacity,
   ActivityIndicator,
+  Keyboard,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
@@ -55,8 +56,14 @@ export default function HomeScreen() {
 
     try {
       const [statsData, todayData] = await Promise.all([
-        apiGet<DashboardStats>('/api/stats/dashboard'),
-        apiGet<TodayAppointment[]>('/api/appointments/today'),
+        apiGet<DashboardStats>('/api/stats/dashboard').catch(() => ({
+          todayAppointments: 0,
+          confirmedToday: 0,
+          unconfirmedToday: 0,
+          totalClients: 0,
+          totalAppointments: 0,
+        })),
+        apiGet<TodayAppointment[]>('/api/appointments/today').catch(() => []),
       ]);
       console.log('[Home] Stats loaded:', statsData);
       console.log('[Home] Today appointments loaded:', todayData.length);
@@ -74,8 +81,12 @@ export default function HomeScreen() {
 
   const getGreeting = () => {
     const hour = new Date().getHours();
-    if (hour < 12) return 'Buenos días';
-    if (hour < 19) return 'Buenas tardes';
+    if (hour < 12) {
+      return 'Buenos días';
+    }
+    if (hour < 19) {
+      return 'Buenas tardes';
+    }
     return 'Buenas noches';
   };
 
@@ -87,7 +98,8 @@ export default function HomeScreen() {
       month: 'long',
       day: 'numeric',
     };
-    return today.toLocaleDateString('es-MX', options);
+    const formatted = today.toLocaleDateString('es-MX', options);
+    return formatted.charAt(0).toUpperCase() + formatted.slice(1);
   };
 
   const greeting = getGreeting();
@@ -98,6 +110,7 @@ export default function HomeScreen() {
       <SafeAreaView style={styles.container}>
         <View style={styles.loadingContainer}>
           <ActivityIndicator size="large" color={colors.primary} />
+          <Text style={styles.loadingText}>Cargando...</Text>
         </View>
       </SafeAreaView>
     );
@@ -108,15 +121,12 @@ export default function HomeScreen() {
       <ScrollView contentContainerStyle={styles.scrollContent}>
         <View style={styles.header}>
           <View>
-            <Text style={styles.greeting}>{greeting}</Text>
-            <Text style={styles.userName}>{userName}</Text>
-            <Text style={styles.userName}>👋</Text>
+            <Text style={styles.greeting}>{greeting}, {userName} 👋</Text>
+            {businessName ? (
+              <Text style={styles.businessName}>{businessName}</Text>
+            ) : null}
           </View>
         </View>
-
-        {businessName ? (
-          <Text style={styles.businessName}>{businessName}</Text>
-        ) : null}
 
         <Text style={styles.date}>{todayDate}</Text>
 
@@ -166,32 +176,39 @@ export default function HomeScreen() {
                 style={styles.emptyStateButton}
                 onPress={() => {
                   console.log('User tapped Nueva Cita from empty state');
-                  router.push('/(tabs)/appointments');
+                  router.push('/appointments/new');
                 }}
               >
                 <Text style={styles.emptyStateButtonText}>Crear primera cita</Text>
               </TouchableOpacity>
             </View>
           ) : (
-            todayAppointments.map((appt) => (
-              <View key={appt.id} style={styles.appointmentCard}>
-                <View style={styles.appointmentTime}>
-                  <Text style={styles.appointmentTimeText}>{appt.time}</Text>
-                </View>
-                <View style={styles.appointmentInfo}>
-                  <Text style={styles.appointmentClient}>{appt.client?.name}</Text>
-                  <Text style={styles.appointmentService}>{appt.service}</Text>
-                </View>
-                <View style={[
-                  styles.statusBadge,
-                  appt.status === 'confirmada' ? styles.statusConfirmed : styles.statusPending,
-                ]}>
-                  <Text style={styles.statusText}>
-                    {appt.status === 'confirmada' ? 'Confirmada' : 'Sin confirmar'}
-                  </Text>
-                </View>
-              </View>
-            ))
+            todayAppointments.map((appt) => {
+              const statusDisplay = appt.status === 'Confirmada' ? 'Confirmada' : 'Sin confirmar';
+              const statusStyle = appt.status === 'Confirmada' ? styles.statusConfirmed : styles.statusPending;
+              
+              return (
+                <TouchableOpacity
+                  key={appt.id}
+                  style={styles.appointmentCard}
+                  onPress={() => {
+                    console.log('User tapped appointment:', appt.id);
+                    router.push(`/appointments/${appt.id}`);
+                  }}
+                >
+                  <View style={styles.appointmentTime}>
+                    <Text style={styles.appointmentTimeText}>{appt.time}</Text>
+                  </View>
+                  <View style={styles.appointmentInfo}>
+                    <Text style={styles.appointmentClient}>{appt.client?.name}</Text>
+                    <Text style={styles.appointmentService}>{appt.service}</Text>
+                  </View>
+                  <View style={[styles.statusBadge, statusStyle]}>
+                    <Text style={styles.statusText}>{statusDisplay}</Text>
+                  </View>
+                </TouchableOpacity>
+              );
+            })
           )}
         </View>
 
@@ -202,7 +219,7 @@ export default function HomeScreen() {
               style={styles.actionCard}
               onPress={() => {
                 console.log('User tapped Nueva Cita');
-                router.push('/(tabs)/appointments');
+                router.push('/appointments/new');
               }}
             >
               <IconSymbol
@@ -217,7 +234,7 @@ export default function HomeScreen() {
               style={styles.actionCard}
               onPress={() => {
                 console.log('User tapped Nuevo Cliente');
-                router.push('/(tabs)/clients');
+                router.push('/clients/new');
               }}
             >
               <IconSymbol
@@ -232,6 +249,7 @@ export default function HomeScreen() {
               style={styles.actionCard}
               onPress={() => {
                 console.log('User tapped Lista de Espera');
+                router.push('/(tabs)/appointments');
               }}
             >
               <IconSymbol
@@ -246,6 +264,7 @@ export default function HomeScreen() {
               style={styles.actionCard}
               onPress={() => {
                 console.log('User tapped Reactivar Clientes');
+                router.push('/clients/inactive');
               }}
             >
               <IconSymbol
@@ -262,7 +281,7 @@ export default function HomeScreen() {
           style={styles.whatsappBanner}
           onPress={() => {
             console.log('User tapped WhatsApp banner');
-            router.push('/(tabs)/settings');
+            router.push('/settings/whatsapp');
           }}
         >
           <IconSymbol
@@ -292,6 +311,11 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
   },
+  loadingText: {
+    marginTop: 12,
+    fontSize: 16,
+    color: colors.textSecondary,
+  },
   scrollContent: {
     padding: 20,
     paddingBottom: 100,
@@ -303,18 +327,14 @@ const styles = StyleSheet.create({
     marginBottom: 8,
   },
   greeting: {
-    fontSize: 16,
-    color: colors.textSecondary,
-  },
-  userName: {
-    fontSize: 28,
+    fontSize: 24,
     fontWeight: 'bold',
     color: colors.text,
   },
   businessName: {
-    fontSize: 18,
+    fontSize: 16,
     color: colors.textSecondary,
-    marginBottom: 8,
+    marginTop: 4,
   },
   date: {
     fontSize: 14,
