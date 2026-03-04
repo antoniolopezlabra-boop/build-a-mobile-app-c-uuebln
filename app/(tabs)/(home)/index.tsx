@@ -10,7 +10,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { colors } from '@/styles/commonStyles';
-import { IconSymbol } from '@/components/IconSymbol';
+import MaterialIcons from "@expo/vector-icons/MaterialIcons";
 import { useAuth } from '@/contexts/AuthContext';
 import { apiGet } from '@/utils/api';
 
@@ -105,17 +105,17 @@ export default function HomeScreen() {
 
         <View style={styles.statsContainer}>
           <View style={styles.statCard}>
-            <IconSymbol android_material_icon_name="calendar-today" size={32} color={colors.primary} />
+            <MaterialIcons name="calendar-today" size={32} color={colors.primary} />
             <Text style={styles.statValue}>{stats.todayAppointments}</Text>
             <Text style={styles.statLabel}>Citas hoy</Text>
           </View>
           <View style={styles.statCard}>
-            <IconSymbol android_material_icon_name="check-circle" size={32} color={colors.success} />
+            <MaterialIcons name="check-circle" size={32} color={colors.success} />
             <Text style={styles.statValue}>{stats.confirmedToday}</Text>
             <Text style={styles.statLabel}>Confirmadas</Text>
           </View>
           <View style={styles.statCard}>
-            <IconSymbol android_material_icon_name="schedule" size={32} color={colors.warning} />
+            <MaterialIcons name="schedule" size={32} color={colors.warning} />
             <Text style={styles.statValue}>{stats.unconfirmedToday}</Text>
             <Text style={styles.statLabel}>Sin confirmar</Text>
           </View>
@@ -125,7 +125,7 @@ export default function HomeScreen() {
           <Text style={styles.sectionTitle}>Citas de Hoy</Text>
           {todayAppointments.length === 0 ? (
             <View style={styles.emptyState}>
-              <IconSymbol android_material_icon_name="event-available" size={64} color={colors.textSecondary} />
+              <MaterialIcons name="event-available" size={64} color={colors.textSecondary} />
               <Text style={styles.emptyStateText}>Aún no tienes citas hoy</Text>
               <TouchableOpacity style={styles.emptyStateButton} onPress={() => router.push('/appointments/new')}>
                 <Text style={styles.emptyStateButtonText}>Crear primera cita</Text>
@@ -153,28 +153,28 @@ export default function HomeScreen() {
           <Text style={styles.sectionTitle}>Acciones rápidas</Text>
           <View style={styles.actionsGrid}>
             <TouchableOpacity style={styles.actionCard} onPress={() => router.push('/appointments/new')}>
-              <IconSymbol android_material_icon_name="add-circle" size={32} color={colors.primary} />
+              <MaterialIcons name="add-circle" size={32} color={colors.primary} />
               <Text style={styles.actionText}>Nueva Cita</Text>
             </TouchableOpacity>
             <TouchableOpacity style={styles.actionCard} onPress={() => router.push('/clients/new')}>
-              <IconSymbol android_material_icon_name="person-add" size={32} color={colors.primary} />
+              <MaterialIcons name="person-add" size={32} color={colors.primary} />
               <Text style={styles.actionText}>Nuevo Cliente</Text>
             </TouchableOpacity>
             <TouchableOpacity style={styles.actionCard} onPress={() => router.push('/(tabs)/appointments')}>
-              <IconSymbol android_material_icon_name="list" size={32} color={colors.primary} />
+              <MaterialIcons name="list" size={32} color={colors.primary} />
               <Text style={styles.actionText}>Lista de Espera</Text>
             </TouchableOpacity>
             <TouchableOpacity style={styles.actionCard} onPress={() => router.push('/clients/inactive')}>
-              <IconSymbol android_material_icon_name="refresh" size={32} color={colors.primary} />
+              <MaterialIcons name="refresh" size={32} color={colors.primary} />
               <Text style={styles.actionText}>Reactivar Clientes</Text>
             </TouchableOpacity>
           </View>
         </View>
 
         <TouchableOpacity style={styles.whatsappBanner} onPress={() => router.push('/settings/whatsapp')}>
-          <IconSymbol android_material_icon_name="warning" size={24} color={colors.warning} />
+          <MaterialIcons name="warning" size={24} color={colors.warning} />
           <Text style={styles.whatsappText}>WhatsApp: No configurado</Text>
-          <IconSymbol android_material_icon_name="arrow-forward" size={24} color={colors.textSecondary} />
+          <MaterialIcons name="arrow-forward" size={24} color={colors.textSecondary} />
         </TouchableOpacity>
       </ScrollView>
     </SafeAreaView>

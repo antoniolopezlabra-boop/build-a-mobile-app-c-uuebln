@@ -342,7 +342,7 @@ export default function NewAppointmentScreen() {
               onChangeText={setSearchQuery}
               placeholder="Buscar cliente..."
               placeholderTextColor={colors.textSecondary}
-              autoFocus
+              autoFocus={false}
             />
 
             <ScrollView style={styles.clientsList}>
@@ -402,7 +402,7 @@ export default function NewAppointmentScreen() {
         <DateTimePicker
           value={date}
           mode="date"
-          display="default"
+          display="spinner"
           minimumDate={new Date()}
           onChange={(event, selectedDate) => {
             setShowDatePicker(false);
@@ -568,7 +568,8 @@ const styles = StyleSheet.create({
   modalOverlay: {
     flex: 1,
     backgroundColor: 'rgba(0, 0, 0, 0.5)',
-    justifyContent: 'flex-end',
+    justifyContent: 'flex-start',
+    paddingTop: 100,
   },
   modalContent: {
     backgroundColor: '#ffffff',

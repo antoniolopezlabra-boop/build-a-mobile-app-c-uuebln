@@ -1,236 +1,356 @@
-import Constants from "expo-constants";
-import { Platform } from "react-native";
-import * as SecureStore from "expo-secure-store";
-import { BEARER_TOKEN_KEY } from "@/lib/auth";
+import { supabase } from '@/lib/supabase';
 
-/**
- * Backend URL is configured in app.json under expo.extra.backendUrl
- * It is set automatically when the backend is deployed
- */
-export const BACKEND_URL = Constants.expoConfig?.extra?.backendUrl || "";
+// Helper para obtener el user_id actual
+export async function getCurrentUserId(): Promise<string> {
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) throw new Error('No authenticated user');
+  return user.id;
+}
 
-/**
- * Check if backend is properly configured
- */
-export const isBackendConfigured = (): boolean => {
-  return !!BACKEND_URL && BACKEND_URL.length > 0;
-};
+// GET genérico - mantiene compatibilidad con código existente
+export async function apiGet<T>(path: string): Promise<T> {
+  const userId = await getCurrentUserId();
 
-/**
- * Get bearer token from platform-specific storage
- * Web: localStorage
- * Native: SecureStore
- *
- * @returns Bearer token or null if not found
- */
-export const getBearerToken = async (): Promise<string | null> => {
-  try {
-    if (Platform.OS === "web") {
-      return localStorage.getItem(BEARER_TOKEN_KEY);
+  if (path === '/api/business-profile') {
+    const { data, error } = await supabase
+      .from('business_profiles')
+      .select('*')
+      .eq('user_id', userId)
+      .single();
+    if (error) throw error;
+    return {
+      id: data.id,
+      userId: data.user_id,
+      businessName: data.business_name,
+      businessType: data.business_type,
+      address: data.address,
+      phone: data.phone,
+      alternativePhone: data.alternative_phone,
+      logoUrl: data.logo_url,
+      weeklySchedule: data.weekly_schedule,
+    } as T;
+  }
+
+  if (path === '/api/clients') {
+    const { data, error } = await supabase
+      .from('clients')
+      .select('*')
+      .eq('user_id', userId)
+      .eq('is_active', true)
+      .order('name');
+    if (error) throw error;
+    return (data?.map(c => ({
+      id: c.id,
+      name: c.name,
+      phone: c.phone,
+      email: c.email,
+      birthday: c.birthday,
+      notes: c.notes,
+      isActive: c.is_active,
+      lastVisit: c.last_visit,
+      totalVisits: c.total_visits,
+    })) || []) as T;
+  }
+
+  if (path === '/api/appointments') {
+    const { data, error } = await supabase
+      .from('appointments')
+      .select('*, client:clients(name, phone)')
+      .eq('user_id', userId)
+      .order('start_time');
+    if (error) throw error;
+    return (data?.map(a => ({
+      id: a.id,
+      clientId: a.client_id,
+      service: a.service_name,
+      date: a.date,
+      time: a.start_time,
+      startTime: a.start_time,
+      endTime: a.end_time,
+      status: a.status,
+      notes: a.notes,
+      client: a.client,
+    })) || []) as T;
+  }
+
+  if (path === '/api/appointments/today') {
+    const today = new Date().toISOString().split('T')[0];
+    const { data, error } = await supabase
+      .from('appointments')
+      .select('*, client:clients(name, phone)')
+      .eq('user_id', userId)
+      .eq('date', today)
+      .order('start_time');
+    if (error) throw error;
+    return (data?.map(a => ({
+      id: a.id,
+      clientId: a.client_id,
+      service: a.service_name,
+      date: a.date,
+      time: a.start_time,
+      status: a.status,
+      notes: a.notes,
+      client: a.client,
+    })) || []) as T;
+  }
+
+  if (path === '/api/stats/dashboard') {
+    const today = new Date().toISOString().split('T')[0];
+    const { data: todayApts } = await supabase
+      .from('appointments')
+      .select('status')
+      .eq('user_id', userId)
+      .eq('date', today);
+    const { count: totalClients } = await supabase
+      .from('clients')
+      .select('*', { count: 'exact', head: true })
+      .eq('user_id', userId);
+    const { count: totalAppointments } = await supabase
+      .from('appointments')
+      .select('*', { count: 'exact', head: true })
+      .eq('user_id', userId);
+
+    return {
+      todayAppointments: todayApts?.length || 0,
+      confirmedToday: todayApts?.filter(a => a.status === 'Confirmada').length || 0,
+      unconfirmedToday: todayApts?.filter(a => a.status === 'Pendiente').length || 0,
+      totalClients: totalClients || 0,
+      totalAppointments: totalAppointments || 0,
+    } as T;
+  }
+
+  if (path === "/api/business-hours") {
+    const { data, error } = await supabase
+      .from("business_hours")
+      .select("*")
+      .eq("user_id", userId)
+      .order("day_of_week");
+    if (error) throw error;
+    return (data || []) as T;
+  }
+
+  if (path.startsWith("/api/clients/inactive")) {
+    const ninetyDaysAgo = new Date();
+    ninetyDaysAgo.setDate(ninetyDaysAgo.getDate() - 90);
+    const { data, error } = await supabase
+      .from('clients')
+      .select('*')
+      .eq('user_id', userId)
+      .lt('last_visit', ninetyDaysAgo.toISOString().split('T')[0]);
+    if (error) throw error;
+    return (data || []) as T;
+  }
+
+  // GET por ID de appointment
+  if (path.startsWith('/api/appointments/')) {
+    const id = path.split('/').pop();
+    const { data, error } = await supabase
+      .from('appointments')
+      .select('*, client:clients(*)')
+      .eq('id', id)
+      .eq('user_id', userId)
+      .single();
+    if (error) throw error;
+    return { ...data, service: data.service_name, time: data.start_time } as T;
+  }
+
+  // GET por ID de client
+  if (path.startsWith('/api/clients/')) {
+    const id = path.split('/').pop();
+    const { data, error } = await supabase
+      .from('clients')
+      .select('*')
+      .eq('id', id)
+      .eq('user_id', userId)
+      .single();
+    if (error) throw error;
+    return data as T;
+  }
+
+  throw new Error(`Unknown API path: ${path}`);
+}
+
+// POST genérico
+export async function apiPost<T>(path: string, body: any): Promise<T> {
+  const userId = await getCurrentUserId();
+
+  if (path === '/api/appointments') {
+    const startTime = body.time;
+    const [h, m] = startTime.split(':').map(Number);
+    const endMinutes = h * 60 + m + 30;
+    const endTime = `${Math.floor(endMinutes / 60).toString().padStart(2, '0')}:${(endMinutes % 60).toString().padStart(2, '0')}`;
+
+    const { data, error } = await supabase
+      .from('appointments')
+      .insert({
+        user_id: userId,
+        client_id: body.clientId,
+        service_name: body.service,
+        date: body.date,
+        start_time: startTime,
+        end_time: endTime,
+        status: 'Pendiente',
+        notes: body.notes || null,
+        whatsapp_notification: body.sendWhatsApp || false,
+      })
+      .select()
+      .single();
+    if (error) throw error;
+    return { ...data, service: data.service_name, time: data.start_time } as T;
+  }
+
+  if (path === '/api/clients') {
+    const { data, error } = await supabase
+      .from('clients')
+      .insert({ user_id: userId, ...body })
+      .select()
+      .single();
+    if (error) throw error;
+    return data as T;
+  }
+
+  throw new Error(`Unknown API path: ${path}`);
+}
+
+// PATCH genérico
+export async function apiPatch<T>(path: string, body: any): Promise<T> {
+  const userId = await getCurrentUserId();
+
+  if (path.includes('/status')) {
+    const id = path.split('/')[3];
+    const { data, error } = await supabase
+      .from('appointments')
+      .update({ status: body.status, updated_at: new Date().toISOString() })
+      .eq('id', id)
+      .eq('user_id', userId)
+      .select()
+      .single();
+    if (error) throw error;
+    return data as T;
+  }
+
+  if (path.includes('/reschedule')) {
+    const id = path.split('/')[3];
+    const { data, error } = await supabase
+      .from('appointments')
+      .update({ date: body.date, start_time: body.time, status: 'Reagendada', updated_at: new Date().toISOString() })
+      .eq('id', id)
+      .eq('user_id', userId)
+      .select()
+      .single();
+    if (error) throw error;
+    return data as T;
+  }
+
+  if (path.startsWith('/api/clients/')) {
+    const id = path.split('/').pop();
+    const { data, error } = await supabase
+      .from('clients')
+      .update({ ...body, updated_at: new Date().toISOString() })
+      .eq('id', id)
+      .eq('user_id', userId)
+      .select()
+      .single();
+    if (error) throw error;
+    return data as T;
+  }
+
+  if (path === '/api/business-profile') {
+    const { data, error } = await supabase
+      .from('business_profiles')
+      .update({ ...body, updated_at: new Date().toISOString() })
+      .eq('user_id', userId)
+      .select()
+      .single();
+    if (error) throw error;
+    return data as T;
+  }
+
+  throw new Error(`Unknown API path: ${path}`);
+}
+
+// DELETE genérico
+export async function apiDelete<T>(path: string): Promise<T> {
+  const userId = await getCurrentUserId();
+
+  if (path.startsWith('/api/appointments/')) {
+    const id = path.split('/').pop();
+    const { error } = await supabase
+      .from('appointments')
+      .delete()
+      .eq('id', id)
+      .eq('user_id', userId);
+    if (error) throw error;
+    return { success: true } as T;
+  }
+
+  if (path.startsWith('/api/clients/')) {
+    const id = path.split('/').pop();
+    const { error } = await supabase
+      .from('clients')
+      .delete()
+      .eq('id', id)
+      .eq('user_id', userId);
+    if (error) throw error;
+    return { success: true } as T;
+  }
+
+  throw new Error(`Unknown API path: ${path}`);
+}
+
+// Mantener compatibilidad con código que usa getBearerToken
+export async function getBearerToken(): Promise<string | null> {
+  const { data: { session } } = await supabase.auth.getSession();
+  return session?.access_token || null;
+}
+
+export const BACKEND_URL = 'https://nhjmwmkaduiaifgztymi.supabase.co';
+
+// PUT genérico
+export async function apiPut<T>(path: string, body: any): Promise<T> {
+  const userId = await getCurrentUserId();
+
+  if (path.startsWith('/api/business-hours/')) {
+    const dayOfWeek = parseInt(path.split('/').pop() || '0');
+    
+    const { data: existing } = await supabase
+      .from('business_hours')
+      .select('id')
+      .eq('user_id', userId)
+      .eq('day_of_week', dayOfWeek)
+      .single();
+
+    if (existing) {
+      const { data, error } = await supabase
+        .from('business_hours')
+        .update({
+          start_time: body.startTime,
+          end_time: body.endTime,
+          is_open: body.isOpen,
+          updated_at: new Date().toISOString(),
+        })
+        .eq('user_id', userId)
+        .eq('day_of_week', dayOfWeek)
+        .select()
+        .single();
+      if (error) throw error;
+      return data as T;
     } else {
-      return await SecureStore.getItemAsync(BEARER_TOKEN_KEY);
+      const { data, error } = await supabase
+        .from('business_hours')
+        .insert({
+          user_id: userId,
+          day_of_week: dayOfWeek,
+          start_time: body.startTime,
+          end_time: body.endTime,
+          is_open: body.isOpen,
+        })
+        .select()
+        .single();
+      if (error) throw error;
+      return data as T;
     }
-  } catch (error) {
-    console.error("[API] Error retrieving bearer token:", error);
-    return null;
-  }
-};
-
-/**
- * Generic API call helper with error handling
- *
- * @param endpoint - API endpoint path (e.g., '/users', '/auth/login')
- * @param options - Fetch options (method, headers, body, etc.)
- * @returns Parsed JSON response
- * @throws Error if backend is not configured or request fails
- */
-export const apiCall = async <T = any>(
-  endpoint: string,
-  options?: RequestInit
-): Promise<T> => {
-  if (!isBackendConfigured()) {
-    throw new Error("Backend URL not configured. Please rebuild the app.");
   }
 
-  const url = `${BACKEND_URL}${endpoint}`;
-  console.log("[API] Calling:", url, options?.method || "GET");
-
-  try {
-    const fetchOptions: RequestInit = {
-      ...options,
-      headers: {
-        "Content-Type": "application/json",
-        "Origin": BACKEND_URL,
-        ...options?.headers,
-      },
-    };
-
-    console.log("[API] Fetch options:", fetchOptions);
-
-    // Always send the token if we have it (needed for cross-domain/iframe support)
-    const token = await getBearerToken();
-    if (token) {
-      fetchOptions.headers = {
-        ...fetchOptions.headers,
-        Authorization: `Bearer ${token}`,
-      };
-    }
-
-    const response = await fetch(url, fetchOptions);
-
-    if (!response.ok) {
-      const text = await response.text();
-      console.error("[API] Error response:", response.status, text);
-      throw new Error(`API error: ${response.status} - ${text}`);
-    }
-
-    const data = await response.json();
-    console.log("[API] Success:", data);
-    return data;
-  } catch (error) {
-    console.error("[API] Request failed:", error);
-    throw error;
-  }
-};
-
-/**
- * GET request helper
- */
-export const apiGet = async <T = any>(endpoint: string): Promise<T> => {
-  return apiCall<T>(endpoint, { method: "GET" });
-};
-
-/**
- * POST request helper
- */
-export const apiPost = async <T = any>(
-  endpoint: string,
-  data: any
-): Promise<T> => {
-  return apiCall<T>(endpoint, {
-    method: "POST",
-    body: JSON.stringify(data),
-  });
-};
-
-/**
- * PUT request helper
- */
-export const apiPut = async <T = any>(
-  endpoint: string,
-  data: any
-): Promise<T> => {
-  return apiCall<T>(endpoint, {
-    method: "PUT",
-    body: JSON.stringify(data),
-  });
-};
-
-/**
- * PATCH request helper
- */
-export const apiPatch = async <T = any>(
-  endpoint: string,
-  data: any
-): Promise<T> => {
-  return apiCall<T>(endpoint, {
-    method: "PATCH",
-    body: JSON.stringify(data),
-  });
-};
-
-/**
- * DELETE request helper
- * Always sends a body to avoid FST_ERR_CTP_EMPTY_JSON_BODY errors
- */
-export const apiDelete = async <T = any>(endpoint: string, data: any = {}): Promise<T> => {
-  return apiCall<T>(endpoint, {
-    method: "DELETE",
-    body: JSON.stringify(data),
-  });
-};
-
-/**
- * Authenticated API call helper
- * Automatically retrieves bearer token from storage and adds to Authorization header
- *
- * @param endpoint - API endpoint path
- * @param options - Fetch options (method, headers, body, etc.)
- * @returns Parsed JSON response
- * @throws Error if token not found or request fails
- */
-export const authenticatedApiCall = async <T = any>(
-  endpoint: string,
-  options?: RequestInit
-): Promise<T> => {
-  const token = await getBearerToken();
-
-  if (!token) {
-    throw new Error("Authentication token not found. Please sign in.");
-  }
-
-  return apiCall<T>(endpoint, {
-    ...options,
-    headers: {
-      ...options?.headers,
-      Authorization: `Bearer ${token}`,
-    },
-  });
-};
-
-/**
- * Authenticated GET request
- */
-export const authenticatedGet = async <T = any>(endpoint: string): Promise<T> => {
-  return authenticatedApiCall<T>(endpoint, { method: "GET" });
-};
-
-/**
- * Authenticated POST request
- */
-export const authenticatedPost = async <T = any>(
-  endpoint: string,
-  data: any
-): Promise<T> => {
-  return authenticatedApiCall<T>(endpoint, {
-    method: "POST",
-    body: JSON.stringify(data),
-  });
-};
-
-/**
- * Authenticated PUT request
- */
-export const authenticatedPut = async <T = any>(
-  endpoint: string,
-  data: any
-): Promise<T> => {
-  return authenticatedApiCall<T>(endpoint, {
-    method: "PUT",
-    body: JSON.stringify(data),
-  });
-};
-
-/**
- * Authenticated PATCH request
- */
-export const authenticatedPatch = async <T = any>(
-  endpoint: string,
-  data: any
-): Promise<T> => {
-  return authenticatedApiCall<T>(endpoint, {
-    method: "PATCH",
-    body: JSON.stringify(data),
-  });
-};
-
-/**
- * Authenticated DELETE request
- * Always sends a body to avoid FST_ERR_CTP_EMPTY_JSON_BODY errors
- */
-export const authenticatedDelete = async <T = any>(endpoint: string, data: any = {}): Promise<T> => {
-  return authenticatedApiCall<T>(endpoint, {
-    method: "DELETE",
-    body: JSON.stringify(data),
-  });
-};
+  throw new Error(`Unknown API path: ${path}`);
+}

@@ -14,9 +14,10 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { colors } from '@/styles/commonStyles';
 import { IconSymbol } from '@/components/IconSymbol';
-import { ConfirmModal } from '@/components/button';
+import { ConfirmModal } from "@/components/button";
+import TimePickerModal from "@/components/TimePickerModal";
 import { apiGet, apiPut } from '@/utils/api';
-import DateTimePicker from '@react-native-community/datetimepicker';
+
 
 interface DaySchedule {
   dayOfWeek: number;
@@ -305,45 +306,16 @@ export default function ScheduleSettingsScreen() {
         </TouchableOpacity>
       </ScrollView>
 
-      {/* Time Picker Modal */}
-      {showTimePicker && (
-        <Modal
-          visible={showTimePicker.visible}
-          animationType="slide"
-          transparent
-          onRequestClose={() => setShowTimePicker(null)}
-        >
-          <View style={styles.modalOverlay}>
-            <View style={styles.pickerContainer}>
-              <View style={styles.pickerHeader}>
-                <Text style={styles.pickerTitle}>
-                  {showTimePicker.field === 'startTime' ? 'Hora de apertura' : 'Hora de cierre'}
-                </Text>
-                <TouchableOpacity onPress={() => setShowTimePicker(null)}>
-                  <IconSymbol android_material_icon_name="close" size={24} color={colors.text} />
-                </TouchableOpacity>
-              </View>
-              <DateTimePicker
-                value={parseTimeToDate(
-                  getDaySchedule(showTimePicker.dayOfWeek)[showTimePicker.field]
-                )}
-                mode="time"
-                display="spinner"
-                onChange={(event, selectedDate) => {
-                  if (selectedDate) {
-                    updateTime(
-                      showTimePicker.dayOfWeek,
-                      showTimePicker.field,
-                      formatDateToTime(selectedDate)
-                    );
-                  }
-                  setShowTimePicker(null);
-                }}
-              />
-            </View>
-          </View>
-        </Modal>
-      )}
+      {showTimePicker && <TimePickerModal
+        visible={showTimePicker.visible}
+        title={showTimePicker.field === "startTime" ? "Hora de apertura" : "Hora de cierre"}
+        value={getDaySchedule(showTimePicker.dayOfWeek)[showTimePicker.field]}
+        onConfirm={(time) => {
+          updateTime(showTimePicker.dayOfWeek, showTimePicker.field, time);
+          setShowTimePicker(null);
+        }}
+        onCancel={() => setShowTimePicker(null)}
+      />}
     </SafeAreaView>
   );
 }
