@@ -1,4 +1,3 @@
-
 import { useEffect, useRef } from 'react';
 import { useRouter } from 'expo-router';
 import { View, ActivityIndicator, StyleSheet, Text } from 'react-native';
@@ -18,12 +17,14 @@ export default function Index() {
     if (hasNavigated.current) return;
     hasNavigated.current = true;
 
+    console.log('[Index] Navigating. User:', user ? user.email : 'none');
+
     if (user) {
       router.replace('/(tabs)/(home)');
     } else {
       router.replace('/auth/onboarding');
     }
-  }, [loading, user, router]);
+  }, [loading, user]);
 
   return (
     <View style={styles.container}>
