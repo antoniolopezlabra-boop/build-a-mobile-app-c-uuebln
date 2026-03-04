@@ -106,11 +106,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
       const sessionData = await response.json();
 
+      console.log("[Auth] Session data received:", JSON.stringify(sessionData));
       if (sessionData?.user) {
         setUser({
           id: sessionData.user.id,
           email: sessionData.user.email,
-          name: sessionData.user.name,
+          name: sessionData.user.name || sessionData.user.displayName || "",
         });
         try {
           const bp = await apiGet<BusinessProfile>("/api/business-profile");
@@ -237,7 +238,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       const newUser = {
         id: data.user?.id || data?.session?.userId || "",
         email: data.user?.email || email,
-        name: data.user?.name || email,
+        name: data.user?.name || data?.name || email,
       };
 
       // Set loading false BEFORE setting user to prevent blank screen
