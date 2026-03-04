@@ -1,5 +1,5 @@
 
-import { useEffect } from 'react';
+import { useEffect, useRef } from 'react';
 import { useRouter } from 'expo-router';
 import { View, ActivityIndicator, StyleSheet, Text } from 'react-native';
 import { useAuth } from '@/contexts/AuthContext';
@@ -8,24 +8,23 @@ import { colors } from '@/styles/commonStyles';
 export default function Index() {
   const router = useRouter();
   const { user, loading } = useAuth();
+  const hasNavigated = useRef(false);
 
   useEffect(() => {
-    // Only navigate ONCE when loading is complete
-    // Do NOT re-trigger on user state changes to prevent loops
-    if (!loading) {
-      console.log('[Index] Auth loaded, user:', user ? user.email : 'not authenticated');
-      
-      if (user) {
-        console.log('[Index] User is authenticated, redirecting to home');
-        router.replace('/(tabs)/(home)');
-      } else {
-        console.log('[Index] User is not authenticated, redirecting to onboarding');
-        router.replace('/auth/onboarding');
-      }
+    if (loading) {
+      hasNavigated.current = false;
+      return;
     }
-  }, [loading]); // ONLY depend on loading, NOT on user
+    if (hasNavigated.current) return;
+    hasNavigated.current = true;
 
-  // Show loading screen while determining auth state
+    if (user) {
+      router.replace('/(tabs)/(home)');
+    } else {
+      router.replace('/auth/onboarding');
+    }
+  }, [loading, user, router]);
+
   return (
     <View style={styles.container}>
       <View style={styles.logoContainer}>
@@ -43,7 +42,7 @@ const styles = StyleSheet.create({
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
-    backgroundColor: '#0F172A', // VYLTA dark blue
+    backgroundColor: '#0F172A',
   },
   logoContainer: {
     alignItems: 'center',
@@ -52,7 +51,7 @@ const styles = StyleSheet.create({
   logoText: {
     fontSize: 48,
     fontWeight: 'bold',
-    color: '#10B981', // VYLTA green
+    color: '#10B981',
     letterSpacing: 4,
   },
   tagline: {
