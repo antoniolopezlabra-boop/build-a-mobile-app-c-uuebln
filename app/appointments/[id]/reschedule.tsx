@@ -85,7 +85,7 @@ export default function RescheduleAppointmentScreen() {
   const checkAvailability = async () => {
     if (!appointment) return;
     try {
-      const dateString = date.toISOString().split('T')[0];
+      const dateString = `${date.getFullYear()}-${String(date.getMonth()+1).padStart(2,'0')}-${String(date.getDate()).padStart(2,'0')}`;
       console.log('[Reschedule] Checking availability for', dateString);
       const appointments = await apiGet<any[]>('/api/appointments');
       
@@ -136,13 +136,13 @@ export default function RescheduleAppointmentScreen() {
 
     setSaving(true);
     try {
-      const dateString = date.toISOString().split('T')[0];
+      const dateString = `${date.getFullYear()}-${String(date.getMonth()+1).padStart(2,'0')}-${String(date.getDate()).padStart(2,'0')}`;
       
       // Use PUT /api/appointments/{id} to reschedule
       await apiPut(`/api/appointments/${appointment.id}`, {
         date: dateString,
         time: time,
-        status: 'Reagendada',
+        status: 'Pendiente',
       });
 
       console.log('[Reschedule] Appointment rescheduled successfully');
@@ -268,7 +268,7 @@ export default function RescheduleAppointmentScreen() {
         <DateTimePicker
           value={date}
           mode="date"
-          display="default"
+          display="spinner"
           minimumDate={new Date()}
           onChange={(event, selectedDate) => {
             setShowDatePicker(false);

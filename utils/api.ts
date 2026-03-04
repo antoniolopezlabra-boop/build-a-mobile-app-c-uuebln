@@ -1,3 +1,4 @@
+import { getTodayString } from '@/utils/dateUtils';
 import { supabase } from '@/lib/supabase';
 
 // Helper para obtener el user_id actual
@@ -68,13 +69,14 @@ export async function apiGet<T>(path: string): Promise<T> {
       startTime: a.start_time,
       endTime: a.end_time,
       status: a.status,
+      isRescheduled: a.is_rescheduled || false,
       notes: a.notes,
       client: a.client,
     })) || []) as T;
   }
 
   if (path === '/api/appointments/today') {
-    const today = new Date().toISOString().split('T')[0];
+    const today = getTodayString();
     const { data, error } = await supabase
       .from('appointments')
       .select('*, client:clients(name, phone)')
@@ -89,13 +91,14 @@ export async function apiGet<T>(path: string): Promise<T> {
       date: a.date,
       time: a.start_time,
       status: a.status,
+      isRescheduled: a.is_rescheduled || false,
       notes: a.notes,
       client: a.client,
     })) || []) as T;
   }
 
   if (path === '/api/stats/dashboard') {
-    const today = new Date().toISOString().split('T')[0];
+    const today = getTodayString();
     const { data: todayApts } = await supabase
       .from('appointments')
       .select('status')
@@ -167,6 +170,24 @@ export async function apiGet<T>(path: string): Promise<T> {
     return data as T;
   }
 
+  if (path === "/api/subscription") {
+    const { data, error } = await supabase
+      .from("subscription_plans")
+      .select("*")
+      .eq("user_id", userId)
+      .single();
+    if (error || !data) {
+      return { planType: "Básico", price: "990", features: [] } as T;
+    }
+    return { planType: data.plan_type, price: data.price, features: data.features || [] } as T;
+  }
+
+  if (path === "/api/whatsapp-config") {
+    const { data } = await supabase.from("whatsapp_config").select("*").eq("user_id", userId).single();
+    if (!data) return { isConnected: false, phoneNumber: null, apiKey: null, reminder24h: false, reminder2h: false, confirmationOnBooking: false, waitlistNotification: false } as T;
+    return { id: data.id, isConnected: data.is_connected, phoneNumber: data.phone_number, apiKey: data.api_key, reminder24h: data.reminder_24h, reminder2h: data.reminder_2h, confirmationOnBooking: data.confirmation_on_booking, waitlistNotification: data.waitlist_notification } as T;
+  }
+
   throw new Error(`Unknown API path: ${path}`);
 }
 
@@ -215,6 +236,19 @@ export async function apiPost<T>(path: string, body: any): Promise<T> {
 // PATCH genérico
 export async function apiPatch<T>(path: string, body: any): Promise<T> {
   const userId = await getCurrentUserId();
+
+  if (path.startsWith('/api/appointments/') && !path.includes('/reschedule')) {
+    const id = path.split('/').pop();
+    const { data, error } = await supabase
+      .from('appointments')
+      .update({ status: body.status, updated_at: new Date().toISOString() })
+      .eq('id', id)
+      .eq('user_id', userId)
+      .select()
+      .single();
+    if (error) throw error;
+    return data as T;
+  }
 
   if (path.includes('/status')) {
     const id = path.split('/')[3];
@@ -350,6 +384,16 @@ export async function apiPut<T>(path: string, body: any): Promise<T> {
       if (error) throw error;
       return data as T;
     }
+  }
+
+  if (path.startsWith("/api/appointments/")) {
+    const id = path.split("/").pop();
+    const t = body.time ? body.time.split(":").map(Number) : [9,0];
+    const endMin = t[0]*60+t[1]+30;
+    const endTime = `${Math.floor(endMin/60).toString().padStart(2,"0")}:${(endMin%60).toString().padStart(2,"0")}`;
+    const { data, error } = await supabase.from("appointments").update({ date: body.date, start_time: body.time, end_time: endTime, status: "Pendiente", updated_at: new Date().toISOString() }).eq("id", id).eq("user_id", userId).select().single();
+    if (error) throw error;
+    return data as T;
   }
 
   throw new Error(`Unknown API path: ${path}`);

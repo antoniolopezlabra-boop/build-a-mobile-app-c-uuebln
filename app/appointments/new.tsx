@@ -86,11 +86,11 @@ export default function NewAppointmentScreen() {
 
   const checkAvailability = async () => {
     try {
-      const dateString = date.toISOString().split('T')[0];
+      const dateString = `${date.getFullYear()}-${String(date.getMonth()+1).padStart(2,'0')}-${String(date.getDate()).padStart(2,'0')}`;
       console.log('[NewAppointment] Checking availability for', dateString);
       const appointments = await apiGet<any[]>('/api/appointments');
       
-      const dateAppointments = appointments.filter((appt: any) => appt.date === dateString);
+      const dateAppointments = appointments.filter((appt: any) => appt.date === dateString && !["Cancelada", "No-show"].includes(appt.status));
       
       const slots: TimeSlot[] = [];
       const businessHoursStart = 9;
@@ -133,7 +133,7 @@ export default function NewAppointmentScreen() {
 
     setLoading(true);
     try {
-      const dateString = date.toISOString().split('T')[0];
+      const dateString = `${date.getFullYear()}-${String(date.getMonth()+1).padStart(2,'0')}-${String(date.getDate()).padStart(2,'0')}`;
       
       const newAppointment = {
         clientId: selectedClient.id,

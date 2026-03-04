@@ -9,7 +9,7 @@ import {
   ActivityIndicator,
 } from 'react-native';
 import { colors } from '@/styles/commonStyles';
-import { apiGet, apiPut, apiDelete } from '@/utils/api';
+import { apiGet, apiPut, apiPatch, apiDelete } from "@/utils/api";
 import React, { useEffect, useState } from 'react';
 import { IconSymbol } from '@/components/IconSymbol';
 import { useRouter, useLocalSearchParams } from 'expo-router';
@@ -104,7 +104,7 @@ export default function AppointmentDetailScreen() {
     setActionLoading(true);
     try {
       // Use PUT /api/appointments/{id} to update status
-      await apiPut(`/api/appointments/${appointment.id}`, { status: newStatus });
+      await apiPatch(`/api/appointments/${appointment.id}`, { status: newStatus });
       await loadAppointment();
     } catch (error: any) {
       console.error('[AppointmentDetail] Error updating status:', error);

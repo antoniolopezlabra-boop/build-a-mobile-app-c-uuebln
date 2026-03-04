@@ -22,7 +22,8 @@ interface ApiAppointment {
   date: string;
   time: string;
   service: string;
-  status: 'Confirmada' | 'Pendiente' | 'Cancelada' | 'Completada' | 'No-show' | 'Reagendada';
+  status: 'Confirmada' | 'Pendiente' | 'Cancelada' | 'Completada' | 'No-show';
+  isRescheduled?: boolean;
   notes?: string | null;
   client: { id: string; name: string; phone: string };
   createdAt: string;
@@ -242,8 +243,15 @@ export default function AppointmentsScreen() {
                       <Text style={styles.clientName}>{appointment.client?.name || 'Cliente'}</Text>
                       <Text style={styles.serviceText}>{appointment.service || 'Servicio'}</Text>
                       
-                      <View style={[styles.statusBadge, { backgroundColor: statusColor }]}>
-                        <Text style={styles.statusText}>{appointment.status}</Text>
+                      <View style={styles.badgesRow}>
+                        {appointment.isRescheduled && (
+                          <View style={styles.rescheduledBadge}>
+                            <Text style={styles.rescheduledText}>🔄 Reagend.</Text>
+                          </View>
+                        )}
+                        <View style={[styles.statusBadge, { backgroundColor: statusColor }]}>
+                          <Text style={styles.statusText}>{appointment.status}</Text>
+                        </View>
                       </View>
                     </View>
 
@@ -400,6 +408,9 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     marginTop: 4,
   },
+  badgesRow: { flexDirection: 'row', gap: 6, alignItems: 'center', marginTop: 4, flexWrap: 'wrap' },
+  rescheduledBadge: { backgroundColor: '#EFF6FF', paddingHorizontal: 8, paddingVertical: 3, borderRadius: 6 },
+  rescheduledText: { fontSize: 11, fontWeight: '600', color: '#3B82F6' },
   statusText: {
     fontSize: 12,
     fontWeight: '600',

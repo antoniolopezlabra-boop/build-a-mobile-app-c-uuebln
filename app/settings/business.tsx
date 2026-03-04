@@ -82,32 +82,43 @@ export default function BusinessSettingsScreen() {
   const uploadLogo = async (uri: string) => {
     setUploadingLogo(true);
     try {
-      console.log('[BusinessSettings] Uploading logo');
-      const formData = new FormData();
-      formData.append('logo', {
-        uri,
-        type: 'image/jpeg',
-        name: 'logo.jpg',
-      } as any);
+      console.log('[BusinessSettings] Uploading logo to Supabase Storage');
+      const { getCurrentUserId } = await import('@/utils/api');
+      const { supabase } = await import('@/lib/supabase');
+      const userId = await getCurrentUserId();
 
-      const token = await getBearerToken();
-      const response = await fetch(`${BACKEND_URL}/api/business-profile/upload-logo`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'multipart/form-data',
-          ...(token ? { Authorization: `Bearer ${token}` } : {}),
-        },
-        body: formData,
+      const response = await fetch(uri);
+      const blob = await response.blob();
+      
+      const base64 = await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve((reader.result as string).split(',')[1]);
+        reader.onerror = reject;
+        reader.readAsDataURL(blob);
       });
-
-      if (!response.ok) {
-        const errData = await response.json().catch(() => ({}));
-        throw new Error(errData?.error || `Error ${response.status}`);
+      
+      const byteCharacters = atob(base64);
+      const byteArray = new Uint8Array(byteCharacters.length);
+      for (let i = 0; i < byteCharacters.length; i++) {
+        byteArray[i] = byteCharacters.charCodeAt(i);
       }
 
-      const data = await response.json();
-      setLogoUrl(data.logoUrl);
-      console.log('[BusinessSettings] Logo uploaded:', data.logoUrl);
+      const fileName = `${userId}/logo_${Date.now()}.jpg`;
+      const { error: uploadError } = await supabase.storage
+        .from('logos')
+        .upload(fileName, byteArray, {
+          contentType: 'image/jpeg',
+          upsert: true,
+        });
+
+      if (uploadError) throw uploadError;
+
+      const { data: urlData } = supabase.storage
+        .from('logos')
+        .getPublicUrl(fileName);
+
+      setLogoUrl(urlData.publicUrl);
+      console.log('[BusinessSettings] Logo uploaded:', urlData.publicUrl);
     } catch (error: any) {
       console.error('[BusinessSettings] Failed to upload logo:', error);
       setErrorModal({ visible: true, message: 'Error al subir el logo' });
