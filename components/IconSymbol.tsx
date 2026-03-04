@@ -1,40 +1,53 @@
-// This file is a fallback for using MaterialIcons on Android and web.
-
 import React from "react";
-import { SymbolWeight } from "expo-symbols";
-import {
-  OpaqueColorValue,
-  StyleProp,
-  TextStyle,
-  ViewStyle,
-} from "react-native";
-import MaterialIcons from "@expo/vector-icons/MaterialIcons";
+import { OpaqueColorValue, StyleProp, TextStyle, ViewStyle, Text } from "react-native";
 
-/**
- * An icon component that uses native SFSymbols on iOS, and MaterialIcons on Android and web. This ensures a consistent look across platforms, and optimal resource usage.
- *
- * Icon `name`s are based on SFSymbols and require manual mapping to MaterialIcons.
- */
+const iconMap: { [key: string]: string } = {
+  "calendar-today": "📅",
+  "check-circle": "✅",
+  "schedule": "🕐",
+  "event-available": "📋",
+  "add-circle": "➕",
+  "person-add": "👤",
+  "list": "📝",
+  "refresh": "🔄",
+  "warning": "⚠️",
+  "arrow-forward": "›",
+  "settings": "⚙️",
+  "person": "👤",
+  "bar-chart": "📊",
+  "home": "🏠",
+  "edit": "✏️",
+  "delete": "🗑️",
+  "phone": "📞",
+  "email": "📧",
+  "close": "✕",
+  "check": "✓",
+  "add": "＋",
+  "search": "🔍",
+  "notifications": "🔔",
+  "logout": "🚪",
+  "business": "🏢",
+  "whatsapp": "💬",
+  "star": "⭐",
+  "info": "ℹ️",
+  "error": "❌",
+  "visibility": "👁",
+  "visibility-off": "🙈",
+};
+
 export function IconSymbol({
-  ios_icon_name = undefined,
   android_material_icon_name,
   size = 24,
   color,
   style,
-  // Forward only the event handlers we inject from EditableElement_ (and a few common RN/web props).
   onPress,
-  onClick,
-  onMouseOver,
-  onMouseLeave,
-  testID,
-  accessibilityLabel,
 }: {
-  ios_icon_name?: string | undefined;
-  android_material_icon_name: keyof typeof MaterialIcons.glyphMap;
+  ios_icon_name?: string;
+  android_material_icon_name: string;
   size?: number;
   color: string | OpaqueColorValue;
   style?: StyleProp<ViewStyle>;
-  weight?: SymbolWeight;
+  weight?: any;
   onPress?: any;
   onClick?: any;
   onMouseOver?: any;
@@ -42,18 +55,14 @@ export function IconSymbol({
   testID?: any;
   accessibilityLabel?: any;
 }) {
+  const emoji = iconMap[android_material_icon_name] || "•";
+  
   return (
-    <MaterialIcons
+    <Text
       onPress={onPress}
-      onClick={onClick}
-      onMouseOver={onMouseOver}
-      onMouseLeave={onMouseLeave}
-      testID={testID}
-      accessibilityLabel={accessibilityLabel}
-      color={color}
-      size={size}
-      name={android_material_icon_name}
-      style={style as StyleProp<TextStyle>}
-    />
+      style={[{ fontSize: size * 0.8, color: color as string, textAlign: 'center' }, style as any]}
+    >
+      {emoji}
+    </Text>
   );
 }
