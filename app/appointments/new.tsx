@@ -14,6 +14,7 @@ import {
 } from 'react-native';
 import { colors } from '@/styles/commonStyles';
 import { apiGet, apiPost } from '@/utils/api';
+import { invalidateCache } from '@/utils/cache';
 import React, { useEffect, useState } from 'react';
 import { IconSymbol } from '@/components/IconSymbol';
 import { useRouter } from 'expo-router';
@@ -47,6 +48,7 @@ export default function NewAppointmentScreen() {
   const [sendWhatsApp, setSendWhatsApp] = useState(true);
   
   const [timeSlots, setTimeSlots] = useState<TimeSlot[]>([]);
+  const [dayIsClosed, setDayIsClosed] = useState(false);
   const [errorModal, setErrorModal] = useState({ visible: false, message: '' });
 
   useEffect(() => {
@@ -88,22 +90,44 @@ export default function NewAppointmentScreen() {
     try {
       const dateString = `${date.getFullYear()}-${String(date.getMonth()+1).padStart(2,'0')}-${String(date.getDate()).padStart(2,'0')}`;
       console.log('[NewAppointment] Checking availability for', dateString);
-      const appointments = await apiGet<any[]>('/api/appointments');
-      
-      const dateAppointments = appointments.filter((appt: any) => appt.date === dateString && !["Cancelada", "No-show"].includes(appt.status));
-      
-      const slots: TimeSlot[] = [];
-      const businessHoursStart = 9;
-      const businessHoursEnd = 19;
-      
-      for (let hour = businessHoursStart; hour < businessHoursEnd; hour++) {
-        for (let minute = 0; minute < 60; minute += 30) {
-          const timeString = `${hour.toString().padStart(2, '0')}:${minute.toString().padStart(2, '0')}`;
-          const isBooked = dateAppointments.some((appt: any) => appt.time === timeString);
-          slots.push({ time: timeString, available: !isBooked });
-        }
+
+      const [appointments, businessHours] = await Promise.all([
+        apiGet<any[]>('/api/appointments'),
+        apiGet<any[]>('/api/business-hours'),
+      ]);
+
+      const dayOfWeek = date.getDay();
+      const dayConfig = (businessHours as any[]).find((d: any) => d.dayOfWeek === dayOfWeek);
+
+      if (!dayConfig || !dayConfig.isOpen) {
+        setDayIsClosed(true);
+        setTimeSlots([]);
+        return;
       }
-      
+      setDayIsClosed(false);
+
+      const startHour = parseInt(dayConfig.startTime.split(':')[0]);
+      const startMin = parseInt(dayConfig.startTime.split(':')[1]);
+      const endHour = parseInt(dayConfig.endTime.split(':')[0]);
+      const endMin = parseInt(dayConfig.endTime.split(':')[1]);
+
+      const dateAppointments = (appointments as any[]).filter((appt: any) => 
+        appt.date === dateString && !["Cancelada", "No-show"].includes(appt.status)
+      );
+
+      const slots: TimeSlot[] = [];
+      const todayString = `${new Date().getFullYear()}-${String(new Date().getMonth()+1).padStart(2,'0')}-${String(new Date().getDate()).padStart(2,'0')}`;
+      const isToday = dateString === todayString;
+
+      for (let totalMin = startHour * 60 + startMin; totalMin < endHour * 60 + endMin; totalMin += 30) {
+        const hour = Math.floor(totalMin / 60);
+        const minute = totalMin % 60;
+        const timeString = `${hour.toString().padStart(2, '0')}:${minute.toString().padStart(2, '0')}`;
+        const isBooked = dateAppointments.some((appt: any) => appt.time === timeString);
+        const isPast = isToday && (hour < new Date().getHours() || (hour === new Date().getHours() && minute <= new Date().getMinutes()));
+        slots.push({ time: timeString, available: !isBooked && !isPast });
+      }
+
       setTimeSlots(slots);
     } catch (error) {
       console.error('[NewAppointment] Error checking availability:', error);
@@ -148,6 +172,9 @@ export default function NewAppointmentScreen() {
       await apiPost('/api/appointments', newAppointment);
       
       console.log('[NewAppointment] Appointment created successfully');
+      invalidateCache('dashboard_stats');
+      invalidateCache('today_appointments');
+      invalidateCache('appointments_list');
       router.back();
     } catch (error: any) {
       console.error('[NewAppointment] Error creating appointment:', error);
@@ -235,6 +262,12 @@ export default function NewAppointmentScreen() {
         {/* Time slots */}
         <View style={styles.section}>
           <Text style={styles.label}>Hora *</Text>
+          {dayIsClosed ? (
+            <View style={styles.dayClosedContainer}>
+              <Text style={styles.dayClosedText}>🚫 Este día no tienes atención configurada</Text>
+              <Text style={styles.dayClosedSubtext}>Selecciona otro día o actualiza tu horario en Ajustes</Text>
+            </View>
+          ) : (
           <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.timeSlotsContainer}>
             {timeSlots.map((slot) => {
               const isSelected = slot.time === time;
@@ -264,6 +297,7 @@ export default function NewAppointmentScreen() {
               );
             })}
           </ScrollView>
+          )}
         </View>
 
         {/* Notes */}
@@ -499,6 +533,9 @@ const styles = StyleSheet.create({
   textArea: {
     minHeight: 100,
   },
+  dayClosedContainer: { backgroundColor: '#FEF2F2', borderRadius: 12, padding: 16, marginTop: 8 },
+  dayClosedText: { fontSize: 15, fontWeight: '600', color: '#EF4444', textAlign: 'center' },
+  dayClosedSubtext: { fontSize: 13, color: '#9CA3AF', textAlign: 'center', marginTop: 4 },
   timeSlotsContainer: {
     flexDirection: 'row',
   },

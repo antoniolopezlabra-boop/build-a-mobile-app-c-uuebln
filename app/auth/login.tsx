@@ -44,7 +44,7 @@ export default function LoginScreen() {
       
       // Use router.replace to clear navigation stack
       // This prevents going back to auth screens
-      router.replace('/(tabs)/(home)');
+      router.replace('/');
     } catch (error: any) {
       console.error('Login failed:', error);
       const message = error?.message?.includes('401') || error?.message?.includes('Invalid')

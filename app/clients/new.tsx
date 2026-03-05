@@ -15,6 +15,7 @@ import { useRouter } from 'expo-router';
 import { colors } from '@/styles/commonStyles';
 import { IconSymbol } from '@/components/IconSymbol';
 import { ConfirmModal } from '@/components/button';
+import { invalidateCache } from '@/utils/cache';
 import { apiPost } from '@/utils/api';
 import DateTimePicker from '@react-native-community/datetimepicker';
 
@@ -22,10 +23,15 @@ export default function NewClientScreen() {
   const router = useRouter();
   const [saving, setSaving] = useState(false);
   const [showDatePicker, setShowDatePicker] = useState(false);
-  const [errorModal, setErrorModal] = useState<{ visible: boolean; message: string }>({
-    visible: false,
-    message: '',
-  });
+  const [errorModal, setErrorModal] = useState<{ visible: boolean; message: string }>({ visible: false, message: '' });
+
+const extraStyles = {
+  datePickerModal: { position: 'absolute' as const, bottom: 0, left: 0, right: 0, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-end' as const, zIndex: 999 },
+  datePickerContainer: { backgroundColor: '#fff', borderTopLeftRadius: 20, borderTopRightRadius: 20, padding: 20 },
+  datePickerTitle: { fontSize: 17, fontWeight: '600' as const, color: '#0F172A', textAlign: 'center' as const, marginBottom: 8 },
+  datePickerConfirm: { backgroundColor: '#10B981', borderRadius: 12, padding: 14, alignItems: 'center' as const, marginTop: 8 },
+  datePickerConfirmText: { color: '#fff', fontSize: 16, fontWeight: '600' as const },
+};
 
   // Form state
   const [fullName, setFullName] = useState('');
@@ -65,6 +71,7 @@ export default function NewClientScreen() {
       };
 
       await apiPost('/api/clients', body);
+      invalidateCache('clients_list');
       console.log('[NewClient] Client created successfully');
       router.back();
     } catch (error: any) {
@@ -162,18 +169,26 @@ export default function NewClientScreen() {
         </TouchableOpacity>
 
         {showDatePicker && (
-          <DateTimePicker
-            value={birthday || new Date()}
-            mode="date"
-            display="default"
-            maximumDate={new Date()}
-            onChange={(event, selectedDate) => {
-              setShowDatePicker(false);
-              if (selectedDate) {
-                setBirthday(selectedDate);
-              }
-            }}
-          />
+          <View style={extraStyles.datePickerModal}>
+            <View style={extraStyles.datePickerContainer}>
+              <Text style={extraStyles.datePickerTitle}>Fecha de nacimiento</Text>
+              <DateTimePicker
+                value={birthday || new Date()}
+                mode="date"
+                display="spinner"
+                maximumDate={new Date()}
+                onChange={(event, selectedDate) => {
+                  if (selectedDate) setBirthday(selectedDate);
+                }}
+              />
+              <TouchableOpacity
+                style={extraStyles.datePickerConfirm}
+                onPress={() => setShowDatePicker(false)}
+              >
+                <Text style={extraStyles.datePickerConfirmText}>Confirmar</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
         )}
 
         <Text style={styles.fieldLabel}>Notas internas (opcional)</Text>

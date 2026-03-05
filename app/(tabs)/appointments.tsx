@@ -9,6 +9,7 @@ import {
   ActivityIndicator,
 } from 'react-native';
 import { colors } from '@/styles/commonStyles';
+import { getCached, setCached } from '@/utils/cache';
 import { apiGet } from '@/utils/api';
 import React, { useEffect, useState, useCallback } from 'react';
 import { IconSymbol } from '@/components/IconSymbol';
@@ -50,13 +51,20 @@ export default function AppointmentsScreen() {
     updateMarkedDates();
   }, [appointments, selectedDate]);
 
-  const loadAppointments = async () => {
+  const loadAppointments = async (forceRefresh = false) => {
+    const cached = getCached<any[]>('appointments_list');
+    if (!forceRefresh && cached) {
+      setAppointments(cached);
+      setLoading(false);
+      return;
+    }
     setLoading(true);
     try {
       console.log('[Appointments] Loading all appointments');
       const data = await apiGet<ApiAppointment[]>('/api/appointments');
       console.log('[Appointments] Loaded:', data.length, 'appointments');
       setAppointments(data);
+      setCached('appointments_list', data);
     } catch (error) {
       console.error('[Appointments] Error loading appointments:', error);
     } finally {

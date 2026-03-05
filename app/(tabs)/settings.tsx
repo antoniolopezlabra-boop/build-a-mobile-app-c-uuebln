@@ -13,6 +13,7 @@ import { useRouter } from 'expo-router';
 import { colors } from '@/styles/commonStyles';
 import { IconSymbol } from '@/components/IconSymbol';
 import { ConfirmModal } from '@/components/button';
+import { getCached, setCached } from '@/utils/cache';
 import { useAuth } from '@/contexts/AuthContext';
 import { apiGet } from '@/utils/api';
 
@@ -30,6 +31,8 @@ export default function SettingsScreen() {
   const router = useRouter();
   const { user, businessProfile, signOut } = useAuth();
   const [logoutModal, setLogoutModal] = useState(false);
+  const [deleteModal, setDeleteModal] = useState(false);
+  const [deleting, setDeleting] = useState(false);
   const [whatsappConfig, setWhatsappConfig] = useState<WhatsAppConfig | null>(null);
   const [subscription, setSubscription] = useState<Subscription | null>(null);
   const [loading, setLoading] = useState(true);
@@ -38,7 +41,15 @@ export default function SettingsScreen() {
     loadSettings();
   }, []);
 
-  const loadSettings = async () => {
+  const loadSettings = async (forceRefresh = false) => {
+    const cachedWA = getCached<any>('settings_whatsapp');
+    const cachedSub = getCached<any>('settings_subscription');
+    if (!forceRefresh && cachedWA && cachedSub) {
+      setWhatsappConfig(cachedWA);
+      setSubscription(cachedSub);
+      setLoading(false);
+      return;
+    }
     console.log('[Settings] Loading settings');
     setLoading(true);
     try {
@@ -46,7 +57,8 @@ export default function SettingsScreen() {
         apiGet<WhatsAppConfig | null>('/api/whatsapp-config').catch(() => null),
         apiGet<Subscription>('/api/subscription').catch(() => null),
       ]);
-      
+      if (whatsappData) setCached('settings_whatsapp', whatsappData);
+      if (subscriptionData) setCached('settings_subscription', subscriptionData);
       setWhatsappConfig(whatsappData);
       setSubscription(subscriptionData);
       console.log('[Settings] Settings loaded');
@@ -71,6 +83,21 @@ export default function SettingsScreen() {
   const whatsappStatusColor = whatsappConfig?.isConnected ? colors.primary : colors.warning;
   const currentPlan = subscription?.planType || 'Básico';
   const currentPrice = subscription?.price || '$990 MXN';
+
+  const handleDeleteAccount = async () => {
+    setDeleting(true);
+    try {
+      const { supabase } = await import('@/lib/supabase');
+      const { error } = await supabase.rpc('delete_user_account');
+      if (error) throw error;
+      await signOut();
+    } catch (error: any) {
+      console.error('[Settings] Failed to delete account:', error);
+      alert('Error al eliminar la cuenta. Intenta de nuevo.');
+    } finally {
+      setDeleting(false);
+    }
+  };
 
   return (
     <SafeAreaView style={styles.container}>
@@ -254,6 +281,17 @@ export default function SettingsScreen() {
               />
             </TouchableOpacity>
 
+<TouchableOpacity
+              style={styles.settingItem}
+              onPress={() => router.push('/legal')}
+            >
+              <View style={styles.settingLeft}>
+                <IconSymbol ios_icon_name="doc.text" android_material_icon_name="description" size={24} color={colors.textSecondary} />
+                <Text style={styles.settingText}>Legal y Privacidad</Text>
+              </View>
+              <IconSymbol ios_icon_name="chevron.right" android_material_icon_name="chevron_right" size={20} color={colors.textSecondary} />
+            </TouchableOpacity>
+
             <TouchableOpacity
               style={styles.settingItem}
               onPress={() => {
@@ -266,6 +304,16 @@ export default function SettingsScreen() {
                 <Text style={[styles.settingText, styles.logoutText]}>Cerrar sesión</Text>
               </View>
             </TouchableOpacity>
+
+            <TouchableOpacity
+              style={styles.settingItem}
+              onPress={() => setDeleteModal(true)}
+            >
+              <View style={styles.settingLeft}>
+                <IconSymbol ios_icon_name="trash" android_material_icon_name="delete-forever" size={24} color="#EF4444" />
+                <Text style={[styles.settingText, { color: '#EF4444', fontWeight: '600' }]}>Eliminar mi cuenta</Text>
+              </View>
+            </TouchableOpacity>
           </View>
 
           <View style={styles.footer}>
@@ -274,6 +322,16 @@ export default function SettingsScreen() {
           </View>
         </ScrollView>
       )}
+      <ConfirmModal
+        visible={deleteModal}
+        title="⚠️ Eliminar cuenta"
+        message="Se eliminarán TODOS tus datos permanentemente: citas, clientes, configuración y perfil. Esta acción no tiene vuelta atrás. ¿Estás seguro?"
+        buttons={[
+          { text: "Cancelar", onPress: () => setDeleteModal(false), style: "cancel" },
+          { text: deleting ? "Eliminando..." : "Sí, eliminar todo", onPress: () => { setDeleteModal(false); handleDeleteAccount(); }, style: "destructive" },
+        ]}
+        onDismiss={() => setDeleteModal(false)}
+      />
     </SafeAreaView>
   );
 }

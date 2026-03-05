@@ -180,7 +180,7 @@ export default function ClientDetailScreen() {
         </TouchableOpacity>
         <Text style={styles.headerTitle}>Detalle del Cliente</Text>
         <TouchableOpacity onPress={() => router.push(`/clients/${id}/edit`)}>
-          <IconSymbol android_material_icon_name="edit" size={24} color={colors.text} />
+          <IconSymbol ios_icon_name="pencil" android_material_icon_name="edit" size={24} color={colors.text} />
         </TouchableOpacity>
       </View>
 

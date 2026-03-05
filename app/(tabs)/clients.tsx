@@ -15,6 +15,7 @@ import { useRouter } from 'expo-router';
 import { colors } from '@/styles/commonStyles';
 import { IconSymbol } from '@/components/IconSymbol';
 import { ConfirmModal } from '@/components/button';
+import { getCached, setCached } from '@/utils/cache';
 import { apiGet } from '@/utils/api';
 
 interface Client {
@@ -67,6 +68,7 @@ export default function ClientsScreen() {
       const data = await apiGet<Client[]>(endpoint);
       console.log('[Clients] Loaded:', data.length, 'clients');
       setClients(data);
+      setCached('clients_list', data);
     } catch (error) {
       console.error('[Clients] Failed to load:', error);
       setErrorModal({ visible: true, message: 'Error al cargar los clientes' });
@@ -300,7 +302,7 @@ export default function ClientsScreen() {
           router.push('/clients/new');
         }}
       >
-        <IconSymbol android_material_icon_name="add" size={32} color="#FFFFFF" />
+        <IconSymbol ios_icon_name="plus" android_material_icon_name="add" size={32} color="#FFFFFF" />
       </TouchableOpacity>
     </SafeAreaView>
   );

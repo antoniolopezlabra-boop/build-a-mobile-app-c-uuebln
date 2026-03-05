@@ -4,6 +4,7 @@ import { View, Text, ScrollView, ActivityIndicator, StyleSheet, TouchableOpacity
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { supabase } from '@/lib/supabase';
 import { getCurrentUserId } from '@/utils/api';
+import { getCached, setCached } from '@/utils/cache';
 
 interface Stats {
   todayAppointments: number;
@@ -48,7 +49,15 @@ export default function ReportsScreen() {
 
   useEffect(() => { loadData(); }, []);
 
-  const loadData = async () => {
+  const loadData = async (forceRefresh = false) => {
+    const cachedStats = getCached<any>('reports_stats');
+    const cachedRecent = getCached<any[]>('reports_recent');
+    if (!forceRefresh && cachedStats && cachedRecent) {
+      setStats(cachedStats);
+      setRecent(cachedRecent);
+      setLoading(false);
+      return;
+    }
     setLoading(true);
     try {
       const userId = await getCurrentUserId();
@@ -96,6 +105,25 @@ export default function ReportsScreen() {
         monthAppointments: monthApts?.length || 0,
       });
       setRecent((recentApts || []) as any);
+      const newStats = {
+        todayAppointments: todayApts?.length || 0,
+        confirmedToday: todayApts?.filter((a:any) => a.status === 'Confirmada').length || 0,
+        pendingToday: todayApts?.filter((a:any) => a.status === 'Pendiente').length || 0,
+        cancelledToday: todayApts?.filter((a:any) => a.status === 'Cancelada').length || 0,
+        confirmedWeek: weekApts?.filter((a:any) => a.status === 'Confirmada').length || 0,
+        pendingWeek: weekApts?.filter((a:any) => a.status === 'Pendiente').length || 0,
+        cancelledWeek: weekApts?.filter((a:any) => a.status === 'Cancelada').length || 0,
+        confirmedMonth: monthApts?.filter((a:any) => a.status === 'Confirmada').length || 0,
+        pendingMonth: monthApts?.filter((a:any) => a.status === 'Pendiente').length || 0,
+        cancelledMonth: monthApts?.filter((a:any) => a.status === 'Cancelada').length || 0,
+        totalClients: totalClients || 0,
+        totalAppointments: totalAppointments || 0,
+        completedAppointments: completedCount || 0,
+        weekAppointments: weekApts?.length || 0,
+        monthAppointments: monthApts?.length || 0,
+      };
+      setCached('reports_stats', newStats);
+      setCached('reports_recent', recentApts || []);
     } catch (error) {
       console.error('[Reports] Failed to load:', error);
     } finally {

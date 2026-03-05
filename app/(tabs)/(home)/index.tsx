@@ -6,13 +6,16 @@ import {
   ScrollView,
   TouchableOpacity,
   ActivityIndicator,
+  Image,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
+import { useFocusEffect } from '@react-navigation/native';
 import { colors } from '@/styles/commonStyles';
 import MaterialIcons from "@expo/vector-icons/MaterialIcons";
 import { useAuth } from '@/contexts/AuthContext';
 import { apiGet } from '@/utils/api';
+import { getCached, setCached } from '@/utils/cache';
 
 interface DashboardStats {
   todayAppointments: number;
@@ -44,19 +47,37 @@ export default function HomeScreen() {
   });
   const [todayAppointments, setTodayAppointments] = useState<TodayAppointment[]>([]);
 
-  useEffect(() => {
-    loadDashboardData();
-  }, [user]);
+  useFocusEffect(
+    React.useCallback(() => {
+      loadDashboardData();
+    }, [user])
+  );
 
-  const loadDashboardData = async () => {
+  const loadDashboardData = async (forceRefresh = false) => {
     try {
+      const cachedStats = getCached<DashboardStats>('dashboard_stats');
+      const cachedApts = getCached<TodayAppointment[]>('today_appointments');
+
+      if (!forceRefresh && cachedStats && cachedApts) {
+        setStats(cachedStats);
+        setTodayAppointments(cachedApts);
+        setLoading(false);
+        return;
+      }
+
       setLoading(true);
       const results = await Promise.allSettled([
         apiGet<DashboardStats>('/api/stats/dashboard'),
         apiGet<TodayAppointment[]>('/api/appointments/today'),
       ]);
-      if (results[0].status === 'fulfilled') setStats(results[0].value);
-      if (results[1].status === 'fulfilled') setTodayAppointments(results[1].value);
+      if (results[0].status === 'fulfilled') {
+        setStats(results[0].value);
+        setCached('dashboard_stats', results[0].value);
+      }
+      if (results[1].status === 'fulfilled') {
+        setTodayAppointments(results[1].value);
+        setCached('today_appointments', results[1].value);
+      }
     } catch (error) {
       console.error('[Home] Error loading dashboard:', error);
     } finally {
@@ -92,16 +113,28 @@ export default function HomeScreen() {
     <SafeAreaView style={styles.container}>
       <ScrollView contentContainerStyle={styles.scrollContent}>
         <View style={styles.header}>
-          <View>
-            <Text style={styles.greeting}>{getGreeting()}</Text>
-            <Text style={styles.userName}>{authLoading ? 'Cargando...' : (user?.name || 'Usuario')} 👋</Text>
-            {businessProfile?.businessName ? (
-              <Text style={styles.businessName}>{businessProfile.businessName}</Text>
-            ) : null}
+          <View style={styles.headerTop}>
+            <View style={styles.headerLeft}>
+              <Text style={styles.greeting}>{getGreeting()}</Text>
+              <Text style={styles.userName}>{authLoading ? 'Cargando...' : (user?.name || 'Usuario')}</Text>
+              <Text style={styles.date}>{getTodayDate()}</Text>
+            </View>
+            <View style={styles.logoContainer}>
+              {businessProfile?.logoUrl ? (
+                <Image source={{ uri: businessProfile.logoUrl }} style={styles.logoImage} resizeMode="cover" />
+              ) : (
+                <View style={styles.logoPlaceholder}>
+                  <Text style={styles.logoPlaceholderText}>
+                    {businessProfile?.businessName?.charAt(0)?.toUpperCase() || 'N'}
+                  </Text>
+                </View>
+              )}
+              {businessProfile?.businessName ? (
+                <Text style={styles.businessName} numberOfLines={1}>{businessProfile.businessName}</Text>
+              ) : null}
+            </View>
           </View>
         </View>
-
-        <Text style={styles.date}>{getTodayDate()}</Text>
 
         <View style={styles.statsContainer}>
           <View style={styles.statCard}>
@@ -185,6 +218,39 @@ const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.background },
   loadingContainer: { flex: 1, justifyContent: 'center', alignItems: 'center' },
   scrollContent: { padding: 20, paddingBottom: 100 },
+  headerTop: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  headerLeft: {
+    flex: 1,
+    paddingRight: 12,
+  },
+  logoContainer: {
+    alignItems: 'center',
+    gap: 6,
+  },
+  logoImage: {
+    width: 64,
+    height: 64,
+    borderRadius: 16,
+    borderWidth: 2,
+    borderColor: colors.primary,
+  },
+  logoPlaceholder: {
+    width: 64,
+    height: 64,
+    borderRadius: 16,
+    backgroundColor: colors.primary,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  logoPlaceholderText: {
+    fontSize: 28,
+    fontWeight: '800',
+    color: '#ffffff',
+  },
   header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 },
   greeting: { fontSize: 16, color: colors.textSecondary },
   userName: { fontSize: 28, fontWeight: 'bold', color: colors.text },

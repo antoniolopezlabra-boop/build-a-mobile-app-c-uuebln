@@ -129,7 +129,13 @@ export async function apiGet<T>(path: string): Promise<T> {
       .eq("user_id", userId)
       .order("day_of_week");
     if (error) throw error;
-    return (data || []) as T;
+    return ((data || []).map((d: any) => ({
+      id: d.id,
+      dayOfWeek: d.day_of_week,
+      startTime: d.start_time,
+      endTime: d.end_time,
+      isOpen: d.is_open,
+    }))) as T;
   }
 
   if (path.startsWith("/api/clients/inactive")) {
@@ -188,6 +194,26 @@ export async function apiGet<T>(path: string): Promise<T> {
     return { id: data.id, isConnected: data.is_connected, phoneNumber: data.phone_number, apiKey: data.api_key, reminder24h: data.reminder_24h, reminder2h: data.reminder_2h, confirmationOnBooking: data.confirmation_on_booking, waitlistNotification: data.waitlist_notification } as T;
   }
 
+  if (path.startsWith('/api/clients/')) {
+    const id = path.split('/').pop();
+    const { data, error } = await supabase
+      .from('clients')
+      .update({
+        name: body.name,
+        phone: body.phone,
+        email: body.email || null,
+        notes: body.notes || null,
+        birthday: body.birthday || null,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', id)
+      .eq('user_id', userId)
+      .select()
+      .single();
+    if (error) throw error;
+    return data as T;
+  }
+
   throw new Error(`Unknown API path: ${path}`);
 }
 
@@ -224,6 +250,26 @@ export async function apiPost<T>(path: string, body: any): Promise<T> {
     const { data, error } = await supabase
       .from('clients')
       .insert({ user_id: userId, ...body })
+      .select()
+      .single();
+    if (error) throw error;
+    return data as T;
+  }
+
+  if (path.startsWith('/api/clients/')) {
+    const id = path.split('/').pop();
+    const { data, error } = await supabase
+      .from('clients')
+      .update({
+        name: body.name,
+        phone: body.phone,
+        email: body.email || null,
+        notes: body.notes || null,
+        birthday: body.birthday || null,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', id)
+      .eq('user_id', userId)
       .select()
       .single();
     if (error) throw error;
@@ -300,6 +346,26 @@ export async function apiPatch<T>(path: string, body: any): Promise<T> {
     return data as T;
   }
 
+  if (path.startsWith('/api/clients/')) {
+    const id = path.split('/').pop();
+    const { data, error } = await supabase
+      .from('clients')
+      .update({
+        name: body.name,
+        phone: body.phone,
+        email: body.email || null,
+        notes: body.notes || null,
+        birthday: body.birthday || null,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', id)
+      .eq('user_id', userId)
+      .select()
+      .single();
+    if (error) throw error;
+    return data as T;
+  }
+
   throw new Error(`Unknown API path: ${path}`);
 }
 
@@ -327,6 +393,45 @@ export async function apiDelete<T>(path: string): Promise<T> {
       .eq('user_id', userId);
     if (error) throw error;
     return { success: true } as T;
+  }
+
+  if (path === '/api/business-profile') {
+    const { data, error } = await supabase
+      .from('business_profiles')
+      .update({
+        business_name: body.businessName,
+        business_type: body.businessType,
+        address: body.address || null,
+        phone: body.phone || null,
+        alternative_phone: body.alternativePhone || null,
+        logo_url: body.logoUrl || null,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('user_id', userId)
+      .select()
+      .single();
+    if (error) throw error;
+    return data as T;
+  }
+
+  if (path.startsWith('/api/clients/')) {
+    const id = path.split('/').pop();
+    const { data, error } = await supabase
+      .from('clients')
+      .update({
+        name: body.name,
+        phone: body.phone,
+        email: body.email || null,
+        notes: body.notes || null,
+        birthday: body.birthday || null,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', id)
+      .eq('user_id', userId)
+      .select()
+      .single();
+    if (error) throw error;
+    return data as T;
   }
 
   throw new Error(`Unknown API path: ${path}`);
@@ -392,6 +497,31 @@ export async function apiPut<T>(path: string, body: any): Promise<T> {
     const endMin = t[0]*60+t[1]+30;
     const endTime = `${Math.floor(endMin/60).toString().padStart(2,"0")}:${(endMin%60).toString().padStart(2,"0")}`;
     const { data, error } = await supabase.from("appointments").update({ date: body.date, start_time: body.time, end_time: endTime, status: "Pendiente", updated_at: new Date().toISOString() }).eq("id", id).eq("user_id", userId).select().single();
+    if (error) throw error;
+    return data as T;
+  }
+  if (path === "/api/business-profile") {
+    const { data, error } = await supabase.from("business_profiles").upsert({ user_id: userId, business_name: body.businessName, business_type: body.businessType, address: body.address || null, phone: body.phone || null, alternative_phone: body.alternativePhone || null, logo_url: body.logoUrl || null, updated_at: new Date().toISOString() }, { onConflict: "user_id" }).select().single();
+    if (error) throw error;
+    return data as T;
+  }
+
+  if (path.startsWith('/api/clients/')) {
+    const id = path.split('/').pop();
+    const { data, error } = await supabase
+      .from('clients')
+      .update({
+        name: body.name,
+        phone: body.phone,
+        email: body.email || null,
+        notes: body.notes || null,
+        birthday: body.birthday || null,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', id)
+      .eq('user_id', userId)
+      .select()
+      .single();
     if (error) throw error;
     return data as T;
   }

@@ -43,7 +43,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     // Escuchar cambios de sesión
     const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
-      console.log('[Auth] State change:', event);
+      console.log("[Auth] State change:", event);
+      if (event === "USER_UPDATED") return;
       if (session?.user) {
         await loadUserData(session.user);
       } else {
@@ -65,8 +66,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return () => subscription.unsubscribe();
   }, []);
 
+  const trackSession = async (userId: string) => {
+    try {
+      await supabase.from('user_sessions').upsert(
+        { user_id: userId, last_seen_at: new Date().toISOString() },
+        { onConflict: 'user_id' }
+      );
+    } catch (e) {}
+  };
+
   const loadUserData = async (supabaseUser: User) => {
     try {
+      trackSession(supabaseUser.id);
       const appUser: AppUser = {
         id: supabaseUser.id,
         email: supabaseUser.email || '',

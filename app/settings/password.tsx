@@ -1,5 +1,6 @@
 
 import React, { useState } from 'react';
+import MaterialIcons from '@expo/vector-icons/MaterialIcons';
 import {
   View,
   Text,
@@ -53,33 +54,26 @@ export default function PasswordSettingsScreen() {
     setSaving(true);
     try {
       console.log('[Password] Changing password');
-      const token = await getBearerToken();
-      const response = await fetch(`${BACKEND_URL}/api/auth/change-password`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          ...(token ? { Authorization: `Bearer ${token}` } : {}),
-        },
-        body: JSON.stringify({
-          currentPassword,
-          newPassword,
-          revokeOtherSessions: false,
-        }),
+      const { supabase } = await import('@/lib/supabase');
+      const { error: updateError } = await supabase.auth.updateUser({
+        password: newPassword,
       });
-      if (!response.ok) {
-        const errData = await response.json().catch(() => ({}));
-        throw new Error(errData?.message || errData?.error || `Error ${response.status}`);
-      }
+      if (updateError) throw updateError;
       setCurrentPassword('');
       setNewPassword('');
       setConfirmPassword('');
       setSuccessModal(true);
+      setTimeout(() => router.back(), 1500);
       console.log('[Password] Password changed');
     } catch (error: any) {
       console.error('[Password] Failed to change:', error);
       setErrorModal({
         visible: true,
-        message: error?.message || 'Error al cambiar la contraseña',
+        message: error?.message?.includes('different from the old')
+          ? 'La nueva contraseña debe ser diferente a la actual.'
+          : error?.message?.includes('at least')
+          ? 'La contraseña debe tener al menos 6 caracteres.'
+          : 'Error al cambiar la contraseña. Intenta de nuevo.',
       });
     } finally {
       setSaving(false);
@@ -151,6 +145,7 @@ export default function PasswordSettingsScreen() {
             onPress={() => setShowCurrentPassword(!showCurrentPassword)}
           >
             <IconSymbol
+              ios_icon_name={showCurrentPassword ? 'eye.slash' : 'eye'}
               android_material_icon_name={showCurrentPassword ? 'visibility-off' : 'visibility'}
               size={24}
               color={colors.textSecondary}
@@ -174,6 +169,7 @@ export default function PasswordSettingsScreen() {
             onPress={() => setShowNewPassword(!showNewPassword)}
           >
             <IconSymbol
+              ios_icon_name={showNewPassword ? 'eye.slash' : 'eye'}
               android_material_icon_name={showNewPassword ? 'visibility-off' : 'visibility'}
               size={24}
               color={colors.textSecondary}
@@ -197,6 +193,7 @@ export default function PasswordSettingsScreen() {
             onPress={() => setShowConfirmPassword(!showConfirmPassword)}
           >
             <IconSymbol
+              ios_icon_name={showConfirmPassword ? 'eye.slash' : 'eye'}
               android_material_icon_name={showConfirmPassword ? 'visibility-off' : 'visibility'}
               size={24}
               color={colors.textSecondary}

@@ -7,6 +7,8 @@ import {
   TouchableOpacity,
   StyleSheet,
   ScrollView,
+  KeyboardAvoidingView,
+  Platform,
   ActivityIndicator,
   Modal,
 } from 'react-native';
@@ -89,7 +91,8 @@ export default function RegisterScreen() {
 
   return (
     <SafeAreaView style={styles.container}>
-      <ScrollView contentContainerStyle={styles.scrollContent}>
+      <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={{ flex: 1 }}>
+      <ScrollView contentContainerStyle={styles.scrollContent} keyboardShouldPersistTaps="handled">
         <View style={styles.header}>
           <Text style={styles.logo}>VYLTA</Text>
           <Text style={styles.tagline}>Cada cliente regresa</Text>
@@ -195,6 +198,7 @@ export default function RegisterScreen() {
           </TouchableOpacity>
         </View>
       </ScrollView>
+      </KeyboardAvoidingView>
 
       <ConfirmModal
         visible={errorModal.visible}

@@ -9,6 +9,7 @@ import {
   ActivityIndicator,
 } from 'react-native';
 import { colors } from '@/styles/commonStyles';
+import { invalidateCache } from '@/utils/cache';
 import { apiGet, apiPut, apiPatch, apiDelete } from "@/utils/api";
 import React, { useEffect, useState } from 'react';
 import { IconSymbol } from '@/components/IconSymbol';
@@ -105,6 +106,9 @@ export default function AppointmentDetailScreen() {
     try {
       // Use PUT /api/appointments/{id} to update status
       await apiPatch(`/api/appointments/${appointment.id}`, { status: newStatus });
+      invalidateCache('dashboard_stats');
+      invalidateCache('today_appointments');
+      invalidateCache('appointments_list');
       await loadAppointment();
     } catch (error: any) {
       console.error('[AppointmentDetail] Error updating status:', error);

@@ -2,6 +2,7 @@ import { useEffect, useRef } from 'react';
 import { useRouter } from 'expo-router';
 import { View, ActivityIndicator, StyleSheet, Text } from 'react-native';
 import { useAuth } from '@/contexts/AuthContext';
+import { supabase } from '@/lib/supabase';
 import { colors } from '@/styles/commonStyles';
 
 export default function Index() {
@@ -19,11 +20,34 @@ export default function Index() {
 
     console.log('[Index] Navigating. User:', user ? user.email : 'none');
 
-    if (user) {
-      router.replace('/(tabs)/(home)');
-    } else {
-      router.replace('/auth/onboarding');
-    }
+    const navigate = async () => {
+      if (user) {
+        // Usar getUser() directo para garantizar UUID fresco de Auth
+        const { data: { user: authUser } } = await supabase.auth.getUser();
+        if (!authUser) { router.replace('/auth/onboarding'); return; }
+
+        console.log('[Index] Auth UUID:', authUser.id);
+
+        const { data: adminData } = await supabase
+          .from('vylta_admins')
+          .select('role')
+          .eq('user_id', authUser.id)
+          .eq('is_active', true)
+          .single();
+
+        console.log('[Index] Admin check:', adminData);
+
+        if (adminData) {
+          try { router.dismissAll(); } catch(e) {}
+          router.replace('/admin');
+        } else {
+          router.replace('/(tabs)/(home)');
+        }
+      } else {
+        router.replace('/auth/onboarding');
+      }
+    };
+    navigate();
   }, [loading, user]);
 
   return (
