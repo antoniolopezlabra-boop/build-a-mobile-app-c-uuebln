@@ -5,6 +5,8 @@ import {
   Text,
   StyleSheet,
   ScrollView,
+  KeyboardAvoidingView,
+  Platform,
   TouchableOpacity,
   TextInput,
   ActivityIndicator,
@@ -118,6 +120,7 @@ const extraStyles = {
         <View style={styles.placeholder} />
       </View>
 
+      <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={{ flex: 1 }}>
       <ScrollView contentContainerStyle={styles.scrollContent} keyboardShouldPersistTaps="handled">
         <Text style={styles.fieldLabel}>Nombre completo *</Text>
         <TextInput
@@ -217,6 +220,7 @@ const extraStyles = {
           )}
         </TouchableOpacity>
       </ScrollView>
+      </KeyboardAvoidingView>
     </SafeAreaView>
   );
 }

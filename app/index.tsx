@@ -22,7 +22,8 @@ export default function Index() {
 
     const navigate = async () => {
       if (user) {
-        // Usar getUser() directo para garantizar UUID fresco de Auth
+        // Esperar a que la sesión esté completamente lista
+        await new Promise(resolve => setTimeout(resolve, 500));
         const { data: { user: authUser } } = await supabase.auth.getUser();
         if (!authUser) { router.replace('/auth/onboarding'); return; }
 
@@ -35,10 +36,10 @@ export default function Index() {
           .eq('is_active', true)
           .single();
 
-        console.log('[Index] Admin check:', adminData);
+        console.log('[Index] Admin check:', JSON.stringify(adminData));
+        console.log('[Index] Auth UUID:', authUser.id);
 
         if (adminData) {
-          try { router.dismissAll(); } catch(e) {}
           router.replace('/admin');
         } else {
           router.replace('/(tabs)/(home)');

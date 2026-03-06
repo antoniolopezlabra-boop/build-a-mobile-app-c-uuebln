@@ -21,6 +21,9 @@ interface DashboardStats {
   todayAppointments: number;
   confirmedToday: number;
   unconfirmedToday: number;
+  weekAppointments: number;
+  confirmedWeek: number;
+  unconfirmedWeek: number;
   totalClients: number;
   totalAppointments: number;
 }
@@ -42,10 +45,14 @@ export default function HomeScreen() {
     todayAppointments: 0,
     confirmedToday: 0,
     unconfirmedToday: 0,
+    weekAppointments: 0,
+    confirmedWeek: 0,
+    unconfirmedWeek: 0,
     totalClients: 0,
     totalAppointments: 0,
   });
   const [todayAppointments, setTodayAppointments] = useState<TodayAppointment[]>([]);
+  const [weekAppointments, setWeekAppointments] = useState<TodayAppointment[]>([]);
 
   useFocusEffect(
     React.useCallback(() => {
@@ -57,10 +64,12 @@ export default function HomeScreen() {
     try {
       const cachedStats = getCached<DashboardStats>('dashboard_stats');
       const cachedApts = getCached<TodayAppointment[]>('today_appointments');
+      const cachedWeek = getCached<TodayAppointment[]>('week_appointments');
 
       if (!forceRefresh && cachedStats && cachedApts) {
         setStats(cachedStats);
         setTodayAppointments(cachedApts);
+        if (cachedWeek) setWeekAppointments(cachedWeek);
         setLoading(false);
         return;
       }
@@ -69,6 +78,7 @@ export default function HomeScreen() {
       const results = await Promise.allSettled([
         apiGet<DashboardStats>('/api/stats/dashboard'),
         apiGet<TodayAppointment[]>('/api/appointments/today'),
+        apiGet<TodayAppointment[]>('/api/appointments/week'),
       ]);
       if (results[0].status === 'fulfilled') {
         setStats(results[0].value);
@@ -77,6 +87,10 @@ export default function HomeScreen() {
       if (results[1].status === 'fulfilled') {
         setTodayAppointments(results[1].value);
         setCached('today_appointments', results[1].value);
+      }
+      if (results[2].status === 'fulfilled') {
+        setWeekAppointments(results[2].value);
+        setCached('week_appointments', results[2].value);
       }
     } catch (error) {
       console.error('[Home] Error loading dashboard:', error);
@@ -136,6 +150,7 @@ export default function HomeScreen() {
           </View>
         </View>
 
+        <Text style={styles.sectionLabel}>📅 HOY</Text>
         <View style={styles.statsContainer}>
           <View style={styles.statCard}>
             <MaterialIcons name="calendar-today" size={32} color={colors.primary} />
@@ -150,6 +165,25 @@ export default function HomeScreen() {
           <View style={styles.statCard}>
             <MaterialIcons name="schedule" size={32} color={colors.warning} />
             <Text style={styles.statValue}>{stats.unconfirmedToday}</Text>
+            <Text style={styles.statLabel}>Sin confirmar</Text>
+          </View>
+        </View>
+
+        <Text style={styles.sectionLabel}>📆 PRÓXIMOS 7 DÍAS</Text>
+        <View style={styles.statsContainer}>
+          <View style={styles.statCard}>
+            <MaterialIcons name="date-range" size={32} color="#6366F1" />
+            <Text style={styles.statValue}>{stats.weekAppointments}</Text>
+            <Text style={styles.statLabel}>Citas semana</Text>
+          </View>
+          <View style={styles.statCard}>
+            <MaterialIcons name="check-circle" size={32} color={colors.success} />
+            <Text style={styles.statValue}>{stats.confirmedWeek}</Text>
+            <Text style={styles.statLabel}>Confirmadas</Text>
+          </View>
+          <View style={styles.statCard}>
+            <MaterialIcons name="schedule" size={32} color={colors.warning} />
+            <Text style={styles.statValue}>{stats.unconfirmedWeek}</Text>
             <Text style={styles.statLabel}>Sin confirmar</Text>
           </View>
         </View>
@@ -256,6 +290,15 @@ const styles = StyleSheet.create({
   userName: { fontSize: 28, fontWeight: 'bold', color: colors.text },
   businessName: { fontSize: 16, color: colors.textSecondary, marginTop: 4 },
   date: { fontSize: 14, color: colors.textSecondary, marginBottom: 24 },
+  sectionLabel: {
+    fontSize: 11,
+    fontWeight: '800',
+    color: '#94A3B8',
+    letterSpacing: 1.5,
+    marginBottom: 8,
+    marginTop: 16,
+    paddingHorizontal: 4,
+  },
   statsContainer: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 32 },
   statCard: { flex: 1, backgroundColor: colors.card, borderRadius: 16, padding: 16, alignItems: 'center', marginHorizontal: 4, shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.05, shadowRadius: 8, elevation: 2 },
   statValue: { fontSize: 24, fontWeight: 'bold', color: colors.text, marginTop: 8 },

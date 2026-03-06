@@ -1,10 +1,11 @@
 import { getTodayString } from '@/utils/dateUtils';
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useCallback } from 'react';
+import { useFocusEffect } from '@react-navigation/native';
 import { View, Text, ScrollView, ActivityIndicator, StyleSheet, TouchableOpacity } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { supabase } from '@/lib/supabase';
 import { getCurrentUserId } from '@/utils/api';
-import { getCached, setCached } from '@/utils/cache';
+import { getCached, setCached, invalidateCache } from '@/utils/cache';
 
 interface Stats {
   todayAppointments: number;
@@ -22,6 +23,8 @@ interface Stats {
   completedAppointments: number;
   weekAppointments: number;
   monthAppointments: number;
+  monthRevenue: number;
+  pendingRevenue: number;
 }
 
 interface RecentAppointment {
@@ -47,7 +50,13 @@ export default function ReportsScreen() {
   const [recent, setRecent] = useState<RecentAppointment[]>([]);
   const [activeTab, setActiveTab] = useState<'hoy' | 'semana' | 'mes'>('hoy');
 
-  useEffect(() => { loadData(); }, []);
+  useFocusEffect(
+    useCallback(() => {
+      invalidateCache('reports_stats');
+      invalidateCache('reports_recent');
+      loadData(true);
+    }, [])
+  );
 
   const loadData = async (forceRefresh = false) => {
     const cachedStats = getCached<any>('reports_stats');
@@ -69,6 +78,7 @@ export default function ReportsScreen() {
       monthStart.setDate(1);
       const monthStartStr = monthStart.toISOString().split('T')[0];
 
+      const monthStartStr2 = monthStartStr;
       const [
         { data: todayApts },
         { data: weekApts },
@@ -87,25 +97,26 @@ export default function ReportsScreen() {
         supabase.from('appointments').select('*', { count: 'exact', head: true }).eq('user_id', userId).eq('status', 'Completada'),
       ]);
 
-      setStats({
-        todayAppointments: todayApts?.length || 0,
-        confirmedToday: todayApts?.filter(a => a.status === 'Confirmada').length || 0,
-        pendingToday: todayApts?.filter(a => a.status === 'Pendiente').length || 0,
-        cancelledToday: todayApts?.filter(a => a.status === 'Cancelada').length || 0,
-        confirmedWeek: weekApts?.filter(a => a.status === 'Confirmada').length || 0,
-        pendingWeek: weekApts?.filter(a => a.status === 'Pendiente').length || 0,
-        cancelledWeek: weekApts?.filter(a => a.status === 'Cancelada').length || 0,
-        confirmedMonth: monthApts?.filter(a => a.status === 'Confirmada').length || 0,
-        pendingMonth: monthApts?.filter(a => a.status === 'Pendiente').length || 0,
-        cancelledMonth: monthApts?.filter(a => a.status === 'Cancelada').length || 0,
-        totalClients: totalClients || 0,
-        totalAppointments: totalAppointments || 0,
-        completedAppointments: completedCount || 0,
-        weekAppointments: weekApts?.length || 0,
-        monthAppointments: monthApts?.length || 0,
-      });
       setRecent((recentApts || []) as any);
-      const newStats = {
+
+      // Calcular ingresos del mes
+      const { data: revenueData } = await supabase
+        .from('appointments')
+        .select('service_cost')
+        .eq('user_id', userId)
+        .eq('status', 'Pagado')
+        .gte('date', monthStartStr);
+      const monthRevenue = revenueData?.reduce((sum: number, a: any) => sum + (a.service_cost || 0), 0) || 0;
+
+      const { data: pendingData } = await supabase
+        .from('appointments')
+        .select('service_cost')
+        .eq('user_id', userId)
+        .eq('status', 'Completada')
+        .gte('date', monthStartStr);
+      const pendingRevenue = pendingData?.reduce((sum: number, a: any) => sum + (a.service_cost || 0), 0) || 0;
+
+      const finalStats = {
         todayAppointments: todayApts?.length || 0,
         confirmedToday: todayApts?.filter((a:any) => a.status === 'Confirmada').length || 0,
         pendingToday: todayApts?.filter((a:any) => a.status === 'Pendiente').length || 0,
@@ -121,8 +132,12 @@ export default function ReportsScreen() {
         completedAppointments: completedCount || 0,
         weekAppointments: weekApts?.length || 0,
         monthAppointments: monthApts?.length || 0,
+        monthRevenue,
+        pendingRevenue,
       };
-      setCached('reports_stats', newStats);
+
+      setStats(finalStats);
+      setCached('reports_stats', finalStats);
       setCached('reports_recent', recentApts || []);
     } catch (error) {
       console.error('[Reports] Failed to load:', error);
@@ -182,21 +197,46 @@ export default function ReportsScreen() {
           </View>
         </View>
 
+        {/* Fila 1 — Clientes y Citas */}
         <View style={styles.statsRow}>
-          <View style={[styles.statCard, { borderLeftColor: '#10B981' }]}>
+          <View style={[styles.statCardLarge, { borderLeftColor: '#10B981' }]}>
             <Text style={styles.statEmoji}>👥</Text>
-            <Text style={styles.statValue}>{stats?.totalClients}</Text>
-            <Text style={styles.statLabel}>Clientes</Text>
+            <Text style={styles.statValueLarge}>{stats?.totalClients}</Text>
+            <Text style={styles.statLabelLarge}>Clientes</Text>
           </View>
-          <View style={[styles.statCard, { borderLeftColor: '#6366F1' }]}>
+          <View style={[styles.statCardLarge, { borderLeftColor: '#6366F1' }]}>
             <Text style={styles.statEmoji}>📅</Text>
-            <Text style={styles.statValue}>{stats?.totalAppointments}</Text>
-            <Text style={styles.statLabel}>Total citas</Text>
+            <Text style={styles.statValueLarge}>{stats?.totalAppointments}</Text>
+            <Text style={styles.statLabelLarge}>Total citas</Text>
           </View>
-          <View style={[styles.statCard, { borderLeftColor: '#F59E0B' }]}>
+        </View>
+
+        {/* Fila 2 — Completadas y % */}
+        <View style={styles.statsRow}>
+          <View style={[styles.statCardLarge, { borderLeftColor: '#F59E0B' }]}>
             <Text style={styles.statEmoji}>✅</Text>
-            <Text style={styles.statValue}>{completionRate}%</Text>
-            <Text style={styles.statLabel}>Completadas</Text>
+            <Text style={styles.statValueLarge}>{completionRate}%</Text>
+            <Text style={styles.statLabelLarge}>Completadas</Text>
+          </View>
+          <View style={[styles.statCardLarge, { borderLeftColor: '#94A3B8' }]}>
+            <Text style={styles.statEmoji}>📊</Text>
+            <Text style={styles.statValueLarge}>{stats?.completedAppointments}</Text>
+            <Text style={styles.statLabelLarge}>Servicios dados</Text>
+          </View>
+        </View>
+
+        {/* Fila 3 — Ingresos */}
+        <Text style={styles.ingresoTitle}>💵 Finanzas del mes</Text>
+        <View style={styles.statsRow}>
+          <View style={[styles.statCardLarge, { borderLeftColor: '#10B981', backgroundColor: '#ECFDF5' }]}>
+            <Text style={styles.statEmoji}>💰</Text>
+            <Text style={[styles.statValueLarge, { color: '#10B981' }]}>${((stats as any)?.monthRevenue || 0).toLocaleString('es-MX', { minimumFractionDigits: 0 })}</Text>
+            <Text style={styles.statLabelLarge}>Cobrado</Text>
+          </View>
+          <View style={[styles.statCardLarge, { borderLeftColor: '#F59E0B', backgroundColor: '#FFFBEB' }]}>
+            <Text style={styles.statEmoji}>⏳</Text>
+            <Text style={[styles.statValueLarge, { color: '#F59E0B' }]}>${((stats as any)?.pendingRevenue || 0).toLocaleString('es-MX', { minimumFractionDigits: 0 })}</Text>
+            <Text style={styles.statLabelLarge}>Por cobrar</Text>
           </View>
         </View>
 
@@ -267,6 +307,37 @@ const styles = StyleSheet.create({
   heroMini: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   heroDot: { width: 8, height: 8, borderRadius: 4 },
   heroMiniText: { fontSize: 13, color: '#CBD5E1' },
+  statCardLarge: {
+    flex: 1,
+    backgroundColor: '#fff',
+    borderRadius: 14,
+    padding: 16,
+    borderLeftWidth: 4,
+    alignItems: 'center',
+    shadowColor: '#000',
+    shadowOpacity: 0.04,
+    shadowRadius: 6,
+    elevation: 2,
+  },
+  statValueLarge: {
+    fontSize: 32,
+    fontWeight: '800',
+    color: '#0F172A',
+    marginTop: 4,
+  },
+  statLabelLarge: {
+    fontSize: 13,
+    color: '#64748B',
+    marginTop: 4,
+    fontWeight: '500',
+  },
+  ingresoTitle: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: '#64748B',
+    marginBottom: 8,
+    marginTop: 4,
+  },
   statsRow: { flexDirection: 'row', paddingHorizontal: 20, gap: 10, marginBottom: 12 },
   statCard: { flex: 1, backgroundColor: '#fff', borderRadius: 14, padding: 14, borderLeftWidth: 3, shadowColor: '#000', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.05, shadowRadius: 4, elevation: 1 },
   statEmoji: { fontSize: 20, marginBottom: 6 },

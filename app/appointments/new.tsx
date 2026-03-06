@@ -5,6 +5,8 @@ import {
   Text,
   StyleSheet,
   ScrollView,
+  KeyboardAvoidingView,
+  Platform,
   TouchableOpacity,
   TextInput,
   ActivityIndicator,
@@ -45,6 +47,7 @@ export default function NewAppointmentScreen() {
   const [showDatePicker, setShowDatePicker] = useState(false);
   const [time, setTime] = useState('09:00');
   const [notes, setNotes] = useState('');
+  const [serviceCost, setServiceCost] = useState('');
   const [sendWhatsApp, setSendWhatsApp] = useState(true);
   
   const [timeSlots, setTimeSlots] = useState<TimeSlot[]>([]);
@@ -166,6 +169,7 @@ export default function NewAppointmentScreen() {
         time: time,
         status: 'Pendiente',
         notes: notes.trim() || undefined,
+        service_cost: serviceCost ? parseFloat(serviceCost) : 0,
       };
 
       console.log('[NewAppointment] Creating appointment:', newAppointment);
@@ -210,6 +214,7 @@ export default function NewAppointmentScreen() {
         <View style={styles.placeholder} />
       </View>
 
+      <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={{ flex: 1 }}>
       <ScrollView style={styles.content} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
         {/* Client selector */}
         <View style={styles.section}>
@@ -236,6 +241,8 @@ export default function NewAppointmentScreen() {
             style={styles.textInput}
             value={service}
             onChangeText={setService}
+            onSubmitEditing={() => Keyboard.dismiss()}
+            returnKeyType="done"
             placeholder="Ej: Corte de cabello, Manicure, etc."
             placeholderTextColor={colors.textSecondary}
             returnKeyType="done"
@@ -300,6 +307,21 @@ export default function NewAppointmentScreen() {
           )}
         </View>
 
+        {/* Costo del servicio */}
+        <View style={styles.inputGroup}>
+          <Text style={styles.label}>Costo del servicio (MXN)</Text>
+          <TextInput
+            style={styles.input}
+            placeholder="0.00"
+            placeholderTextColor={colors.textSecondary}
+            value={serviceCost}
+            onChangeText={t => setServiceCost(t.replace(/[^0-9.]/g, ''))}
+            onSubmitEditing={() => Keyboard.dismiss()}
+            returnKeyType="done"
+            keyboardType="decimal-pad"
+          />
+        </View>
+
         {/* Notes */}
         <View style={styles.section}>
           <Text style={styles.label}>Notas (opcional)</Text>
@@ -307,6 +329,8 @@ export default function NewAppointmentScreen() {
             style={[styles.textInput, styles.textArea]}
             value={notes}
             onChangeText={setNotes}
+            onSubmitEditing={() => Keyboard.dismiss()}
+            returnKeyType="done"
             placeholder="Notas adicionales..."
             placeholderTextColor={colors.textSecondary}
             multiline
@@ -349,6 +373,7 @@ export default function NewAppointmentScreen() {
           )}
         </TouchableOpacity>
       </ScrollView>
+      </KeyboardAvoidingView>
 
       {/* Client picker modal */}
       <Modal

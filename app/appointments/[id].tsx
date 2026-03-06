@@ -28,7 +28,7 @@ interface Appointment {
   date: string;
   time: string;
   service: string;
-  status: 'Confirmada' | 'Pendiente' | 'Cancelada' | 'Completada' | 'No-show' | 'Reagendada';
+  status: 'Confirmada' | 'Pendiente' | 'Cancelada' | 'Completada' | 'No asistió' | 'Reagendada' | 'Pagado';
   notes?: string | null;
   client: Client;
   clientId: string;
@@ -89,7 +89,9 @@ export default function AppointmentDetailScreen() {
         return '#EF4444';
       case 'Completada':
         return '#6B7280';
-      case 'No-show':
+      case 'Pagado':
+        return '#10B981';
+      case 'No asistió':
         return '#F97316';
       case 'Reagendada':
         return '#3B82F6';
@@ -109,6 +111,8 @@ export default function AppointmentDetailScreen() {
       invalidateCache('dashboard_stats');
       invalidateCache('today_appointments');
       invalidateCache('appointments_list');
+      invalidateCache('reports_stats');
+      invalidateCache('reports_recent');
       await loadAppointment();
     } catch (error: any) {
       console.error('[AppointmentDetail] Error updating status:', error);
@@ -131,6 +135,12 @@ export default function AppointmentDetailScreen() {
     try {
       await apiDelete(`/api/appointments/${appointment.id}`);
       console.log('[AppointmentDetail] Appointment deleted');
+      invalidateCache('dashboard_stats');
+      invalidateCache('today_appointments');
+      invalidateCache('week_appointments');
+      invalidateCache('appointments_list');
+      invalidateCache('reports_stats');
+      invalidateCache('reports_recent');
       router.back();
     } catch (error: any) {
       console.error('[AppointmentDetail] Error deleting appointment:', error);
@@ -158,7 +168,10 @@ export default function AppointmentDetailScreen() {
         handleStatusChange('Completada');
         break;
       case 'noshow':
-        handleStatusChange('No-show');
+        handleStatusChange('No asistió');
+        break;
+      case 'paid':
+        handleStatusChange('Pagado');
         break;
       case 'delete':
         handleDelete();
@@ -333,6 +346,21 @@ export default function AppointmentDetailScreen() {
             </TouchableOpacity>
           )}
 
+          {appointment.status === 'Completada' && (
+            <TouchableOpacity
+              style={[styles.actionButton, { backgroundColor: '#10B981' }]}
+              onPress={() => showConfirmation('paid', 'Marcar como Pagado', '¿Confirmas que ya se cobró este servicio?')}
+            >
+              <IconSymbol
+                ios_icon_name="dollarsign.circle"
+                android_material_icon_name="attach-money"
+                size={24}
+                color="#ffffff"
+              />
+              <Text style={styles.actionButtonText}>💰 Pagado</Text>
+            </TouchableOpacity>
+          )}
+
           {(appointment.status === 'Pendiente' || appointment.status === 'Confirmada') && (
             <>
               <TouchableOpacity
@@ -363,7 +391,7 @@ export default function AppointmentDetailScreen() {
 
               <TouchableOpacity
                 style={[styles.actionButton, styles.noshowButton]}
-                onPress={() => showConfirmation('noshow', 'Marcar No-show', '¿El cliente no se presentó a la cita?')}
+                onPress={() => showConfirmation('noshow', 'No asistió', '¿El cliente no se presentó a la cita?')}
               >
                 <IconSymbol
                   ios_icon_name="xmark.circle"
@@ -371,7 +399,7 @@ export default function AppointmentDetailScreen() {
                   size={24}
                   color="#ffffff"
                 />
-                <Text style={styles.actionButtonText}>No-show</Text>
+                <Text style={styles.actionButtonText}>No asistió</Text>
               </TouchableOpacity>
 
               <TouchableOpacity

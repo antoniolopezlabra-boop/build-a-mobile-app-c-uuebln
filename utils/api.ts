@@ -97,26 +97,57 @@ export async function apiGet<T>(path: string): Promise<T> {
     })) || []) as T;
   }
 
+  if (path === '/api/appointments/week') {
+    const tomorrow = new Date(); tomorrow.setDate(tomorrow.getDate() + 1);
+    const weekEnd = new Date(); weekEnd.setDate(weekEnd.getDate() + 7);
+    const { data, error } = await supabase
+      .from('appointments')
+      .select('*, client:clients(name, phone)')
+      .eq('user_id', userId)
+      .gte('date', tomorrow.toISOString().split('T')[0])
+      .lte('date', weekEnd.toISOString().split('T')[0])
+      .order('date')
+      .order('start_time');
+    if (error) throw error;
+    return (data?.map(a => ({
+      id: a.id,
+      clientId: a.client_id,
+      service: a.service_name,
+      date: a.date,
+      time: a.start_time,
+      status: a.status,
+      isRescheduled: a.is_rescheduled || false,
+      notes: a.notes,
+      client: a.client,
+    })) || []) as T;
+  }
+
   if (path === '/api/stats/dashboard') {
     const today = getTodayString();
-    const { data: todayApts } = await supabase
-      .from('appointments')
-      .select('status')
-      .eq('user_id', userId)
-      .eq('date', today);
-    const { count: totalClients } = await supabase
-      .from('clients')
-      .select('*', { count: 'exact', head: true })
-      .eq('user_id', userId);
-    const { count: totalAppointments } = await supabase
-      .from('appointments')
-      .select('*', { count: 'exact', head: true })
-      .eq('user_id', userId);
+    const week = new Date(); week.setDate(week.getDate() + 7);
+    const weekEnd = week.toISOString().split('T')[0];
+    const tomorrow = new Date(); tomorrow.setDate(tomorrow.getDate() + 1);
+    const tomorrowStr = tomorrow.toISOString().split('T')[0];
+
+    const [
+      { data: todayApts },
+      { data: weekApts },
+      { count: totalClients },
+      { count: totalAppointments },
+    ] = await Promise.all([
+      supabase.from('appointments').select('status').eq('user_id', userId).eq('date', today),
+      supabase.from('appointments').select('status').eq('user_id', userId).gte('date', tomorrowStr).lte('date', weekEnd),
+      supabase.from('clients').select('*', { count: 'exact', head: true }).eq('user_id', userId),
+      supabase.from('appointments').select('*', { count: 'exact', head: true }).eq('user_id', userId),
+    ]);
 
     return {
       todayAppointments: todayApts?.length || 0,
       confirmedToday: todayApts?.filter(a => a.status === 'Confirmada').length || 0,
       unconfirmedToday: todayApts?.filter(a => a.status === 'Pendiente').length || 0,
+      weekAppointments: weekApts?.length || 0,
+      confirmedWeek: weekApts?.filter(a => a.status === 'Confirmada').length || 0,
+      unconfirmedWeek: weekApts?.filter(a => a.status === 'Pendiente').length || 0,
       totalClients: totalClients || 0,
       totalAppointments: totalAppointments || 0,
     } as T;
@@ -238,6 +269,7 @@ export async function apiPost<T>(path: string, body: any): Promise<T> {
         end_time: endTime,
         status: 'Pendiente',
         notes: body.notes || null,
+        service_cost: body.service_cost || 0,
         whatsapp_notification: body.sendWhatsApp || false,
       })
       .select()
