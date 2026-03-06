@@ -56,7 +56,6 @@ export default function NewAppointmentScreen() {
 
   useEffect(() => {
     loadClients();
-    generateTimeSlots();
   }, []);
 
   useEffect(() => {
@@ -100,7 +99,20 @@ export default function NewAppointmentScreen() {
       ]);
 
       const dayOfWeek = date.getDay();
-      const dayConfig = (businessHours as any[]).find((d: any) => d.dayOfWeek === dayOfWeek);
+
+      // Default hours: Mon-Fri 9am-6pm, Sat-Sun closed
+      const defaultHours = [
+        { dayOfWeek: 0, isOpen: false, startTime: '09:00', endTime: '18:00' }, // Dom
+        { dayOfWeek: 1, isOpen: true,  startTime: '09:00', endTime: '18:00' }, // Lun
+        { dayOfWeek: 2, isOpen: true,  startTime: '09:00', endTime: '18:00' }, // Mar
+        { dayOfWeek: 3, isOpen: true,  startTime: '09:00', endTime: '18:00' }, // Mié
+        { dayOfWeek: 4, isOpen: true,  startTime: '09:00', endTime: '18:00' }, // Jue
+        { dayOfWeek: 5, isOpen: true,  startTime: '09:00', endTime: '18:00' }, // Vie
+        { dayOfWeek: 6, isOpen: false, startTime: '09:00', endTime: '18:00' }, // Sáb
+      ];
+
+      const hoursToUse = (businessHours as any[]).length > 0 ? businessHours as any[] : defaultHours;
+      const dayConfig = hoursToUse.find((d: any) => d.dayOfWeek === dayOfWeek);
 
       if (!dayConfig || !dayConfig.isOpen) {
         setDayIsClosed(true);

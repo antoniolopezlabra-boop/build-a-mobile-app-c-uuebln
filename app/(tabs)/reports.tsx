@@ -1,6 +1,7 @@
 import { getTodayString } from '@/utils/dateUtils';
 import React, { useEffect, useState, useCallback } from 'react';
 import { useFocusEffect } from '@react-navigation/native';
+import { useRouter } from 'expo-router';
 import { View, Text, ScrollView, ActivityIndicator, StyleSheet, TouchableOpacity } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { supabase } from '@/lib/supabase';
@@ -45,6 +46,7 @@ const STATUS_CONFIG: Record<string, { color: string; bg: string; label: string }
 };
 
 export default function ReportsScreen() {
+  const router = useRouter();
   const [loading, setLoading] = useState(true);
   const [stats, setStats] = useState<Stats | null>(null);
   const [recent, setRecent] = useState<RecentAppointment[]>([]);
@@ -233,11 +235,12 @@ export default function ReportsScreen() {
             <Text style={[styles.statValueLarge, { color: '#10B981' }]}>${((stats as any)?.monthRevenue || 0).toLocaleString('es-MX', { minimumFractionDigits: 0 })}</Text>
             <Text style={styles.statLabelLarge}>Cobrado</Text>
           </View>
-          <View style={[styles.statCardLarge, { borderLeftColor: '#F59E0B', backgroundColor: '#FFFBEB' }]}>
+          <TouchableOpacity style={[styles.statCardLarge, { borderLeftColor: '#F59E0B', backgroundColor: '#FFFBEB' }]} onPress={() => router.push('/reports/pending-payments')}>
             <Text style={styles.statEmoji}>⏳</Text>
             <Text style={[styles.statValueLarge, { color: '#F59E0B' }]}>${((stats as any)?.pendingRevenue || 0).toLocaleString('es-MX', { minimumFractionDigits: 0 })}</Text>
             <Text style={styles.statLabelLarge}>Por cobrar</Text>
-          </View>
+            <Text style={{ fontSize: 10, color: '#F59E0B', marginTop: 4 }}>Ver detalle →</Text>
+          </TouchableOpacity>
         </View>
 
         <View style={styles.progressCard}>
