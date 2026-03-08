@@ -254,9 +254,7 @@ export async function apiPost<T>(path: string, body: any): Promise<T> {
 
   if (path === '/api/appointments') {
     const startTime = body.time;
-    const [h, m] = startTime.split(':').map(Number);
-    const endMinutes = h * 60 + m + 30;
-    const endTime = `${Math.floor(endMinutes / 60).toString().padStart(2, '0')}:${(endMinutes % 60).toString().padStart(2, '0')}`;
+    const endTime = body.endTime || (() => { const [h, m] = startTime.split(':').map(Number); const endMin = h * 60 + m + 30; return `${Math.floor(endMin/60).toString().padStart(2,'0')}:${(endMin%60).toString().padStart(2,'0')}`; })();
 
     const { data, error } = await supabase
       .from('appointments')

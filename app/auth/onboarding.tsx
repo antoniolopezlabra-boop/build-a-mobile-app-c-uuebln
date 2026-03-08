@@ -9,6 +9,7 @@ import {
   ScrollView,
 } from 'react-native';
 import { useRouter } from 'expo-router';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useAuth } from '@/contexts/AuthContext';
 import { colors } from '@/styles/commonStyles';
 import { IconSymbol } from '@/components/IconSymbol';
@@ -46,19 +47,21 @@ export default function OnboardingScreen() {
   const [currentIndex, setCurrentIndex] = useState(0);
   const scrollViewRef = useRef<ScrollView>(null);
 
-  const handleNext = () => {
+  const handleNext = async () => {
     if (currentIndex < slides.length - 1) {
       const nextIndex = currentIndex + 1;
       setCurrentIndex(nextIndex);
       scrollViewRef.current?.scrollTo({ x: width * nextIndex, animated: true });
     } else {
       console.log('User completed onboarding, navigating to login');
+      await AsyncStorage.setItem('has_seen_onboarding', 'true');
       router.replace('/auth/login');
     }
   };
 
-  const handleSkip = () => {
+  const handleSkip = async () => {
     console.log('User skipped onboarding, navigating to login');
+    await AsyncStorage.setItem('has_seen_onboarding', 'true');
     router.replace('/auth/login');
   };
 

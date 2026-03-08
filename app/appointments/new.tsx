@@ -32,6 +32,7 @@ interface Client {
 interface TimeSlot {
   time: string;
   available: boolean;
+  endTime?: string;
 }
 
 export default function NewAppointmentScreen() {
@@ -46,6 +47,7 @@ export default function NewAppointmentScreen() {
   const [date, setDate] = useState(new Date());
   const [showDatePicker, setShowDatePicker] = useState(false);
   const [time, setTime] = useState('09:00');
+  const [selectedBlocks, setSelectedBlocks] = useState<string[]>([]);
   const [notes, setNotes] = useState('');
   const [serviceCost, setServiceCost] = useState('');
   const [sendWhatsApp, setSendWhatsApp] = useState(true);
@@ -120,6 +122,7 @@ export default function NewAppointmentScreen() {
         return;
       }
       setDayIsClosed(false);
+      setSelectedBlocks([]);
 
       const startHour = parseInt(dayConfig.startTime.split(':')[0]);
       const startMin = parseInt(dayConfig.startTime.split(':')[1]);
@@ -164,6 +167,14 @@ export default function NewAppointmentScreen() {
       return;
     }
 
+    // Calcular end_time basado en bloques seleccionados
+    const lastBlock = selectedBlocks.length > 0 
+      ? selectedBlocks[selectedBlocks.length - 1] 
+      : time;
+    const [lh, lm] = lastBlock.split(':').map(Number);
+    const endMinutes = lh * 60 + lm + 30;
+    const calculatedEndTime = `${Math.floor(endMinutes / 60).toString().padStart(2, '0')}:${(endMinutes % 60).toString().padStart(2, '0')}`;
+
     const selectedSlot = timeSlots.find((slot) => slot.time === time);
     if (!selectedSlot || !selectedSlot.available) {
       setErrorModal({ visible: true, message: 'El horario seleccionado no está disponible. Por favor elige otro.' });
@@ -182,6 +193,7 @@ export default function NewAppointmentScreen() {
         status: 'Pendiente',
         notes: notes.trim() || undefined,
         service_cost: serviceCost ? parseFloat(serviceCost) : 0,
+        endTime: calculatedEndTime,
       };
 
       console.log('[NewAppointment] Creating appointment:', newAppointment);
@@ -287,9 +299,22 @@ export default function NewAppointmentScreen() {
               <Text style={styles.dayClosedSubtext}>Selecciona otro día o actualiza tu horario en Ajustes</Text>
             </View>
           ) : (
+          <>
+          {selectedBlocks.length > 0 && (
+            <View style={styles.durationBadge}>
+              <Text style={styles.durationText}>
+                ⏱ {selectedBlocks[0]} → {(() => { const [h,m] = selectedBlocks[selectedBlocks.length-1].split(':').map(Number); const e = h*60+m+30; return `${Math.floor(e/60).toString().padStart(2,'0')}:${(e%60).toString().padStart(2,'0')}`; })()} · {selectedBlocks.length * 30} min
+              </Text>
+              <TouchableOpacity onPress={() => { setSelectedBlocks([]); setTime('09:00'); }}>
+                <Text style={styles.durationClear}>✕ Limpiar</Text>
+              </TouchableOpacity>
+            </View>
+          )}
           <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.timeSlotsContainer}>
             {timeSlots.map((slot) => {
-              const isSelected = slot.time === time;
+              const isSelected = selectedBlocks.includes(slot.time);
+              const isFirst = slot.time === selectedBlocks[0];
+              const isLast = slot.time === selectedBlocks[selectedBlocks.length - 1];
               const slotAvailable = slot.available;
               
               return (
@@ -300,7 +325,29 @@ export default function NewAppointmentScreen() {
                     isSelected && styles.timeSlotSelected,
                     !slotAvailable && styles.timeSlotDisabled,
                   ]}
-                  onPress={() => slotAvailable && setTime(slot.time)}
+                  onPress={() => {
+                    if (!slotAvailable) return;
+                    if (selectedBlocks.length === 0) {
+                      // Primer bloque — inicio
+                      setSelectedBlocks([slot.time]);
+                      setTime(slot.time);
+                    } else {
+                      const firstIdx = timeSlots.findIndex(s => s.time === selectedBlocks[0]);
+                      const thisIdx = timeSlots.findIndex(s => s.time === slot.time);
+                      if (thisIdx < firstIdx) {
+                        // Clicked before start — reset
+                        setSelectedBlocks([slot.time]);
+                        setTime(slot.time);
+                      } else {
+                        // Extend selection — check all slots in between are available
+                        const range = timeSlots.slice(firstIdx, thisIdx + 1);
+                        const allAvailable = range.every(s => s.available);
+                        if (allAvailable) {
+                          setSelectedBlocks(range.map(s => s.time));
+                        }
+                      }
+                    }
+                  }}
                   disabled={!slotAvailable}
                 >
                   <Text
@@ -316,6 +363,7 @@ export default function NewAppointmentScreen() {
               );
             })}
           </ScrollView>
+          </>
           )}
         </View>
 
@@ -573,6 +621,28 @@ const styles = StyleSheet.create({
   dayClosedContainer: { backgroundColor: '#FEF2F2', borderRadius: 12, padding: 16, marginTop: 8 },
   dayClosedText: { fontSize: 15, fontWeight: '600', color: '#EF4444', textAlign: 'center' },
   dayClosedSubtext: { fontSize: 13, color: '#9CA3AF', textAlign: 'center', marginTop: 4 },
+  durationBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: '#ECFDF5',
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    marginBottom: 8,
+    borderWidth: 1,
+    borderColor: '#10B981',
+  },
+  durationText: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: '#10B981',
+  },
+  durationClear: {
+    fontSize: 12,
+    color: '#EF4444',
+    fontWeight: '600',
+  },
   timeSlotsContainer: {
     flexDirection: 'row',
   },

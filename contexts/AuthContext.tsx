@@ -169,6 +169,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     try {
       setAuthLoading(true);
       await supabase.auth.signOut();
+      const { router } = await import('expo-router');
+      router.replace('/auth/login');
     } catch (error) {
       console.error('[Auth] Sign out error:', error);
     } finally {

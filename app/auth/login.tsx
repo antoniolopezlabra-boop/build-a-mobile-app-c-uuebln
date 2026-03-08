@@ -9,6 +9,7 @@ import {
   ActivityIndicator,
 } from 'react-native';
 import { useRouter } from 'expo-router';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { colors } from '@/styles/commonStyles';
 import { ConfirmModal } from '@/components/button';
@@ -41,6 +42,7 @@ export default function LoginScreen() {
     try {
       await login(email, password);
       console.log('[Login] Login successful, navigating to home with reset');
+      await AsyncStorage.setItem('has_seen_onboarding', 'true');
       
       // Use router.replace to clear navigation stack
       // This prevents going back to auth screens

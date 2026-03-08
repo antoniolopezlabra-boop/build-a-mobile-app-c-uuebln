@@ -2,6 +2,7 @@ import { useEffect, useRef } from 'react';
 import { useRouter } from 'expo-router';
 import { View, ActivityIndicator, StyleSheet, Text } from 'react-native';
 import { useAuth } from '@/contexts/AuthContext';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { supabase } from '@/lib/supabase';
 import { colors } from '@/styles/commonStyles';
 
@@ -11,20 +12,21 @@ export default function Index() {
   const hasNavigated = useRef(false);
 
   useEffect(() => {
-    if (loading) {
-      hasNavigated.current = false;
-      return;
-    }
+    if (loading) return;
     if (hasNavigated.current) return;
     hasNavigated.current = true;
 
-    console.log('[Index] Navigating. User:', user ? user.email : 'none');
+    console.log('[Index] Navigating. User:', user ? user.email : 'none', 'loading:', loading);
 
     const navigate = async () => {
       if (user) {
-        // Esperar a que la sesión esté completamente lista
-        await new Promise(resolve => setTimeout(resolve, 500));
-        const { data: { user: authUser } } = await supabase.auth.getUser();
+        // Esperar a que la sesión de Supabase esté activa
+        let authUser = null;
+        for (let i = 0; i < 10; i++) {
+          const { data } = await supabase.auth.getUser();
+          if (data?.user) { authUser = data.user; break; }
+          await new Promise(resolve => setTimeout(resolve, 300));
+        }
         if (!authUser) { router.replace('/auth/onboarding'); return; }
 
         console.log('[Index] Auth UUID:', authUser.id);
@@ -45,7 +47,7 @@ export default function Index() {
           router.replace('/(tabs)/(home)');
         }
       } else {
-        router.replace('/auth/onboarding');
+        router.replace('/auth/login');
       }
     };
     navigate();

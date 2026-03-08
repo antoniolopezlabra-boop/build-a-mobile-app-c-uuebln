@@ -75,7 +75,7 @@ export default function SettingsScreen() {
     try {
       await signOut();
     } finally {
-      router.replace('/auth/onboarding');
+      router.replace('/auth/login');
     }
   };
 
