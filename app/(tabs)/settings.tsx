@@ -7,6 +7,7 @@ import {
   ScrollView,
   TouchableOpacity,
   ActivityIndicator,
+  Switch,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
@@ -34,6 +35,8 @@ export default function SettingsScreen() {
   const [deleteModal, setDeleteModal] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [whatsappConfig, setWhatsappConfig] = useState<WhatsAppConfig | null>(null);
+  const [allowOverlapping, setAllowOverlapping] = useState(false);
+  const [savingOverlap, setSavingOverlap] = useState(false);
   const [subscription, setSubscription] = useState<Subscription | null>(null);
   const [loading, setLoading] = useState(true);
 
@@ -58,6 +61,10 @@ export default function SettingsScreen() {
         apiGet<Subscription>('/api/subscription').catch(() => null),
       ]);
       if (whatsappData) setCached('settings_whatsapp', whatsappData);
+      // Cargar configuración de solapamiento
+      const { supabase } = await import('@/lib/supabase');
+      const { data: bpData } = await supabase.from('business_profiles').select('allow_overlapping').eq('user_id', user?.id).single();
+      if (bpData) setAllowOverlapping(bpData.allow_overlapping || false);
       if (subscriptionData) setCached('settings_subscription', subscriptionData);
       setWhatsappConfig(whatsappData);
       setSubscription(subscriptionData);
@@ -76,6 +83,22 @@ export default function SettingsScreen() {
       await signOut();
     } finally {
       router.replace('/auth/login');
+    }
+  };
+
+  const handleOverlappingToggle = async (value: boolean) => {
+    setAllowOverlapping(value);
+    setSavingOverlap(true);
+    try {
+      const { supabase } = await import('@/lib/supabase');
+      await supabase.from('business_profiles')
+        .update({ allow_overlapping: value })
+        .eq('user_id', user?.id);
+    } catch (e) {
+      console.error('Error saving overlapping:', e);
+      setAllowOverlapping(!value); // revert
+    } finally {
+      setSavingOverlap(false);
     }
   };
 
@@ -187,6 +210,25 @@ export default function SettingsScreen() {
                 color={colors.textSecondary}
               />
             </TouchableOpacity>
+            <View style={styles.settingItem}>
+              <View style={styles.settingLeft}>
+                <IconSymbol android_material_icon_name="event-available" size={24} color={colors.text} />
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.settingText}>Citas simultáneas</Text>
+                  <Text style={{ fontSize: 11, color: colors.textSecondary, marginTop: 2 }}>
+                    Permite sobreponer citas bajo confirmación
+                  </Text>
+                </View>
+              </View>
+              <Switch
+                value={allowOverlapping}
+                onValueChange={handleOverlappingToggle}
+                trackColor={{ false: '#E2E8F0', true: '#10B981' }}
+                thumbColor={allowOverlapping ? '#fff' : '#fff'}
+                disabled={savingOverlap}
+              />
+            </View>
+
           </View>
 
           {/* WHATSAPP BUSINESS */}

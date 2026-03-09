@@ -265,7 +265,7 @@ export async function apiPost<T>(path: string, body: any): Promise<T> {
         date: body.date,
         start_time: startTime,
         end_time: endTime,
-        status: 'Pendiente',
+        status: body.isOverlapping ? 'En espera' : 'Pendiente',
         notes: body.notes || null,
         service_cost: body.service_cost || 0,
         whatsapp_notification: body.sendWhatsApp || false,

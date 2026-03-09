@@ -28,7 +28,7 @@ interface Appointment {
   date: string;
   time: string;
   service: string;
-  status: 'Confirmada' | 'Pendiente' | 'Cancelada' | 'Completada' | 'No asistió' | 'Reagendada' | 'Pagado';
+  status: 'Confirmada' | 'Pendiente' | 'Cancelada' | 'Completada' | 'No asistió' | 'Reagendada' | 'Pagado' | 'En espera';
   notes?: string | null;
   client: Client;
   clientId: string;
@@ -95,6 +95,8 @@ export default function AppointmentDetailScreen() {
         return '#F97316';
       case 'Reagendada':
         return '#3B82F6';
+      case 'En espera':
+        return '#8B5CF6';
       default:
         return colors.text;
     }
@@ -110,6 +112,7 @@ export default function AppointmentDetailScreen() {
       await apiPatch(`/api/appointments/${appointment.id}`, { status: newStatus });
       invalidateCache('dashboard_stats');
       invalidateCache('today_appointments');
+      invalidateCache('week_appointments');
       invalidateCache('appointments_list');
       invalidateCache('reports_stats');
       invalidateCache('reports_recent');
@@ -175,6 +178,12 @@ export default function AppointmentDetailScreen() {
         break;
       case 'delete':
         handleDelete();
+        break;
+      case 'approve':
+        handleStatusChange('Confirmada');
+        break;
+      case 'reject':
+        handleStatusChange('Cancelada');
         break;
     }
   };
@@ -331,6 +340,36 @@ export default function AppointmentDetailScreen() {
         <View style={styles.actionsSection}>
           <Text style={styles.sectionTitle}>Acciones</Text>
           
+          {appointment.status === 'En espera' && (
+            <View>
+              <View style={{ backgroundColor: '#F3E8FF', borderRadius: 12, padding: 12, marginBottom: 12, borderWidth: 1, borderColor: '#8B5CF6' }}>
+                <Text style={{ color: '#8B5CF6', fontWeight: '700', fontSize: 13, marginBottom: 4 }}>⏳ Cita en espera de confirmación</Text>
+                <Text style={{ color: '#6B7280', fontSize: 12 }}>Esta cita se solapa con otro servicio. Revisa tu agenda y decide si puedes atenderla.</Text>
+              </View>
+              <TouchableOpacity
+                style={[styles.actionButton, { backgroundColor: '#10B981', marginBottom: 10 }]}
+                onPress={() => showConfirmation('approve', 'Aprobar cita', '¿Confirmas que puedes atender esta cita simultánea?')}
+              >
+                <IconSymbol android_material_icon_name="check-circle" size={24} color="#fff" />
+                <Text style={styles.actionButtonText}>✅ Aprobar cita</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.actionButton, { backgroundColor: '#EF4444', marginBottom: 10 }]}
+                onPress={() => showConfirmation('reject', 'Rechazar cita', '¿Deseas rechazar esta cita? El cliente será notificado.')}
+              >
+                <IconSymbol android_material_icon_name="cancel" size={24} color="#fff" />
+                <Text style={styles.actionButtonText}>❌ Rechazar cita</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.actionButton, { backgroundColor: '#3B82F6' }]}
+                onPress={handleReschedule}
+              >
+                <IconSymbol android_material_icon_name="event" size={24} color="#fff" />
+                <Text style={styles.actionButtonText}>📅 Modificar horario</Text>
+              </TouchableOpacity>
+            </View>
+          )}
+
           {appointment.status === 'Pendiente' && (
             <TouchableOpacity
               style={[styles.actionButton, styles.confirmButton]}

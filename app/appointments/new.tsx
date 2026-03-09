@@ -33,6 +33,7 @@ interface TimeSlot {
   time: string;
   available: boolean;
   endTime?: string;
+  isOverlap?: boolean;
 }
 
 export default function NewAppointmentScreen() {
@@ -54,11 +55,23 @@ export default function NewAppointmentScreen() {
   
   const [timeSlots, setTimeSlots] = useState<TimeSlot[]>([]);
   const [dayIsClosed, setDayIsClosed] = useState(false);
+  const [allowOverlapping, setAllowOverlapping] = useState(false);
   const [errorModal, setErrorModal] = useState({ visible: false, message: '' });
 
   useEffect(() => {
     loadClients();
+    loadOverlapConfig();
   }, []);
+
+  const loadOverlapConfig = async () => {
+    try {
+      const { supabase } = await import('@/lib/supabase');
+      const { getCurrentUserId } = await import('@/utils/api');
+      const userId = await getCurrentUserId();
+      const { data } = await supabase.from('business_profiles').select('allow_overlapping').eq('user_id', userId).single();
+      if (data) setAllowOverlapping(data.allow_overlapping || false);
+    } catch (e) {}
+  };
 
   useEffect(() => {
     checkAvailability();
@@ -141,9 +154,17 @@ export default function NewAppointmentScreen() {
         const hour = Math.floor(totalMin / 60);
         const minute = totalMin % 60;
         const timeString = `${hour.toString().padStart(2, '0')}:${minute.toString().padStart(2, '0')}`;
-        const isBooked = dateAppointments.some((appt: any) => appt.time === timeString);
+        const slotMin = hour * 60 + minute;
+        const isBooked = dateAppointments.some((appt: any) => {
+          const [sh, sm] = (appt.time || appt.start_time || '00:00').split(':').map(Number);
+          const [eh, em] = (appt.endTime || appt.end_time || '00:00').split(':').map(Number);
+          const apptStart = sh * 60 + sm;
+          const apptEnd = eh * 60 + em;
+          return slotMin >= apptStart && slotMin < apptEnd;
+        });
+        const isOverlap = isBooked && allowOverlapping;
         const isPast = isToday && (hour < new Date().getHours() || (hour === new Date().getHours() && minute <= new Date().getMinutes()));
-        slots.push({ time: timeString, available: !isBooked && !isPast });
+        slots.push({ time: timeString, available: (!isBooked || isOverlap) && !isPast, isOverlap });
       }
 
       setTimeSlots(slots);
@@ -194,6 +215,7 @@ export default function NewAppointmentScreen() {
         notes: notes.trim() || undefined,
         service_cost: serviceCost ? parseFloat(serviceCost) : 0,
         endTime: calculatedEndTime,
+        isOverlapping: selectedBlocks.some(b => timeSlots.find(s => s.time === b)?.isOverlap),
       };
 
       console.log('[NewAppointment] Creating appointment:', newAppointment);
@@ -315,6 +337,7 @@ export default function NewAppointmentScreen() {
               const isSelected = selectedBlocks.includes(slot.time);
               const isFirst = slot.time === selectedBlocks[0];
               const isLast = slot.time === selectedBlocks[selectedBlocks.length - 1];
+              const isOverlap = slot.isOverlap && !isSelected;
               const slotAvailable = slot.available;
               
               return (
@@ -324,6 +347,7 @@ export default function NewAppointmentScreen() {
                     styles.timeSlot,
                     isSelected && styles.timeSlotSelected,
                     !slotAvailable && styles.timeSlotDisabled,
+                    isOverlap && styles.timeSlotOverlap,
                   ]}
                   onPress={() => {
                     if (!slotAvailable) return;
@@ -355,10 +379,12 @@ export default function NewAppointmentScreen() {
                       styles.timeSlotText,
                       isSelected && styles.timeSlotTextSelected,
                       !slotAvailable && styles.timeSlotTextDisabled,
+                      isOverlap && { color: '#F59E0B' },
                     ]}
                   >
                     {slot.time}
                   </Text>
+                  {slot.isOverlap && <Text style={{ fontSize: 8, color: '#F59E0B' }}>⚡</Text>}
                 </TouchableOpacity>
               );
             })}
@@ -642,6 +668,11 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: '#EF4444',
     fontWeight: '600',
+  },
+  timeSlotOverlap: {
+    borderWidth: 1,
+    borderColor: '#F59E0B',
+    backgroundColor: '#FFFBEB',
   },
   timeSlotsContainer: {
     flexDirection: 'row',
