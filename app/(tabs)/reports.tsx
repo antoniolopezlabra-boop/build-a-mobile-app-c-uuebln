@@ -2,6 +2,7 @@ import { getTodayString } from '@/utils/dateUtils';
 import React, { useEffect, useState, useCallback } from 'react';
 import { useFocusEffect } from '@react-navigation/native';
 import { useRouter } from 'expo-router';
+import { usePlan } from '@/contexts/PlanContext';
 import { View, Text, ScrollView, ActivityIndicator, StyleSheet, TouchableOpacity } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { supabase } from '@/lib/supabase';
@@ -46,6 +47,7 @@ const STATUS_CONFIG: Record<string, { color: string; bg: string; label: string }
 };
 
 export default function ReportsScreen() {
+  const { canViewReports, isGratuito } = usePlan();
   const router = useRouter();
   const [loading, setLoading] = useState(true);
   const [stats, setStats] = useState<Stats | null>(null);
@@ -169,6 +171,21 @@ export default function ReportsScreen() {
   const tabAppointments = activeTab === 'hoy' ? stats?.todayAppointments
     : activeTab === 'semana' ? stats?.weekAppointments : stats?.monthAppointments;
 
+  if (!canViewReports) {
+    return (
+      <SafeAreaView style={styles.container}>
+        <View style={styles.paywallContainer}>
+          <Text style={styles.paywallIcon}>📊</Text>
+          <Text style={styles.paywallTitle}>Reportes disponibles en Plan Básico</Text>
+          <Text style={styles.paywallDesc}>Accede a reportes de ingresos, citas completadas y clientes con el Plan Básico o Premium.</Text>
+          <TouchableOpacity style={styles.paywallButton} onPress={() => router.push('/settings/subscription')}>
+            <Text style={styles.paywallButtonText}>Ver planes →</Text>
+          </TouchableOpacity>
+        </View>
+      </SafeAreaView>
+    );
+  }
+
   return (
     <SafeAreaView style={styles.container}>
       <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.scroll}>
@@ -291,6 +308,41 @@ export default function ReportsScreen() {
 }
 
 const styles = StyleSheet.create({
+  paywallContainer: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 32,
+  },
+  paywallIcon: {
+    fontSize: 64,
+    marginBottom: 16,
+  },
+  paywallTitle: {
+    fontSize: 20,
+    fontWeight: '700',
+    color: '#0F172A',
+    textAlign: 'center',
+    marginBottom: 12,
+  },
+  paywallDesc: {
+    fontSize: 14,
+    color: '#64748B',
+    textAlign: 'center',
+    lineHeight: 22,
+    marginBottom: 24,
+  },
+  paywallButton: {
+    backgroundColor: '#10B981',
+    paddingHorizontal: 28,
+    paddingVertical: 14,
+    borderRadius: 12,
+  },
+  paywallButtonText: {
+    color: '#fff',
+    fontWeight: '700',
+    fontSize: 15,
+  },
   container: { flex: 1, backgroundColor: '#F8FAFC' },
   loadingContainer: { flex: 1, justifyContent: 'center', alignItems: 'center' },
   scroll: { paddingBottom: 100 },

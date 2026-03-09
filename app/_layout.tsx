@@ -5,6 +5,7 @@ import { useEffect } from 'react';
 LogBox.ignoreAllLogs();
 import { StatusBar } from 'expo-status-bar';
 import { AuthProvider, useAuth } from '@/contexts/AuthContext';
+import { PlanProvider } from '@/contexts/PlanContext';
 import { AdminProvider } from '@/contexts/AdminContext';
 import React from 'react';
 
@@ -28,11 +29,13 @@ function NavigationGuard() {
 export default function RootLayout() {
   return (
     <AuthProvider>
+      <PlanProvider>
       <AdminProvider>
         <NavigationGuard />
         <Stack screenOptions={{ headerShown: false }} />
         <StatusBar style="dark" />
       </AdminProvider>
+      </PlanProvider>
     </AuthProvider>
   );
 }

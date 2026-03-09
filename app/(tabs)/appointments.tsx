@@ -14,6 +14,7 @@ import { apiGet } from '@/utils/api';
 import React, { useEffect, useState, useCallback } from 'react';
 import { IconSymbol } from '@/components/IconSymbol';
 import { useRouter, useFocusEffect } from 'expo-router';
+import { usePlan } from '@/contexts/PlanContext';
 import { Calendar } from 'react-native-calendars';
 
 interface ApiAppointment {
@@ -34,6 +35,7 @@ type ViewMode = 'month' | 'week' | 'day';
 
 export default function AppointmentsScreen() {
   const router = useRouter();
+  const { canSchedule } = usePlan();
   const [loading, setLoading] = useState(true);
   const [appointments, setAppointments] = useState<ApiAppointment[]>([]);
   const [selectedDate, setSelectedDate] = useState(new Date().toISOString().split('T')[0]);
@@ -122,6 +124,10 @@ export default function AppointmentsScreen() {
 
   const handleNewAppointment = () => {
     console.log('[Appointments] Navigate to new appointment');
+    if (!canSchedule) {
+      router.push('/settings/subscription');
+      return;
+    }
     router.push('/appointments/new');
   };
 
@@ -277,7 +283,7 @@ export default function AppointmentsScreen() {
         </View>
       </ScrollView>
 
-      <TouchableOpacity style={styles.fab} onPress={handleNewAppointment}>
+      <TouchableOpacity style={[styles.fab, !canSchedule && { backgroundColor: '#94A3B8' }]} onPress={handleNewAppointment}>
         <IconSymbol
           ios_icon_name="plus"
           android_material_icon_name="add"

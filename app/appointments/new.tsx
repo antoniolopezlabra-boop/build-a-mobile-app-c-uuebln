@@ -20,6 +20,7 @@ import { invalidateCache } from '@/utils/cache';
 import React, { useEffect, useState } from 'react';
 import { IconSymbol } from '@/components/IconSymbol';
 import { useRouter } from 'expo-router';
+import { usePlan } from '@/contexts/PlanContext';
 import { ConfirmModal } from '@/components/button';
 import DateTimePicker from '@react-native-community/datetimepicker';
 
@@ -38,6 +39,7 @@ interface TimeSlot {
 
 export default function NewAppointmentScreen() {
   const router = useRouter();
+  const { canSchedule, isGratuito } = usePlan();
   const [loading, setLoading] = useState(false);
   const [clients, setClients] = useState<Client[]>([]);
   const [selectedClient, setSelectedClient] = useState<Client | null>(null);
@@ -176,8 +178,14 @@ export default function NewAppointmentScreen() {
 
   const handleSave = async () => {
     console.log('[NewAppointment] Saving new appointment');
+    console.log('[NewAppointment] canSchedule:', canSchedule, 'isGratuito:', isGratuito);
     Keyboard.dismiss();
-    
+
+    if (!canSchedule) {
+      setErrorModal({ visible: true, message: '⚠️ Tu plan Gratuito no permite agendar citas. Actualiza a Plan Básico para comenzar.' });
+      return;
+    }
+
     if (!selectedClient) {
       setErrorModal({ visible: true, message: 'Por favor selecciona un cliente' });
       return;

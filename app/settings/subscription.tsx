@@ -23,7 +23,7 @@ interface Subscription {
 
 const PLAN_FEATURES = {
   Básico: [
-    'Hasta 50 citas por mes',
+    'Citas ilimitadas',
     'Gestión de clientes ilimitada',
     'Calendario y recordatorios',
     'Reportes básicos',

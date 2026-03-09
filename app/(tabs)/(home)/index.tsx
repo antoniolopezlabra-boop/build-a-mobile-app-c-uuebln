@@ -10,6 +10,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
+import { usePlan } from '@/contexts/PlanContext';
 import { useFocusEffect } from '@react-navigation/native';
 import { colors } from '@/styles/commonStyles';
 import MaterialIcons from "@expo/vector-icons/MaterialIcons";
@@ -39,6 +40,7 @@ interface TodayAppointment {
 export default function HomeScreen() {
   const router = useRouter();
   const { user, businessProfile, loading: authLoading } = useAuth();
+  const { canSchedule, isGratuito } = usePlan();
   console.log("[Home] user:", JSON.stringify(user));
   const [loading, setLoading] = useState(true);
   const [stats, setStats] = useState<DashboardStats>({
@@ -150,6 +152,17 @@ export default function HomeScreen() {
           </View>
         </View>
 
+        {isGratuito ? (
+          <View style={styles.upgradeCard}>
+            <Text style={styles.upgradeIcon}>🚀</Text>
+            <Text style={styles.upgradeTitle}>¡Bienvenido a VYLTA!</Text>
+            <Text style={styles.upgradeDesc}>Ya tienes tu negocio configurado. Activa el Plan Básico para comenzar a agendar citas y automatizar tus recordatorios por WhatsApp.</Text>
+            <TouchableOpacity style={styles.upgradeButton} onPress={() => router.push('/settings/subscription')}>
+              <Text style={styles.upgradeButtonText}>Ver planes →</Text>
+            </TouchableOpacity>
+          </View>
+        ) : (
+          <>
         <Text style={styles.sectionLabel}>📅 HOY</Text>
         <View style={styles.statsContainer}>
           <View style={styles.statCard}>
@@ -187,6 +200,8 @@ export default function HomeScreen() {
             <Text style={styles.statLabel}>Sin confirmar</Text>
           </View>
         </View>
+          </>
+        )}
 
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Citas de Hoy</Text>
@@ -290,6 +305,45 @@ const styles = StyleSheet.create({
   userName: { fontSize: 28, fontWeight: 'bold', color: colors.text },
   businessName: { fontSize: 16, color: colors.textSecondary, marginTop: 4 },
   date: { fontSize: 14, color: colors.textSecondary, marginBottom: 24 },
+  upgradeCard: {
+    backgroundColor: '#ECFDF5',
+    borderRadius: 16,
+    padding: 24,
+    marginHorizontal: 16,
+    marginBottom: 20,
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: '#10B981',
+  },
+  upgradeIcon: {
+    fontSize: 48,
+    marginBottom: 12,
+  },
+  upgradeTitle: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: '#0F172A',
+    marginBottom: 8,
+    textAlign: 'center',
+  },
+  upgradeDesc: {
+    fontSize: 13,
+    color: '#64748B',
+    textAlign: 'center',
+    lineHeight: 20,
+    marginBottom: 16,
+  },
+  upgradeButton: {
+    backgroundColor: '#10B981',
+    paddingHorizontal: 24,
+    paddingVertical: 12,
+    borderRadius: 10,
+  },
+  upgradeButtonText: {
+    color: '#fff',
+    fontWeight: '700',
+    fontSize: 14,
+  },
   sectionLabel: {
     fontSize: 11,
     fontWeight: '800',

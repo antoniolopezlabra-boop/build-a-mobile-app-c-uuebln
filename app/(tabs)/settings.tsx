@@ -11,6 +11,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
+import { usePlan } from '@/contexts/PlanContext';
 import { colors } from '@/styles/commonStyles';
 import { IconSymbol } from '@/components/IconSymbol';
 import { ConfirmModal } from '@/components/button';
@@ -31,6 +32,7 @@ interface Subscription {
 export default function SettingsScreen() {
   const router = useRouter();
   const { user, businessProfile, signOut } = useAuth();
+  const { canOverlap, isPremium } = usePlan();
   const [logoutModal, setLogoutModal] = useState(false);
   const [deleteModal, setDeleteModal] = useState(false);
   const [deleting, setDeleting] = useState(false);
@@ -87,6 +89,10 @@ export default function SettingsScreen() {
   };
 
   const handleOverlappingToggle = async (value: boolean) => {
+    if (!canOverlap) {
+      router.push('/settings/subscription');
+      return;
+    }
     setAllowOverlapping(value);
     setSavingOverlap(true);
     try {
@@ -105,7 +111,7 @@ export default function SettingsScreen() {
   const whatsappStatusText = whatsappConfig?.isConnected ? 'Conectado' : 'No configurado';
   const whatsappStatusColor = whatsappConfig?.isConnected ? colors.primary : colors.warning;
   const currentPlan = subscription?.planType || 'Básico';
-  const currentPrice = subscription?.price || '$990 MXN';
+  const currentPrice = subscription?.planType === 'Gratuito' ? '$0 MXN' : subscription?.planType === 'Premium' ? '$1,490 MXN' : '$990 MXN';
 
   const handleDeleteAccount = async () => {
     setDeleting(true);
@@ -214,7 +220,10 @@ export default function SettingsScreen() {
               <View style={styles.settingLeft}>
                 <IconSymbol android_material_icon_name="event-available" size={24} color={colors.text} />
                 <View style={{ flex: 1 }}>
-                  <Text style={styles.settingText}>Citas simultáneas</Text>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                    <Text style={styles.settingText}>Citas simultáneas</Text>
+                    {!isPremium && <View style={{ backgroundColor: '#F59E0B', borderRadius: 6, paddingHorizontal: 6, paddingVertical: 2 }}><Text style={{ fontSize: 10, color: '#fff', fontWeight: '700' }}>PREMIUM</Text></View>}
+                  </View>
                   <Text style={{ fontSize: 11, color: colors.textSecondary, marginTop: 2 }}>
                     Permite sobreponer citas bajo confirmación
                   </Text>
@@ -225,7 +234,7 @@ export default function SettingsScreen() {
                 onValueChange={handleOverlappingToggle}
                 trackColor={{ false: '#E2E8F0', true: '#10B981' }}
                 thumbColor={allowOverlapping ? '#fff' : '#fff'}
-                disabled={savingOverlap}
+                disabled={savingOverlap || !canOverlap}
               />
             </View>
 
