@@ -1,4 +1,6 @@
 import { Stack, useRouter, useSegments } from 'expo-router';
+import { StripeProvider } from '@stripe/stripe-react-native';
+import { STRIPE_PUBLISHABLE_KEY } from '@/services/stripe';
 import { LogBox } from 'react-native';
 import { useEffect } from 'react';
 
@@ -28,6 +30,7 @@ function NavigationGuard() {
 
 export default function RootLayout() {
   return (
+    <StripeProvider publishableKey={STRIPE_PUBLISHABLE_KEY} merchantIdentifier="merchant.com.vylta">
     <AuthProvider>
       <PlanProvider>
       <AdminProvider>
@@ -37,5 +40,6 @@ export default function RootLayout() {
       </AdminProvider>
       </PlanProvider>
     </AuthProvider>
+    </StripeProvider>
   );
 }
