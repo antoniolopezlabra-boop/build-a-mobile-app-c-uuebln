@@ -86,18 +86,26 @@ export default function AdminDashboard() {
           .select('created_at')
           .gte('created_at', new Date(Date.now() - 56 * 86400000).toISOString())
           .order('created_at'),
-        // Conteo real de suscripciones
-        supabase.from('subscription_plans').select('plan_type, status').eq('status', 'active'),
+        // Sin filtro de status — contar todos los planes sin importar cómo fueron asignados
+        supabase.from('subscription_plans').select('plan_type, status'),
       ]);
 
-      // Contar planes reales desde BD
+      console.log('[Admin] Plans raw:', plans);
+
+      // Contar planes reales desde BD — tolerante a acento y mayúsculas
       const basicCount = plans?.filter((p: any) => {
         const t = (p.plan_type || '').toLowerCase().trim();
-        return t === 'basico' || t === 'b\u00e1sico';
+        return t === 'basico' || t === 'básico';
       }).length || 0;
-      const premiumCount = plans?.filter((p: any) => p.plan_type?.toLowerCase().trim() === 'premium').length || 0;
-      const gratuitoCount = plans?.filter((p: any) => p.plan_type?.toLowerCase().trim() === 'gratuito').length || 0;
+      const premiumCount = plans?.filter((p: any) =>
+        (p.plan_type || '').toLowerCase().trim() === 'premium'
+      ).length || 0;
+      const gratuitoCount = plans?.filter((p: any) =>
+        (p.plan_type || '').toLowerCase().trim() === 'gratuito'
+      ).length || 0;
       const mrr = basicCount * 990 + premiumCount * 1490;
+
+      console.log('[Admin] Counts — basic:', basicCount, 'premium:', premiumCount, 'gratuito:', gratuitoCount);
 
       const activeTenants = sessions?.length || 0;
       const retentionRate = totalTenants ? Math.round((activeTenants / (totalTenants || 1)) * 100) : 0;
@@ -153,7 +161,6 @@ export default function AdminDashboard() {
 
   return (
     <SafeAreaView style={styles.container}>
-      {/* Header */}
       <View style={styles.header}>
         <TouchableOpacity onPress={async () => { await signOut(); router.replace('/auth/onboarding'); }}>
           <Text style={styles.backBtn}>⏻ Salir</Text>
@@ -169,7 +176,6 @@ export default function AdminDashboard() {
 
       <ScrollView contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>
 
-        {/* KPIs */}
         <Text style={styles.sectionTitle}>📊 Resumen Global</Text>
         <View style={styles.kpiGrid}>
           <TouchableOpacity style={[styles.kpiCard, { borderLeftColor: '#10B981' }]} onPress={() => router.push('/admin/tenants')}>
@@ -194,7 +200,6 @@ export default function AdminDashboard() {
           </View>
         </View>
 
-        {/* Suscripciones — DATOS REALES */}
         <Text style={styles.sectionTitle}>💳 Suscripciones</Text>
         <View style={styles.mrrCard}>
           <Text style={styles.mrrLabel}>MRR estimado</Text>
@@ -219,19 +224,16 @@ export default function AdminDashboard() {
           </View>
         </View>
 
-        {/* Gráfica citas */}
         <Text style={styles.sectionTitle}>📅 Citas — últimos 14 días</Text>
         <View style={styles.chartCard}>
           <BarChart data={data?.dailyCitas || []} color="#6366F1" />
         </View>
 
-        {/* Gráfica negocios */}
         <Text style={styles.sectionTitle}>🏢 Nuevos negocios — últimas 8 semanas</Text>
         <View style={styles.chartCard}>
           <BarChart data={data?.weeklyNegocios || []} color="#10B981" />
         </View>
 
-        {/* Acciones */}
         {isSuperAdmin && (
           <>
             <Text style={styles.sectionTitle}>⚡ Acciones</Text>
