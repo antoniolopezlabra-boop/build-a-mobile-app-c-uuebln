@@ -48,10 +48,13 @@ export default function NewAppointmentScreen() {
 
   const [service, setService] = useState('');
   const [date, setDate] = useState(new Date());
-  const [showDatePicker, setShowDatePicker] = useState(false);
 
-  // ─── Fecha temporal: la usamos mientras el usuario gira el scroll ────────
-  // Solo se aplica a `date` cuando presiona "Confirmar"
+  // Android: muestra el picker nativo directamente (sin modal wrapper)
+  // iOS: muestra nuestro modal con spinner + botón Confirmar
+  const [showDatePicker, setShowDatePicker] = useState(false);
+  const [showDateModal, setShowDateModal] = useState(false); // solo iOS
+
+  // Fecha temporal — solo para iOS modal; en Android se aplica directo al confirmar
   const [tempDate, setTempDate] = useState(new Date());
 
   const [time, setTime] = useState('09:00');
@@ -69,27 +72,44 @@ export default function NewAppointmentScreen() {
   const costInputRef = useRef<TextInput>(null);
   const notesInputRef = useRef<TextInput>(null);
 
-  // ─── Abrir picker: cerrar teclado primero, luego mostrar modal ───────────
+  // Cierra teclado y abre el selector correcto según plataforma
   const openDatePicker = () => {
     serviceInputRef.current?.blur();
     costInputRef.current?.blur();
     notesInputRef.current?.blur();
     Keyboard.dismiss();
-    // Sincronizar tempDate con la fecha actual antes de abrir
-    setTempDate(date);
-    setTimeout(() => setShowDatePicker(true), Platform.OS === 'android' ? 150 : 50);
+
+    if (Platform.OS === 'ios') {
+      // iOS: abre nuestro modal con spinner + botón Confirmar
+      setTempDate(date);
+      setTimeout(() => setShowDateModal(true), 50);
+    } else {
+      // Android: abre el DatePicker nativo directamente
+      // No necesita modal — el OS maneja el dialog con sus propios botones OK/Cancelar
+      setTimeout(() => setShowDatePicker(true), 150);
+    }
   };
 
-  // ─── Confirmar fecha: aplica tempDate a date y cierra modal ─────────────
-  const confirmDate = () => {
+  // iOS: confirmar fecha desde el modal
+  const confirmDateIOS = () => {
     setDate(tempDate);
-    setShowDatePicker(false);
+    setShowDateModal(false);
   };
 
-  // ─── Cancelar: descarta cambios y cierra modal ───────────────────────────
-  const cancelDate = () => {
-    setTempDate(date); // revertir
-    setShowDatePicker(false);
+  // iOS: cancelar sin aplicar cambios
+  const cancelDateIOS = () => {
+    setTempDate(date);
+    setShowDateModal(false);
+  };
+
+  // Android: el onChange del picker nativo ya trae la fecha confirmada por el usuario
+  const onAndroidDateChange = (_event: any, selected?: Date) => {
+    setShowDatePicker(false); // siempre cerrar el picker nativo
+    if (_event.type === 'set' && selected) {
+      // Usuario tocó OK en el dialog nativo
+      setDate(selected);
+    }
+    // Si _event.type === 'dismissed', usuario canceló — no hacemos nada
   };
 
   useEffect(() => {
@@ -124,7 +144,10 @@ export default function NewAppointmentScreen() {
     const slots: TimeSlot[] = [];
     for (let hour = 9; hour < 19; hour++) {
       for (let minute = 0; minute < 60; minute += 30) {
-        slots.push({ time: `${hour.toString().padStart(2, '0')}:${minute.toString().padStart(2, '0')}`, available: true });
+        slots.push({
+          time: `${hour.toString().padStart(2, '0')}:${minute.toString().padStart(2, '0')}`,
+          available: true,
+        });
       }
     }
     setTimeSlots(slots);
@@ -232,7 +255,6 @@ export default function NewAppointmentScreen() {
     weekday: 'long', year: 'numeric', month: 'long', day: 'numeric',
   });
 
-  // Preview de tempDate dentro del modal (se actualiza mientras el usuario gira el scroll)
   const formattedTempDate = tempDate.toLocaleDateString('es-MX', {
     weekday: 'long', day: 'numeric', month: 'long', year: 'numeric',
   });
@@ -433,52 +455,61 @@ export default function NewAppointmentScreen() {
         </ScrollView>
       </KeyboardAvoidingView>
 
-      {/* ─── Modal selector de fecha con botón Confirmar ─────────────────── */}
-      <Modal
-        visible={showDatePicker}
-        animationType="slide"
-        transparent={true}
-        onRequestClose={cancelDate}
-      >
-        <View style={styles.dateModalOverlay}>
-          <View style={styles.dateModalContent}>
+      {/* ─── Android: picker nativo directo (dialog del OS con OK/Cancelar) ── */}
+      {Platform.OS === 'android' && showDatePicker && (
+        <DateTimePicker
+          value={date}
+          mode="date"
+          display="default"
+          minimumDate={new Date()}
+          onChange={onAndroidDateChange}
+        />
+      )}
 
-            {/* Cabecera del modal */}
-            <View style={styles.dateModalHeader}>
-              <TouchableOpacity onPress={cancelDate} style={styles.dateModalCancel}>
-                <Text style={styles.dateModalCancelText}>Cancelar</Text>
+      {/* ─── iOS: modal propio con spinner + botón Confirmar ─────────────── */}
+      {Platform.OS === 'ios' && (
+        <Modal
+          visible={showDateModal}
+          animationType="slide"
+          transparent={true}
+          onRequestClose={cancelDateIOS}
+        >
+          <View style={styles.dateModalOverlay}>
+            <View style={styles.dateModalContent}>
+
+              <View style={styles.dateModalHeader}>
+                <TouchableOpacity onPress={cancelDateIOS} style={styles.dateModalCancelWrap}>
+                  <Text style={styles.dateModalCancelText}>Cancelar</Text>
+                </TouchableOpacity>
+                <Text style={styles.dateModalTitle}>Seleccionar fecha</Text>
+                <View style={{ width: 80 }} />
+              </View>
+
+              <View style={styles.datePreview}>
+                <Text style={styles.datePreviewText}>
+                  {formattedTempDate.charAt(0).toUpperCase() + formattedTempDate.slice(1)}
+                </Text>
+              </View>
+
+              <DateTimePicker
+                value={tempDate}
+                mode="date"
+                display="spinner"
+                minimumDate={new Date()}
+                onChange={(_event, selected) => {
+                  if (selected) setTempDate(selected);
+                }}
+                style={styles.datePicker}
+              />
+
+              <TouchableOpacity style={styles.dateConfirmBtn} onPress={confirmDateIOS}>
+                <Text style={styles.dateConfirmText}>Confirmar fecha</Text>
               </TouchableOpacity>
-              <Text style={styles.dateModalTitle}>Seleccionar fecha</Text>
-              <View style={{ width: 80 }} />
+
             </View>
-
-            {/* Preview de la fecha mientras el usuario gira el scroll */}
-            <View style={styles.datePreview}>
-              <Text style={styles.datePreviewText}>
-                {formattedTempDate.charAt(0).toUpperCase() + formattedTempDate.slice(1)}
-              </Text>
-            </View>
-
-            {/* El picker — onChange solo actualiza tempDate, NO date */}
-            <DateTimePicker
-              value={tempDate}
-              mode="date"
-              display="spinner"
-              minimumDate={new Date()}
-              onChange={(_event, selected) => {
-                if (selected) setTempDate(selected);
-              }}
-              style={styles.datePicker}
-            />
-
-            {/* Botón Confirmar — aquí sí aplica la fecha */}
-            <TouchableOpacity style={styles.dateConfirmBtn} onPress={confirmDate}>
-              <Text style={styles.dateConfirmText}>Confirmar fecha</Text>
-            </TouchableOpacity>
-
           </View>
-        </View>
-      </Modal>
+        </Modal>
+      )}
 
       {/* ─── Modal selector de clientes ──────────────────────────────────── */}
       <Modal
@@ -614,82 +645,40 @@ const styles = StyleSheet.create({
   saveButtonDisabled: { opacity: 0.6 },
   saveButtonText: { fontSize: 16, fontWeight: '600', color: '#ffffff' },
 
-  // ─── Modal de fecha ───────────────────────────────────────────────────────
+  // ─── Modal fecha (iOS) ────────────────────────────────────────────────────
   dateModalOverlay: {
-    flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.45)',
-    justifyContent: 'flex-end',
+    flex: 1, backgroundColor: 'rgba(0,0,0,0.45)', justifyContent: 'flex-end',
   },
   dateModalContent: {
-    backgroundColor: '#ffffff',
-    borderTopLeftRadius: 24,
-    borderTopRightRadius: 24,
-    paddingBottom: 32,
+    backgroundColor: '#ffffff', borderTopLeftRadius: 24, borderTopRightRadius: 24, paddingBottom: 32,
   },
   dateModalHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: 20,
-    paddingTop: 20,
-    paddingBottom: 12,
-    borderBottomWidth: 0.5,
-    borderBottomColor: '#E2E8F0',
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+    paddingHorizontal: 20, paddingTop: 20, paddingBottom: 12,
+    borderBottomWidth: 0.5, borderBottomColor: '#E2E8F0',
   },
-  dateModalTitle: {
-    fontSize: 16,
-    fontWeight: '700',
-    color: '#0F172A',
-  },
-  dateModalCancel: { width: 80 },
-  dateModalCancelText: {
-    fontSize: 15,
-    color: '#94A3B8',
-    fontWeight: '500',
-  },
+  dateModalTitle: { fontSize: 16, fontWeight: '700', color: '#0F172A' },
+  dateModalCancelWrap: { width: 80 },
+  dateModalCancelText: { fontSize: 15, color: '#94A3B8', fontWeight: '500' },
   datePreview: {
-    alignItems: 'center',
-    paddingVertical: 14,
-    paddingHorizontal: 20,
-    backgroundColor: '#F8FAFC',
-    marginHorizontal: 20,
-    marginTop: 16,
-    borderRadius: 12,
-    borderWidth: 0.5,
-    borderColor: '#E2E8F0',
+    alignItems: 'center', paddingVertical: 14, paddingHorizontal: 20,
+    backgroundColor: '#F8FAFC', marginHorizontal: 20, marginTop: 16,
+    borderRadius: 12, borderWidth: 0.5, borderColor: '#E2E8F0',
   },
-  datePreviewText: {
-    fontSize: 15,
-    fontWeight: '600',
-    color: '#10B981',
-    textTransform: 'capitalize',
-  },
-  datePicker: {
-    width: '100%',
-  },
+  datePreviewText: { fontSize: 15, fontWeight: '600', color: '#10B981', textTransform: 'capitalize' },
+  datePicker: { width: '100%' },
   dateConfirmBtn: {
-    backgroundColor: '#10B981',
-    marginHorizontal: 20,
-    marginTop: 8,
-    paddingVertical: 16,
-    borderRadius: 14,
-    alignItems: 'center',
+    backgroundColor: '#10B981', marginHorizontal: 20, marginTop: 8,
+    paddingVertical: 16, borderRadius: 14, alignItems: 'center',
   },
-  dateConfirmText: {
-    fontSize: 16,
-    fontWeight: '700',
-    color: '#ffffff',
-  },
+  dateConfirmText: { fontSize: 16, fontWeight: '700', color: '#ffffff' },
 
-  // ─── Modal de clientes ────────────────────────────────────────────────────
+  // ─── Modal clientes ───────────────────────────────────────────────────────
   modalOverlay: {
-    flex: 1, backgroundColor: 'rgba(0,0,0,0.5)',
-    justifyContent: 'flex-start', paddingTop: 100,
+    flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-start', paddingTop: 100,
   },
   modalContent: {
-    backgroundColor: '#ffffff',
-    borderTopLeftRadius: 20, borderTopRightRadius: 20,
-    maxHeight: '80%',
+    backgroundColor: '#ffffff', borderTopLeftRadius: 20, borderTopRightRadius: 20, maxHeight: '80%',
   },
   modalHeader: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
