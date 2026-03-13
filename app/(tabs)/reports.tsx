@@ -47,7 +47,8 @@ const STATUS_CONFIG: Record<string, { color: string; bg: string; label: string }
 };
 
 export default function ReportsScreen() {
-  const { canViewReports, isGratuito } = usePlan();
+  // Fix: también traer `loading` del PlanContext para no mostrar paywall mientras carga
+  const { canViewReports, isGratuito, loading: planLoading } = usePlan();
   const router = useRouter();
   const [loading, setLoading] = useState(true);
   const [stats, setStats] = useState<Stats | null>(null);
@@ -82,7 +83,6 @@ export default function ReportsScreen() {
       monthStart.setDate(1);
       const monthStartStr = monthStart.toISOString().split('T')[0];
 
-      const monthStartStr2 = monthStartStr;
       const [
         { data: todayApts },
         { data: weekApts },
@@ -103,7 +103,6 @@ export default function ReportsScreen() {
 
       setRecent((recentApts || []) as any);
 
-      // Calcular ingresos del mes
       const { data: revenueData } = await supabase
         .from('appointments')
         .select('service_cost')
@@ -155,7 +154,8 @@ export default function ReportsScreen() {
     return date.toLocaleDateString('es-MX', { day: 'numeric', month: 'short' });
   };
 
-  if (loading) {
+  // Fix: mostrar spinner mientras el plan está cargando — nunca mostrar paywall prematuramente
+  if (planLoading || loading) {
     return (
       <SafeAreaView style={styles.container}>
         <View style={styles.loadingContainer}>
@@ -165,12 +165,7 @@ export default function ReportsScreen() {
     );
   }
 
-  const completionRate = stats && stats.totalAppointments > 0
-    ? Math.round((stats.completedAppointments / stats.totalAppointments) * 100) : 0;
-
-  const tabAppointments = activeTab === 'hoy' ? stats?.todayAppointments
-    : activeTab === 'semana' ? stats?.weekAppointments : stats?.monthAppointments;
-
+  // Solo mostrar paywall cuando el plan ya cargó y definitivamente no tiene acceso
   if (!canViewReports) {
     return (
       <SafeAreaView style={styles.container}>
@@ -185,6 +180,12 @@ export default function ReportsScreen() {
       </SafeAreaView>
     );
   }
+
+  const completionRate = stats && stats.totalAppointments > 0
+    ? Math.round((stats.completedAppointments / stats.totalAppointments) * 100) : 0;
+
+  const tabAppointments = activeTab === 'hoy' ? stats?.todayAppointments
+    : activeTab === 'semana' ? stats?.weekAppointments : stats?.monthAppointments;
 
   return (
     <SafeAreaView style={styles.container}>
@@ -216,7 +217,6 @@ export default function ReportsScreen() {
           </View>
         </View>
 
-        {/* Fila 1 — Clientes y Citas */}
         <View style={styles.statsRow}>
           <View style={[styles.statCardLarge, { borderLeftColor: '#10B981' }]}>
             <Text style={styles.statEmoji}>👥</Text>
@@ -230,7 +230,6 @@ export default function ReportsScreen() {
           </View>
         </View>
 
-        {/* Fila 2 — Completadas y % */}
         <View style={styles.statsRow}>
           <View style={[styles.statCardLarge, { borderLeftColor: '#F59E0B' }]}>
             <Text style={styles.statEmoji}>✅</Text>
@@ -244,7 +243,6 @@ export default function ReportsScreen() {
           </View>
         </View>
 
-        {/* Fila 3 — Ingresos */}
         <Text style={styles.ingresoTitle}>💵 Finanzas del mes</Text>
         <View style={styles.statsRow}>
           <View style={[styles.statCardLarge, { borderLeftColor: '#10B981', backgroundColor: '#ECFDF5' }]}>
@@ -308,41 +306,12 @@ export default function ReportsScreen() {
 }
 
 const styles = StyleSheet.create({
-  paywallContainer: {
-    flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-    padding: 32,
-  },
-  paywallIcon: {
-    fontSize: 64,
-    marginBottom: 16,
-  },
-  paywallTitle: {
-    fontSize: 20,
-    fontWeight: '700',
-    color: '#0F172A',
-    textAlign: 'center',
-    marginBottom: 12,
-  },
-  paywallDesc: {
-    fontSize: 14,
-    color: '#64748B',
-    textAlign: 'center',
-    lineHeight: 22,
-    marginBottom: 24,
-  },
-  paywallButton: {
-    backgroundColor: '#10B981',
-    paddingHorizontal: 28,
-    paddingVertical: 14,
-    borderRadius: 12,
-  },
-  paywallButtonText: {
-    color: '#fff',
-    fontWeight: '700',
-    fontSize: 15,
-  },
+  paywallContainer: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 32 },
+  paywallIcon: { fontSize: 64, marginBottom: 16 },
+  paywallTitle: { fontSize: 20, fontWeight: '700', color: '#0F172A', textAlign: 'center', marginBottom: 12 },
+  paywallDesc: { fontSize: 14, color: '#64748B', textAlign: 'center', lineHeight: 22, marginBottom: 24 },
+  paywallButton: { backgroundColor: '#10B981', paddingHorizontal: 28, paddingVertical: 14, borderRadius: 12 },
+  paywallButtonText: { color: '#fff', fontWeight: '700', fontSize: 15 },
   container: { flex: 1, backgroundColor: '#F8FAFC' },
   loadingContainer: { flex: 1, justifyContent: 'center', alignItems: 'center' },
   scroll: { paddingBottom: 100 },
@@ -362,37 +331,10 @@ const styles = StyleSheet.create({
   heroMini: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   heroDot: { width: 8, height: 8, borderRadius: 4 },
   heroMiniText: { fontSize: 13, color: '#CBD5E1' },
-  statCardLarge: {
-    flex: 1,
-    backgroundColor: '#fff',
-    borderRadius: 14,
-    padding: 16,
-    borderLeftWidth: 4,
-    alignItems: 'center',
-    shadowColor: '#000',
-    shadowOpacity: 0.04,
-    shadowRadius: 6,
-    elevation: 2,
-  },
-  statValueLarge: {
-    fontSize: 32,
-    fontWeight: '800',
-    color: '#0F172A',
-    marginTop: 4,
-  },
-  statLabelLarge: {
-    fontSize: 13,
-    color: '#64748B',
-    marginTop: 4,
-    fontWeight: '500',
-  },
-  ingresoTitle: {
-    fontSize: 14,
-    fontWeight: '700',
-    color: '#64748B',
-    marginBottom: 8,
-    marginTop: 4,
-  },
+  statCardLarge: { flex: 1, backgroundColor: '#fff', borderRadius: 14, padding: 16, borderLeftWidth: 4, alignItems: 'center', shadowColor: '#000', shadowOpacity: 0.04, shadowRadius: 6, elevation: 2 },
+  statValueLarge: { fontSize: 32, fontWeight: '800', color: '#0F172A', marginTop: 4 },
+  statLabelLarge: { fontSize: 13, color: '#64748B', marginTop: 4, fontWeight: '500' },
+  ingresoTitle: { fontSize: 14, fontWeight: '700', color: '#64748B', marginBottom: 8, marginTop: 4, paddingHorizontal: 20 },
   statsRow: { flexDirection: 'row', paddingHorizontal: 20, gap: 10, marginBottom: 12 },
   statCard: { flex: 1, backgroundColor: '#fff', borderRadius: 14, padding: 14, borderLeftWidth: 3, shadowColor: '#000', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.05, shadowRadius: 4, elevation: 1 },
   statEmoji: { fontSize: 20, marginBottom: 6 },
