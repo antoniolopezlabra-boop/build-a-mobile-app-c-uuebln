@@ -1,5 +1,6 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import { supabase } from '@/lib/supabase';
+import { useAuth } from './AuthContext';
 
 interface AdminUser {
   id: string;
@@ -26,23 +27,27 @@ const AdminContext = createContext<AdminContextType>({
 });
 
 export function AdminProvider({ children }: { children: React.ReactNode }) {
+  const { user, loading: authLoading } = useAuth();
   const [adminUser, setAdminUser] = useState<AdminUser | null>(null);
   const [loading, setLoading] = useState(true);
 
-  const checkAdminAccess = async () => {
+  const checkAdminAccess = async (userId?: string) => {
+    const uid = userId ?? (await supabase.auth.getUser()).data.user?.id;
+    if (!uid) {
+      setAdminUser(null);
+      setLoading(false);
+      return;
+    }
     try {
-      const { data: { user } } = await supabase.auth.getUser();
-      console.log('[Admin] Checking user:', user?.id);
-      if (!user) { setAdminUser(null); setLoading(false); return; }
-
       const { data, error } = await supabase
         .from('vylta_admins')
         .select('*')
-        .eq('user_id', user.id)
+        .eq('user_id', uid)
         .eq('is_active', true)
         .single();
 
-      console.log('[Admin] DB result:', data, error);
+      console.log('[AdminContext] result for', uid, ':', data?.role ?? 'not admin', error?.code ?? '');
+
       if (error || !data) {
         setAdminUser(null);
       } else {
@@ -61,7 +66,16 @@ export function AdminProvider({ children }: { children: React.ReactNode }) {
     }
   };
 
-  useEffect(() => { checkAdminAccess(); }, []);
+  // Reaccionar al cambio de usuario (login/logout)
+  useEffect(() => {
+    if (authLoading) return;
+    if (!user?.id) {
+      setAdminUser(null);
+      setLoading(false);
+      return;
+    }
+    checkAdminAccess(user.id);
+  }, [user?.id, authLoading]);
 
   return (
     <AdminContext.Provider value={{
