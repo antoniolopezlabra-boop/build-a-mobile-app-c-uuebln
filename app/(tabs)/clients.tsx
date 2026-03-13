@@ -1,4 +1,3 @@
-
 import React, { useEffect, useState } from 'react';
 import {
   View,
@@ -8,7 +7,6 @@ import {
   TouchableOpacity,
   ActivityIndicator,
   TextInput,
-  Modal,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
@@ -17,6 +15,7 @@ import { IconSymbol } from '@/components/IconSymbol';
 import { ConfirmModal } from '@/components/button';
 import { getCached, setCached } from '@/utils/cache';
 import { apiGet } from '@/utils/api';
+import MaterialIcons from '@expo/vector-icons/MaterialIcons';
 
 interface Client {
   id: string;
@@ -33,261 +32,217 @@ interface Client {
 
 type FilterType = 'Todos' | 'Activos' | 'Inactivos';
 
+// Paleta de colores para avatares — asignado por inicial
+const AVATAR_COLORS = [
+  { bg: '#ECFDF5', fg: '#065F46' }, // green
+  { bg: '#EEF2FF', fg: '#3730A3' }, // indigo
+  { bg: '#FFF7ED', fg: '#92400E' }, // amber
+  { bg: '#FEF2F2', fg: '#991B1B' }, // red
+  { bg: '#F0FDF4', fg: '#166534' }, // emerald
+  { bg: '#F5F3FF', fg: '#5B21B6' }, // violet
+  { bg: '#ECFEFF', fg: '#155E75' }, // cyan
+  { bg: '#FDF4FF', fg: '#86198F' }, // fuchsia
+];
+
+const getAvatarColor = (name: string) => {
+  const idx = (name.charCodeAt(0) || 0) % AVATAR_COLORS.length;
+  return AVATAR_COLORS[idx];
+};
+
+const getInitials = (name: string) => {
+  const parts = name.trim().split(' ');
+  if (parts.length >= 2) return (parts[0][0] + parts[1][0]).toUpperCase();
+  return name.substring(0, 2).toUpperCase();
+};
+
+const formatLastVisit = (lastVisit: string | null | undefined) => {
+  if (!lastVisit) return null;
+  const date = new Date(lastVisit);
+  const diffDays = Math.ceil(Math.abs(new Date().getTime() - date.getTime()) / 86400000);
+  if (diffDays === 0) return 'Hoy';
+  if (diffDays === 1) return 'Ayer';
+  if (diffDays < 7) return `Hace ${diffDays} días`;
+  if (diffDays < 30) return `Hace ${Math.floor(diffDays / 7)} sem`;
+  if (diffDays < 365) return `Hace ${Math.floor(diffDays / 30)} meses`;
+  return `Hace ${Math.floor(diffDays / 365)} año${Math.floor(diffDays / 365) > 1 ? 's' : ''}`;
+};
+
 export default function ClientsScreen() {
   const router = useRouter();
   const [loading, setLoading] = useState(true);
   const [clients, setClients] = useState<Client[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
   const [filter, setFilter] = useState<FilterType>('Todos');
-  const [errorModal, setErrorModal] = useState<{ visible: boolean; message: string }>({
-    visible: false,
-    message: '',
-  });
-
+  const [errorModal, setErrorModal] = useState({ visible: false, message: '' });
   const [initialLoad, setInitialLoad] = useState(true);
 
-  useEffect(() => {
-    loadClients().then(() => setInitialLoad(false));
-  }, []);
+  useEffect(() => { loadClients().then(() => setInitialLoad(false)); }, []);
 
   useEffect(() => {
     if (initialLoad) return;
-    const timer = setTimeout(() => {
-      loadClients(searchQuery || undefined);
-    }, 400);
+    const timer = setTimeout(() => { loadClients(searchQuery || undefined); }, 400);
     return () => clearTimeout(timer);
   }, [searchQuery]);
 
   const loadClients = async (search?: string) => {
-    console.log('[Clients] Loading clients', search ? `with search: ${search}` : '');
     setLoading(true);
     try {
-      const endpoint = search
-        ? `/api/clients?search=${encodeURIComponent(search)}`
-        : '/api/clients';
+      const endpoint = search ? `/api/clients?search=${encodeURIComponent(search)}` : '/api/clients';
       const data = await apiGet<Client[]>(endpoint);
-      console.log('[Clients] Loaded:', data.length, 'clients');
-      setClients(data);
-      setCached('clients_list', data);
+      setClients(data); setCached('clients_list', data);
     } catch (error) {
-      console.error('[Clients] Failed to load:', error);
       setErrorModal({ visible: true, message: 'Error al cargar los clientes' });
     } finally {
       setLoading(false);
     }
   };
 
-  const getFilteredClients = () => {
-    let filtered = clients;
+  const filteredClients = clients.filter((c) => {
+    if (filter === 'Activos') return c.isActive !== false;
+    if (filter === 'Inactivos') return c.isActive === false;
+    return true;
+  });
 
-    // Apply status filter (client-side, search is handled server-side)
-    if (filter === 'Activos') {
-      filtered = filtered.filter((c) => c.isActive !== false);
-    } else if (filter === 'Inactivos') {
-      filtered = filtered.filter((c) => c.isActive === false);
-    }
-
-    return filtered;
-  };
-
-  const filteredClients = getFilteredClients();
-
-  const getInitials = (name: string) => {
-    const parts = name.trim().split(' ');
-    if (parts.length >= 2) {
-      return (parts[0][0] + parts[1][0]).toUpperCase();
-    }
-    return name.substring(0, 2).toUpperCase();
-  };
-
-  const formatLastVisit = (lastVisit: string | null | undefined) => {
-    if (!lastVisit) return 'Sin visitas';
-    const date = new Date(lastVisit);
-    const now = new Date();
-    const diffTime = Math.abs(now.getTime() - date.getTime());
-    const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
-    
-    if (diffDays === 0) return 'Hoy';
-    if (diffDays === 1) return 'Ayer';
-    if (diffDays < 7) return `Hace ${diffDays} días`;
-    if (diffDays < 30) return `Hace ${Math.floor(diffDays / 7)} semanas`;
-    if (diffDays < 365) return `Hace ${Math.floor(diffDays / 30)} meses`;
-    return `Hace ${Math.floor(diffDays / 365)} años`;
-  };
+  const activeCount   = clients.filter(c => c.isActive !== false).length;
+  const inactiveCount = clients.filter(c => c.isActive === false).length;
 
   if (loading) {
     return (
-      <SafeAreaView style={styles.container}>
-        <View style={styles.loadingContainer}>
-          <ActivityIndicator size="large" color={colors.primary} />
-        </View>
+      <SafeAreaView style={s.container}>
+        <View style={s.loading}><ActivityIndicator size="large" color={colors.primary} /></View>
       </SafeAreaView>
     );
   }
 
   return (
-    <SafeAreaView style={styles.container}>
+    <SafeAreaView style={s.container}>
       <ConfirmModal
         visible={errorModal.visible}
         title="Error"
         message={errorModal.message}
-        buttons={[
-          {
-            text: 'Aceptar',
-            onPress: () => setErrorModal({ visible: false, message: '' }),
-            style: 'cancel',
-          },
-        ]}
+        buttons={[{ text: 'Aceptar', onPress: () => setErrorModal({ visible: false, message: '' }), style: 'cancel' }]}
         onDismiss={() => setErrorModal({ visible: false, message: '' })}
       />
 
-      <View style={styles.header}>
-        <Text style={styles.title}>Clientes</Text>
-        
-        {/* Search bar */}
-        <View style={styles.searchContainer}>
-          <IconSymbol
-            android_material_icon_name="search"
-            size={20}
-            color={colors.textSecondary}
-          />
+      {/* Header */}
+      <View style={s.header}>
+        <View style={s.headerTop}>
+          <View>
+            <Text style={s.title}>Clientes</Text>
+            <Text style={s.subtitle}>{clients.length} registrados</Text>
+          </View>
+          <View style={s.headerStats}>
+            <View style={s.headerStat}>
+              <Text style={s.headerStatNum}>{activeCount}</Text>
+              <Text style={s.headerStatLabel}>Activos</Text>
+            </View>
+            <View style={[s.headerStat, { borderLeftWidth: 1, borderLeftColor: '#E2E8F0', paddingLeft: 12 }]}>
+              <Text style={[s.headerStatNum, { color: '#94A3B8' }]}>{inactiveCount}</Text>
+              <Text style={s.headerStatLabel}>Inactivos</Text>
+            </View>
+          </View>
+        </View>
+
+        {/* Búsqueda */}
+        <View style={s.searchBox}>
+          <MaterialIcons name="search" size={20} color="#94A3B8" />
           <TextInput
-            style={styles.searchInput}
+            style={s.searchInput}
             value={searchQuery}
             onChangeText={setSearchQuery}
-            placeholder="Buscar cliente..."
-            placeholderTextColor={colors.textSecondary}
+            placeholder="Buscar por nombre o teléfono..."
+            placeholderTextColor="#CBD5E1"
           />
           {searchQuery ? (
             <TouchableOpacity onPress={() => setSearchQuery('')}>
-              <IconSymbol
-                android_material_icon_name="close"
-                size={20}
-                color={colors.textSecondary}
-              />
+              <MaterialIcons name="close" size={18} color="#94A3B8" />
             </TouchableOpacity>
           ) : null}
         </View>
 
-        {/* Filter tabs */}
-        <View style={styles.filterContainer}>
+        {/* Filtros */}
+        <View style={s.filters}>
           {(['Todos', 'Activos', 'Inactivos'] as FilterType[]).map((f) => (
             <TouchableOpacity
               key={f}
-              style={[styles.filterTab, filter === f && styles.filterTabActive]}
+              style={[s.filterBtn, filter === f && s.filterBtnActive]}
               onPress={() => setFilter(f)}
             >
-              <Text style={[styles.filterText, filter === f && styles.filterTextActive]}>
-                {f}
-              </Text>
+              <Text style={[s.filterText, filter === f && s.filterTextActive]}>{f}</Text>
             </TouchableOpacity>
           ))}
         </View>
       </View>
 
-      <ScrollView contentContainerStyle={styles.scrollContent}>
+      <ScrollView contentContainerStyle={s.scroll}>
         {filteredClients.length === 0 ? (
-          <View style={styles.emptyState}>
-            <IconSymbol
-              android_material_icon_name="group"
-              size={64}
-              color={colors.textSecondary}
-            />
-            <Text style={styles.emptyStateText}>
-              {searchQuery
-                ? 'No se encontraron clientes'
-                : filter === 'Inactivos'
-                ? 'No hay clientes inactivos'
-                : 'No tienes clientes registrados'}
+          <View style={s.empty}>
+            <MaterialIcons name="group" size={52} color="#CBD5E1" />
+            <Text style={s.emptyTitle}>
+              {searchQuery ? 'Sin resultados' : filter === 'Inactivos' ? 'Sin clientes inactivos' : 'Sin clientes aún'}
             </Text>
-            <Text style={styles.emptyStateSubtext}>
-              {searchQuery
-                ? 'Intenta con otro término de búsqueda'
-                : 'Agrega tu primer cliente para comenzar'}
+            <Text style={s.emptyDesc}>
+              {searchQuery ? 'Intenta con otro término' : 'Agrega tu primer cliente'}
             </Text>
             {!searchQuery && (
-              <TouchableOpacity
-                style={styles.emptyStateButton}
-                onPress={() => {
-                  console.log('User tapped Nuevo Cliente button');
-                  router.push('/clients/new');
-                }}
-              >
-                <Text style={styles.emptyStateButtonText}>Nuevo Cliente</Text>
+              <TouchableOpacity style={s.emptyBtn} onPress={() => router.push('/clients/new')}>
+                <Text style={s.emptyBtnText}>+ Nuevo cliente</Text>
               </TouchableOpacity>
             )}
           </View>
         ) : (
           <>
             {filter === 'Inactivos' && (
-              <TouchableOpacity
-                style={styles.inactivesBanner}
-                onPress={() => {
-                  console.log('User tapped view inactive clients');
-                  router.push('/clients/inactive');
-                }}
-              >
-                <IconSymbol
-                  android_material_icon_name="warning"
-                  size={24}
-                  color={colors.warning}
-                />
-                <View style={styles.inactivesBannerText}>
-                  <Text style={styles.inactivesBannerTitle}>Clientes Inactivos</Text>
-                  <Text style={styles.inactivesBannerSubtitle}>
-                    Ver clientes sin visita en 90+ días
-                  </Text>
+              <TouchableOpacity style={s.inactiveBanner} onPress={() => router.push('/clients/inactive')}>
+                <View style={s.inactiveBannerIcon}>
+                  <MaterialIcons name="warning" size={20} color="#F59E0B" />
                 </View>
-                <IconSymbol
-                  android_material_icon_name="arrow-forward"
-                  size={24}
-                  color={colors.textSecondary}
-                />
+                <View style={{ flex: 1 }}>
+                  <Text style={s.inactiveBannerTitle}>Clientes sin visita reciente</Text>
+                  <Text style={s.inactiveBannerDesc}>Ver campaña de reactivación →</Text>
+                </View>
               </TouchableOpacity>
             )}
 
             {filteredClients.map((client) => {
-              const isActive = client.isActive !== false;
+              const avatarColor = getAvatarColor(client.name);
               const initials = getInitials(client.name);
-              const lastVisitText = formatLastVisit(client.lastVisit);
-              const totalAppointmentsText = `${client.totalVisits} ${
-                client.totalVisits === 1 ? 'cita' : 'citas'
-              }`;
+              const lastVisit = formatLastVisit(client.lastVisit);
+              const isActive = client.isActive !== false;
 
               return (
                 <TouchableOpacity
                   key={client.id}
-                  style={styles.clientCard}
-                  onPress={() => {
-                    console.log('User tapped client:', client.id);
-                    router.push(`/clients/${client.id}`);
-                  }}
+                  style={s.clientCard}
+                  onPress={() => router.push(`/clients/${client.id}`)}
+                  activeOpacity={0.75}
                 >
-                  <View style={styles.clientAvatar}>
-                    <Text style={styles.clientAvatarText}>{initials}</Text>
+                  {/* Avatar con color único */}
+                  <View style={[s.avatar, { backgroundColor: avatarColor.bg }]}>
+                    <Text style={[s.avatarText, { color: avatarColor.fg }]}>{initials}</Text>
                   </View>
-                  <View style={styles.clientInfo}>
-                    <View style={styles.clientNameRow}>
-                      <Text style={styles.clientName}>{client.name}</Text>
-                      <View
-                        style={[
-                          styles.statusDot,
-                          isActive ? styles.statusDotActive : styles.statusDotInactive,
-                        ]}
-                      />
+
+                  <View style={s.clientInfo}>
+                    <View style={s.clientNameRow}>
+                      <Text style={s.clientName}>{client.name}</Text>
+                      <View style={[s.activeDot, { backgroundColor: isActive ? '#10B981' : '#CBD5E1' }]} />
                     </View>
-                    <Text style={styles.clientPhone}>{client.phone}</Text>
-                    <View style={styles.clientStats}>
-                      <Text style={styles.clientStatsText}>{lastVisitText}</Text>
-                      <Text style={styles.clientStatsSeparator}>•</Text>
-                      <Text style={styles.clientStatsText}>{totalAppointmentsText}</Text>
+                    <Text style={s.clientPhone}>{client.phone}</Text>
+                    <View style={s.clientMeta}>
+                      {lastVisit && (
+                        <View style={s.metaChip}>
+                          <MaterialIcons name="access-time" size={11} color="#94A3B8" />
+                          <Text style={s.metaText}>{lastVisit}</Text>
+                        </View>
+                      )}
+                      <View style={s.metaChip}>
+                        <MaterialIcons name="event" size={11} color="#94A3B8" />
+                        <Text style={s.metaText}>{client.totalVisits} {client.totalVisits === 1 ? 'cita' : 'citas'}</Text>
+                      </View>
                     </View>
                   </View>
-                  <IconSymbol
-                    android_material_icon_name="arrow-forward"
-                    size={24}
-                    color={colors.textSecondary}
-                  />
+
+                  <MaterialIcons name="chevron-right" size={20} color="#CBD5E1" />
                 </TouchableOpacity>
               );
             })}
@@ -295,215 +250,84 @@ export default function ClientsScreen() {
         )}
       </ScrollView>
 
-      <TouchableOpacity
-        style={styles.fab}
-        onPress={() => {
-          console.log('User tapped FAB to create client');
-          router.push('/clients/new');
-        }}
-      >
-        <IconSymbol ios_icon_name="plus" android_material_icon_name="add" size={32} color="#FFFFFF" />
+      <TouchableOpacity style={s.fab} onPress={() => router.push('/clients/new')}>
+        <MaterialIcons name="add" size={28} color="#fff" />
       </TouchableOpacity>
     </SafeAreaView>
   );
 }
 
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: colors.background,
+const s = StyleSheet.create({
+  container: { flex: 1, backgroundColor: '#F8FAFC' },
+  loading: { flex: 1, justifyContent: 'center', alignItems: 'center' },
+
+  // Header
+  header: { backgroundColor: '#fff', paddingHorizontal: 20, paddingTop: 16, paddingBottom: 12, borderBottomWidth: 0.5, borderBottomColor: '#E2E8F0' },
+  headerTop: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 14 },
+  title: { fontSize: 28, fontWeight: '800', color: '#0F172A', letterSpacing: -0.5 },
+  subtitle: { fontSize: 13, color: '#94A3B8', marginTop: 2 },
+  headerStats: { flexDirection: 'row', gap: 12, alignItems: 'center' },
+  headerStat: { alignItems: 'center' },
+  headerStatNum: { fontSize: 20, fontWeight: '800', color: '#10B981' },
+  headerStatLabel: { fontSize: 10, color: '#94A3B8', fontWeight: '500', marginTop: 1 },
+
+  // Search
+  searchBox: {
+    flexDirection: 'row', alignItems: 'center', backgroundColor: '#F8FAFC',
+    borderRadius: 12, paddingHorizontal: 12, paddingVertical: 10,
+    marginBottom: 12, borderWidth: 0.5, borderColor: '#E2E8F0', gap: 8,
   },
-  loadingContainer: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
+  searchInput: { flex: 1, fontSize: 15, color: '#0F172A' },
+
+  // Filters
+  filters: { flexDirection: 'row', gap: 8 },
+  filterBtn: { paddingVertical: 7, paddingHorizontal: 16, borderRadius: 20, backgroundColor: '#F8FAFC', borderWidth: 0.5, borderColor: '#E2E8F0' },
+  filterBtnActive: { backgroundColor: '#10B981', borderColor: '#10B981' },
+  filterText: { fontSize: 13, fontWeight: '600', color: '#94A3B8' },
+  filterTextActive: { color: '#fff' },
+
+  scroll: { padding: 16, paddingBottom: 100 },
+
+  // Empty
+  empty: { alignItems: 'center', paddingVertical: 60, gap: 8 },
+  emptyTitle: { fontSize: 17, fontWeight: '600', color: '#0F172A' },
+  emptyDesc: { fontSize: 13, color: '#94A3B8' },
+  emptyBtn: { backgroundColor: '#10B981', borderRadius: 12, paddingVertical: 12, paddingHorizontal: 24, marginTop: 8 },
+  emptyBtnText: { color: '#fff', fontSize: 14, fontWeight: '700' },
+
+  // Inactive banner
+  inactiveBanner: {
+    backgroundColor: '#FFFBEB', borderRadius: 14, padding: 14,
+    flexDirection: 'row', alignItems: 'center', gap: 12, marginBottom: 12,
+    borderWidth: 0.5, borderColor: '#FDE68A',
   },
-  header: {
-    padding: 20,
-    paddingTop: 48,
-    backgroundColor: colors.card,
-    borderBottomWidth: 1,
-    borderBottomColor: colors.border,
-  },
-  title: {
-    fontSize: 28,
-    fontWeight: 'bold',
-    color: colors.text,
-    marginBottom: 16,
-  },
-  searchContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: colors.background,
-    borderRadius: 12,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    marginBottom: 16,
-  },
-  searchInput: {
-    flex: 1,
-    fontSize: 16,
-    color: colors.text,
-    marginLeft: 8,
-  },
-  filterContainer: {
-    flexDirection: 'row',
-    gap: 8,
-  },
-  filterTab: {
-    paddingVertical: 8,
-    paddingHorizontal: 16,
-    borderRadius: 20,
-    backgroundColor: colors.background,
-  },
-  filterTabActive: {
-    backgroundColor: colors.primary,
-  },
-  filterText: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: colors.textSecondary,
-  },
-  filterTextActive: {
-    color: '#FFFFFF',
-  },
-  scrollContent: {
-    flexGrow: 1,
-    padding: 20,
-    paddingBottom: 100,
-  },
-  emptyState: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    paddingVertical: 60,
-  },
-  emptyStateText: {
-    fontSize: 18,
-    fontWeight: '600',
-    color: colors.text,
-    marginTop: 16,
-  },
-  emptyStateSubtext: {
-    fontSize: 14,
-    color: colors.textSecondary,
-    marginTop: 8,
-    marginBottom: 24,
-    textAlign: 'center',
-  },
-  emptyStateButton: {
-    backgroundColor: colors.primary,
-    borderRadius: 12,
-    paddingVertical: 12,
-    paddingHorizontal: 24,
-  },
-  emptyStateButtonText: {
-    color: '#FFFFFF',
-    fontSize: 16,
-    fontWeight: '600',
-  },
-  inactivesBanner: {
-    backgroundColor: colors.card,
-    borderRadius: 12,
-    padding: 16,
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: 16,
-    borderWidth: 1,
-    borderColor: colors.warning,
-  },
-  inactivesBannerText: {
-    flex: 1,
-    marginLeft: 12,
-  },
-  inactivesBannerTitle: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: colors.text,
-  },
-  inactivesBannerSubtitle: {
-    fontSize: 13,
-    color: colors.textSecondary,
-    marginTop: 2,
-  },
-  fab: {
-    position: 'absolute',
-    right: 20,
-    bottom: 100,
-    width: 56,
-    height: 56,
-    borderRadius: 28,
-    backgroundColor: colors.primary,
-    justifyContent: 'center',
-    alignItems: 'center',
-    boxShadow: '0px 4px 8px rgba(0, 0, 0, 0.3)',
-    elevation: 8,
-  },
+  inactiveBannerIcon: { width: 36, height: 36, borderRadius: 10, backgroundColor: '#FEF3C7', justifyContent: 'center', alignItems: 'center' },
+  inactiveBannerTitle: { fontSize: 13, fontWeight: '600', color: '#92400E' },
+  inactiveBannerDesc: { fontSize: 12, color: '#B45309', marginTop: 2 },
+
+  // Client card
   clientCard: {
-    backgroundColor: colors.card,
-    borderRadius: 16,
-    padding: 16,
-    marginBottom: 12,
-    flexDirection: 'row',
-    alignItems: 'center',
-    boxShadow: '0px 2px 8px rgba(0, 0, 0, 0.05)',
-    elevation: 2,
+    backgroundColor: '#fff', borderRadius: 14, padding: 14,
+    flexDirection: 'row', alignItems: 'center', marginBottom: 8, gap: 12,
+    shadowColor: '#000', shadowOpacity: 0.04, shadowRadius: 6, elevation: 1,
   },
-  clientAvatar: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
+  avatar: { width: 46, height: 46, borderRadius: 14, justifyContent: 'center', alignItems: 'center' },
+  avatarText: { fontSize: 16, fontWeight: '800' },
+  clientInfo: { flex: 1, gap: 2 },
+  clientNameRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  clientName: { fontSize: 15, fontWeight: '700', color: '#0F172A' },
+  activeDot: { width: 8, height: 8, borderRadius: 4 },
+  clientPhone: { fontSize: 13, color: '#94A3B8' },
+  clientMeta: { flexDirection: 'row', gap: 10, marginTop: 4 },
+  metaChip: { flexDirection: 'row', alignItems: 'center', gap: 3 },
+  metaText: { fontSize: 11, color: '#94A3B8', fontWeight: '500' },
+
+  // FAB
+  fab: {
+    position: 'absolute', right: 20, bottom: 100,
+    width: 56, height: 56, borderRadius: 28,
     backgroundColor: colors.primary,
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginRight: 12,
-  },
-  clientAvatarText: {
-    fontSize: 18,
-    fontWeight: 'bold',
-    color: '#FFFFFF',
-  },
-  clientInfo: {
-    flex: 1,
-  },
-  clientNameRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  clientName: {
-    fontSize: 16,
-    fontWeight: '700',
-    color: colors.text,
-    marginRight: 8,
-  },
-  statusDot: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-  },
-  statusDotActive: {
-    backgroundColor: colors.primary,
-  },
-  statusDotInactive: {
-    backgroundColor: colors.textSecondary,
-  },
-  clientPhone: {
-    fontSize: 14,
-    color: colors.textSecondary,
-    marginTop: 2,
-  },
-  clientStats: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginTop: 4,
-  },
-  clientStatsText: {
-    fontSize: 12,
-    color: colors.textSecondary,
-  },
-  clientStatsSeparator: {
-    fontSize: 12,
-    color: colors.textSecondary,
-    marginHorizontal: 6,
+    justifyContent: 'center', alignItems: 'center',
+    elevation: 6, shadowColor: '#000', shadowOpacity: 0.2, shadowRadius: 8,
   },
 });

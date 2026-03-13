@@ -1,4 +1,3 @@
-
 import { SafeAreaView } from 'react-native-safe-area-context';
 import {
   View,
@@ -16,8 +15,8 @@ import { IconSymbol } from '@/components/IconSymbol';
 import { useRouter, useFocusEffect } from 'expo-router';
 import { usePlan } from '@/contexts/PlanContext';
 import { Calendar } from 'react-native-calendars';
+import MaterialIcons from '@expo/vector-icons/MaterialIcons';
 
-// Fix #10: tipos de status completos incluyendo Pagado y Reagendada
 interface ApiAppointment {
   id: string;
   clientId: string;
@@ -32,6 +31,16 @@ interface ApiAppointment {
   createdAt: string;
 }
 
+const STATUS_META: Record<string, { color: string; bg: string; label: string }> = {
+  Confirmada: { color: '#10B981', bg: '#ECFDF5', label: 'Confirmada' },
+  Pendiente:  { color: '#F59E0B', bg: '#FFFBEB', label: 'Pendiente' },
+  Cancelada:  { color: '#EF4444', bg: '#FEF2F2', label: 'Cancelada' },
+  Completada: { color: '#6B7280', bg: '#F9FAFB', label: 'Completada' },
+  'No-show':  { color: '#F97316', bg: '#FFF7ED', label: 'No-show' },
+  Reagendada: { color: '#3B82F6', bg: '#EFF6FF', label: 'Reagendada' },
+  Pagado:     { color: '#8B5CF6', bg: '#F5F3FF', label: 'Pagado' },
+};
+
 export default function AppointmentsScreen() {
   const router = useRouter();
   const { canSchedule } = usePlan();
@@ -41,34 +50,20 @@ export default function AppointmentsScreen() {
   const [markedDates, setMarkedDates] = useState<any>({});
   const [loadError, setLoadError] = useState(false);
 
-  // Fix #4: dependencia correcta []
   useFocusEffect(
-    useCallback(() => {
-      loadAppointments();
-    }, [])
+    useCallback(() => { loadAppointments(); }, [])
   );
 
-  useEffect(() => {
-    updateMarkedDates();
-  }, [appointments, selectedDate]);
+  useEffect(() => { updateMarkedDates(); }, [appointments, selectedDate]);
 
   const loadAppointments = async (forceRefresh = false) => {
     const cached = getCached<any[]>('appointments_list');
-    if (!forceRefresh && cached) {
-      setAppointments(cached);
-      setLoading(false);
-      return;
-    }
-    setLoading(true);
-    setLoadError(false);
+    if (!forceRefresh && cached) { setAppointments(cached); setLoading(false); return; }
+    setLoading(true); setLoadError(false);
     try {
-      console.log('[Appointments] Loading all appointments');
       const data = await apiGet<ApiAppointment[]>('/api/appointments');
-      console.log('[Appointments] Loaded:', data.length, 'appointments');
-      setAppointments(data);
-      setCached('appointments_list', data);
+      setAppointments(data); setCached('appointments_list', data);
     } catch (error) {
-      console.error('[Appointments] Error loading appointments:', error);
       setLoadError(true);
     } finally {
       setLoading(false);
@@ -77,181 +72,160 @@ export default function AppointmentsScreen() {
 
   const updateMarkedDates = () => {
     const marked: any = {};
-    
     appointments.forEach((appt) => {
-      if (!marked[appt.date]) {
-        marked[appt.date] = { marked: true, dots: [] };
-      }
+      if (!marked[appt.date]) marked[appt.date] = { marked: true, dotColor: colors.primary };
     });
-
-    marked[selectedDate] = {
-      ...marked[selectedDate],
-      selected: true,
-      selectedColor: colors.primary,
-    };
-
+    marked[selectedDate] = { ...marked[selectedDate], selected: true, selectedColor: colors.primary };
     setMarkedDates(marked);
   };
 
-  const getAppointmentsForDate = (date: string) => {
-    return appointments
-      .filter((appt) => appt.date === date)
-      .sort((a, b) => a.time.localeCompare(b.time));
-  };
-
-  const getStatusColor = (status: string) => {
-    switch (status) {
-      case 'Confirmada': return '#10B981';
-      case 'Pendiente': return '#F59E0B';
-      case 'Cancelada': return '#EF4444';
-      case 'Completada': return '#6B7280';
-      case 'No-show': return '#F97316';
-      case 'Reagendada': return '#3B82F6';
-      case 'Pagado': return '#8B5CF6';
-      default: return colors.text;
-    }
-  };
-
-  const handleDateSelect = (day: any) => {
-    setSelectedDate(day.dateString);
-  };
+  const getAppointmentsForDate = (date: string) =>
+    appointments.filter((a) => a.date === date).sort((a, b) => a.time.localeCompare(b.time));
 
   const handleNewAppointment = () => {
-    if (!canSchedule) {
-      router.push('/settings/subscription');
-      return;
-    }
+    if (!canSchedule) { router.push('/settings/subscription'); return; }
     router.push('/appointments/new');
   };
 
-  const handleAppointmentPress = (appointment: ApiAppointment) => {
-    router.push(`/appointments/${appointment.id}`);
-  };
-
   const dateAppointments = getAppointmentsForDate(selectedDate);
+  const confirmedCount = dateAppointments.filter(a => a.status === 'Confirmada').length;
+  const pendingCount = dateAppointments.filter(a => a.status === 'Pendiente').length;
+
   const selectedDateObj = new Date(selectedDate + 'T12:00:00');
   const formattedDate = selectedDateObj.toLocaleDateString('es-MX', {
-    weekday: 'long',
-    year: 'numeric',
-    month: 'long',
-    day: 'numeric',
+    weekday: 'long', month: 'long', day: 'numeric',
   });
+  const monthYear = selectedDateObj.toLocaleDateString('es-MX', { month: 'long', year: 'numeric' });
 
   if (loading) {
     return (
-      <SafeAreaView style={styles.container} edges={['top']}>
-        <View style={styles.loadingContainer}>
-          <ActivityIndicator size="large" color={colors.primary} />
-          <Text style={styles.loadingText}>Cargando citas...</Text>
-        </View>
+      <SafeAreaView style={s.container} edges={['top']}>
+        <View style={s.loading}><ActivityIndicator size="large" color={colors.primary} /></View>
       </SafeAreaView>
     );
   }
 
   return (
-    <SafeAreaView style={styles.container} edges={['top']}>
-      {/* Fix #1: header simplificado sin botones Semana/Día no implementados */}
-      <View style={styles.header}>
-        <Text style={styles.title}>Citas</Text>
+    <SafeAreaView style={s.container} edges={['top']}>
+      {/* Header */}
+      <View style={s.header}>
+        <View>
+          <Text style={s.title}>Citas</Text>
+          <Text style={s.subtitle}>{monthYear.charAt(0).toUpperCase() + monthYear.slice(1)}</Text>
+        </View>
+        <View style={s.headerBadge}>
+          <Text style={s.headerBadgeText}>{appointments.length} total</Text>
+        </View>
       </View>
 
-      <ScrollView style={styles.content} showsVerticalScrollIndicator={false}>
-        <View style={styles.calendarContainer}>
+      <ScrollView style={s.content} showsVerticalScrollIndicator={false}>
+        {/* Calendario */}
+        <View style={s.calendarWrap}>
           <Calendar
             current={selectedDate}
-            onDayPress={handleDateSelect}
+            onDayPress={(day: any) => setSelectedDate(day.dateString)}
             markedDates={markedDates}
             theme={{
-              backgroundColor: '#ffffff',
-              calendarBackground: '#ffffff',
-              textSectionTitleColor: colors.text,
+              backgroundColor: '#fff',
+              calendarBackground: '#fff',
+              textSectionTitleColor: '#94A3B8',
               selectedDayBackgroundColor: colors.primary,
-              selectedDayTextColor: '#ffffff',
+              selectedDayTextColor: '#fff',
               todayTextColor: colors.primary,
-              dayTextColor: colors.text,
-              textDisabledColor: '#d9e1e8',
+              dayTextColor: '#0F172A',
+              textDisabledColor: '#CBD5E1',
               dotColor: colors.primary,
-              selectedDotColor: '#ffffff',
+              selectedDotColor: '#fff',
               arrowColor: colors.primary,
-              monthTextColor: colors.text,
-              textDayFontWeight: '400',
-              textMonthFontWeight: 'bold',
+              monthTextColor: '#0F172A',
+              textDayFontWeight: '500',
+              textMonthFontWeight: '700',
               textDayHeaderFontWeight: '600',
-              textDayFontSize: 16,
-              textMonthFontSize: 18,
-              textDayHeaderFontSize: 14,
+              textDayFontSize: 15,
+              textMonthFontSize: 17,
+              textDayHeaderFontSize: 13,
             }}
           />
         </View>
 
-        <View style={styles.appointmentsSection}>
-          <Text style={styles.sectionTitle}>{formattedDate}</Text>
+        <View style={s.listSection}>
+          {/* Resumen del día seleccionado */}
+          <View style={s.dayHeader}>
+            <View style={s.dayTitleWrap}>
+              <Text style={s.dayTitle}>{formattedDate.charAt(0).toUpperCase() + formattedDate.slice(1)}</Text>
+              {dateAppointments.length > 0 && (
+                <Text style={s.dayCount}>{dateAppointments.length} {dateAppointments.length === 1 ? 'cita' : 'citas'}</Text>
+              )}
+            </View>
+            {dateAppointments.length > 0 && (
+              <View style={s.daySummary}>
+                {confirmedCount > 0 && (
+                  <View style={s.summaryChip}>
+                    <View style={[s.summaryDot, { backgroundColor: '#10B981' }]} />
+                    <Text style={s.summaryText}>{confirmedCount} confirmada{confirmedCount > 1 ? 's' : ''}</Text>
+                  </View>
+                )}
+                {pendingCount > 0 && (
+                  <View style={s.summaryChip}>
+                    <View style={[s.summaryDot, { backgroundColor: '#F59E0B' }]} />
+                    <Text style={s.summaryText}>{pendingCount} pendiente{pendingCount > 1 ? 's' : ''}</Text>
+                  </View>
+                )}
+              </View>
+            )}
+          </View>
 
-          {/* Fix #8: mostrar error si falla la carga */}
           {loadError && (
-            <View style={styles.errorState}>
-              <Text style={styles.errorText}>No se pudieron cargar las citas.</Text>
-              <TouchableOpacity onPress={() => loadAppointments(true)} style={styles.retryButton}>
-                <Text style={styles.retryText}>Reintentar</Text>
+            <View style={s.errorState}>
+              <Text style={s.errorText}>No se pudieron cargar las citas.</Text>
+              <TouchableOpacity onPress={() => loadAppointments(true)} style={s.retryBtn}>
+                <Text style={s.retryText}>Reintentar</Text>
               </TouchableOpacity>
             </View>
           )}
-          
+
           {!loadError && dateAppointments.length === 0 ? (
-            <View style={styles.emptyState}>
-              <IconSymbol
-                ios_icon_name="calendar"
-                android_material_icon_name="event"
-                size={64}
-                color={colors.textSecondary}
-              />
-              <Text style={styles.emptyStateTitle}>No hay citas para este día</Text>
-              <Text style={styles.emptyStateText}>
-                Toca el botón + para agregar una nueva cita
-              </Text>
+            <View style={s.empty}>
+              <MaterialIcons name="event-available" size={48} color="#CBD5E1" />
+              <Text style={s.emptyTitle}>Sin citas este día</Text>
+              <Text style={s.emptyDesc}>Toca + para agregar una cita</Text>
             </View>
           ) : (
-            <View style={styles.appointmentsList}>
-              {dateAppointments.map((appointment) => {
-                const statusColor = getStatusColor(appointment.status);
+            <View style={s.list}>
+              {dateAppointments.map((appt) => {
+                const meta = STATUS_META[appt.status] || { color: '#94A3B8', bg: '#F1F5F9', label: appt.status };
                 return (
                   <TouchableOpacity
-                    key={appointment.id}
-                    style={styles.appointmentCard}
-                    onPress={() => handleAppointmentPress(appointment)}
+                    key={appt.id}
+                    style={s.apptCard}
+                    onPress={() => router.push(`/appointments/${appt.id}`)}
+                    activeOpacity={0.75}
                   >
-                    <View style={styles.appointmentTime}>
-                      <IconSymbol
-                        ios_icon_name="clock"
-                        android_material_icon_name="access-time"
-                        size={20}
-                        color={colors.primary}
-                      />
-                      <Text style={styles.timeText}>{appointment.time}</Text>
-                    </View>
-                    
-                    <View style={styles.appointmentDetails}>
-                      <Text style={styles.clientName}>{appointment.client?.name || 'Cliente'}</Text>
-                      <Text style={styles.serviceText}>{appointment.service || 'Servicio'}</Text>
-                      
-                      <View style={styles.badgesRow}>
-                        {appointment.isRescheduled && (
-                          <View style={styles.rescheduledBadge}>
-                            <Text style={styles.rescheduledText}>🔄 Reagend.</Text>
-                          </View>
-                        )}
-                        <View style={[styles.statusBadge, { backgroundColor: statusColor }]}>
-                          <Text style={styles.statusText}>{appointment.status}</Text>
-                        </View>
-                      </View>
+                    {/* Barra lateral de color */}
+                    <View style={[s.stripe, { backgroundColor: meta.color }]} />
+
+                    {/* Hora */}
+                    <View style={s.timeCol}>
+                      <Text style={s.timeText}>{appt.time}</Text>
                     </View>
 
-                    <IconSymbol
-                      ios_icon_name="chevron.right"
-                      android_material_icon_name="arrow-forward"
-                      size={20}
-                      color={colors.textSecondary}
-                    />
+                    {/* Info */}
+                    <View style={s.infoCol}>
+                      <Text style={s.clientName}>{appt.client?.name || 'Cliente'}</Text>
+                      <Text style={s.serviceName}>{appt.service || 'Servicio'}</Text>
+                      {appt.isRescheduled && (
+                        <View style={s.rescheduledPill}>
+                          <Text style={s.rescheduledText}>Reagendada</Text>
+                        </View>
+                      )}
+                    </View>
+
+                    {/* Status badge */}
+                    <View style={[s.statusBadge, { backgroundColor: meta.bg }]}>
+                      <Text style={[s.statusText, { color: meta.color }]}>{meta.label}</Text>
+                    </View>
+
+                    <MaterialIcons name="chevron-right" size={18} color="#CBD5E1" />
                   </TouchableOpacity>
                 );
               })}
@@ -260,77 +234,83 @@ export default function AppointmentsScreen() {
         </View>
       </ScrollView>
 
-      <TouchableOpacity style={[styles.fab, !canSchedule && { backgroundColor: '#94A3B8' }]} onPress={handleNewAppointment}>
-        <IconSymbol
-          ios_icon_name="plus"
-          android_material_icon_name="add"
-          size={28}
-          color="#ffffff"
-        />
+      {/* FAB */}
+      <TouchableOpacity
+        style={[s.fab, !canSchedule && s.fabDisabled]}
+        onPress={handleNewAppointment}
+      >
+        <MaterialIcons name="add" size={28} color="#fff" />
       </TouchableOpacity>
     </SafeAreaView>
   );
 }
 
-const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: colors.background },
-  loadingContainer: { flex: 1, justifyContent: 'center', alignItems: 'center' },
-  loadingText: { marginTop: 16, fontSize: 16, color: colors.textSecondary },
+const s = StyleSheet.create({
+  container: { flex: 1, backgroundColor: '#F8FAFC' },
+  loading: { flex: 1, justifyContent: 'center', alignItems: 'center' },
+
   header: {
-    paddingHorizontal: 20,
-    paddingVertical: 16,
-    backgroundColor: '#ffffff',
-    borderBottomWidth: 1,
-    borderBottomColor: '#E5E7EB',
+    paddingHorizontal: 20, paddingVertical: 14,
+    backgroundColor: '#fff',
+    borderBottomWidth: 0.5, borderBottomColor: '#E2E8F0',
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
   },
-  title: { fontSize: 28, fontWeight: 'bold', color: colors.text },
+  title: { fontSize: 28, fontWeight: '800', color: '#0F172A', letterSpacing: -0.5 },
+  subtitle: { fontSize: 13, color: '#94A3B8', marginTop: 2, textTransform: 'capitalize' },
+  headerBadge: { backgroundColor: '#ECFDF5', paddingHorizontal: 12, paddingVertical: 6, borderRadius: 20 },
+  headerBadgeText: { fontSize: 13, fontWeight: '700', color: '#10B981' },
+
   content: { flex: 1 },
-  calendarContainer: { backgroundColor: '#ffffff', marginBottom: 16 },
-  appointmentsSection: { paddingHorizontal: 20, paddingBottom: 100 },
-  sectionTitle: {
-    fontSize: 18,
-    fontWeight: '600',
-    color: colors.text,
-    marginBottom: 16,
-    textTransform: 'capitalize',
-  },
+  calendarWrap: { backgroundColor: '#fff', marginBottom: 8 },
+
+  listSection: { paddingHorizontal: 16, paddingBottom: 100 },
+
+  // Resumen del día
+  dayHeader: { paddingVertical: 14, gap: 8 },
+  dayTitleWrap: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  dayTitle: { fontSize: 16, fontWeight: '700', color: '#0F172A', textTransform: 'capitalize', flex: 1 },
+  dayCount: { fontSize: 13, color: '#94A3B8', fontWeight: '500' },
+  daySummary: { flexDirection: 'row', gap: 8 },
+  summaryChip: { flexDirection: 'row', alignItems: 'center', gap: 5, backgroundColor: '#fff', paddingHorizontal: 10, paddingVertical: 4, borderRadius: 99, borderWidth: 0.5, borderColor: '#E2E8F0' },
+  summaryDot: { width: 7, height: 7, borderRadius: 4 },
+  summaryText: { fontSize: 12, color: '#64748B', fontWeight: '500' },
+
   errorState: { alignItems: 'center', paddingVertical: 32 },
-  errorText: { fontSize: 15, color: '#EF4444', marginBottom: 12 },
-  retryButton: { backgroundColor: colors.primary, paddingHorizontal: 20, paddingVertical: 10, borderRadius: 8 },
+  errorText: { fontSize: 14, color: '#EF4444', marginBottom: 12 },
+  retryBtn: { backgroundColor: colors.primary, paddingHorizontal: 20, paddingVertical: 10, borderRadius: 10 },
   retryText: { color: '#fff', fontWeight: '600' },
-  emptyState: { alignItems: 'center', paddingVertical: 48 },
-  emptyStateTitle: { fontSize: 18, fontWeight: '600', color: colors.text, marginTop: 16, marginBottom: 8 },
-  emptyStateText: { fontSize: 14, color: colors.textSecondary, textAlign: 'center' },
-  appointmentsList: { gap: 12 },
-  appointmentCard: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#ffffff',
-    padding: 16,
-    borderRadius: 12,
-    gap: 12,
+
+  empty: { alignItems: 'center', paddingVertical: 48 },
+  emptyTitle: { fontSize: 16, fontWeight: '600', color: '#0F172A', marginTop: 12 },
+  emptyDesc: { fontSize: 13, color: '#94A3B8', marginTop: 4 },
+
+  list: { gap: 8 },
+
+  // Appointment card
+  apptCard: {
+    backgroundColor: '#fff', borderRadius: 14,
+    flexDirection: 'row', alignItems: 'center',
+    overflow: 'hidden',
+    shadowColor: '#000', shadowOpacity: 0.04, shadowRadius: 6, elevation: 1,
   },
-  appointmentTime: { alignItems: 'center', gap: 4 },
-  timeText: { fontSize: 14, fontWeight: '600', color: colors.text },
-  appointmentDetails: { flex: 1, gap: 4 },
-  clientName: { fontSize: 16, fontWeight: '600', color: colors.text },
-  serviceText: { fontSize: 14, color: colors.textSecondary },
-  statusBadge: { alignSelf: 'flex-start', paddingHorizontal: 10, paddingVertical: 4, borderRadius: 12, marginTop: 4 },
-  badgesRow: { flexDirection: 'row', gap: 6, alignItems: 'center', marginTop: 4, flexWrap: 'wrap' },
-  rescheduledBadge: { backgroundColor: '#EFF6FF', paddingHorizontal: 8, paddingVertical: 3, borderRadius: 6 },
-  rescheduledText: { fontSize: 11, fontWeight: '600', color: '#3B82F6' },
-  statusText: { fontSize: 12, fontWeight: '600', color: '#ffffff' },
+  stripe: { width: 4, alignSelf: 'stretch' },
+  timeCol: { paddingHorizontal: 12, paddingVertical: 16, minWidth: 64, alignItems: 'center' },
+  timeText: { fontSize: 14, fontWeight: '700', color: '#0F172A' },
+  infoCol: { flex: 1, paddingVertical: 14, gap: 2 },
+  clientName: { fontSize: 15, fontWeight: '600', color: '#0F172A' },
+  serviceName: { fontSize: 12, color: '#94A3B8' },
+  rescheduledPill: { alignSelf: 'flex-start', backgroundColor: '#EFF6FF', paddingHorizontal: 7, paddingVertical: 2, borderRadius: 6, marginTop: 4 },
+  rescheduledText: { fontSize: 10, fontWeight: '700', color: '#3B82F6' },
+  statusBadge: { paddingHorizontal: 10, paddingVertical: 5, borderRadius: 10, marginRight: 6 },
+  statusText: { fontSize: 11, fontWeight: '700' },
+
+  // FAB
   fab: {
-    position: 'absolute',
-    bottom: 90,
-    right: 24,
-    width: 56,
-    height: 56,
-    borderRadius: 28,
+    position: 'absolute', bottom: 90, right: 20,
+    width: 56, height: 56, borderRadius: 28,
     backgroundColor: colors.primary,
-    justifyContent: 'center',
-    alignItems: 'center',
-    elevation: 4,
-    boxShadow: '0px 2px 4px rgba(0, 0, 0, 0.25)',
+    justifyContent: 'center', alignItems: 'center',
+    elevation: 4, shadowColor: '#000', shadowOpacity: 0.2, shadowRadius: 8,
   },
+  fabDisabled: { backgroundColor: '#94A3B8' },
 });
