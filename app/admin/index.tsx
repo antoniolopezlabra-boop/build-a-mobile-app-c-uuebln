@@ -72,7 +72,7 @@ export default function AdminDashboard() {
         { data: sessions },
         { data: dailyApts },
         { data: weeklyRegs },
-        { data: plans },
+        { data: plans, error: plansError },
       ] = await Promise.all([
         supabase.from('business_profiles').select('*', { count: 'exact', head: true }),
         supabase.from('appointments').select('*', { count: 'exact', head: true }),
@@ -86,13 +86,14 @@ export default function AdminDashboard() {
           .select('created_at')
           .gte('created_at', new Date(Date.now() - 56 * 86400000).toISOString())
           .order('created_at'),
-        // Sin filtro de status — contar todos los planes sin importar cómo fueron asignados
-        supabase.from('subscription_plans').select('plan_type, status'),
+        // SECURITY DEFINER function — bypasea RLS para leer todos los planes
+        supabase.rpc('get_all_subscription_plans'),
       ]);
 
+      if (plansError) console.error('[Admin] Plans RPC error:', plansError);
       console.log('[Admin] Plans raw:', plans);
 
-      // Contar planes reales desde BD — tolerante a acento y mayúsculas
+      // Contar planes — tolerante a acento y mayúsculas
       const basicCount = plans?.filter((p: any) => {
         const t = (p.plan_type || '').toLowerCase().trim();
         return t === 'basico' || t === 'básico';
