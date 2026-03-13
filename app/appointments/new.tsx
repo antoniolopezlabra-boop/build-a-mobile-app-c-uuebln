@@ -49,6 +49,11 @@ export default function NewAppointmentScreen() {
   const [service, setService] = useState('');
   const [date, setDate] = useState(new Date());
   const [showDatePicker, setShowDatePicker] = useState(false);
+
+  // ─── Fecha temporal: la usamos mientras el usuario gira el scroll ────────
+  // Solo se aplica a `date` cuando presiona "Confirmar"
+  const [tempDate, setTempDate] = useState(new Date());
+
   const [time, setTime] = useState('09:00');
   const [selectedBlocks, setSelectedBlocks] = useState<string[]>([]);
   const [notes, setNotes] = useState('');
@@ -60,21 +65,31 @@ export default function NewAppointmentScreen() {
   const [allowOverlapping, setAllowOverlapping] = useState(false);
   const [errorModal, setErrorModal] = useState({ visible: false, message: '' });
 
-  // ─── Refs de los TextInput para poder hacer .blur() explícito ───────────
   const serviceInputRef = useRef<TextInput>(null);
   const costInputRef = useRef<TextInput>(null);
   const notesInputRef = useRef<TextInput>(null);
 
-  // ─── Cierra TODOS los inputs antes de mostrar el date picker ────────────
+  // ─── Abrir picker: cerrar teclado primero, luego mostrar modal ───────────
   const openDatePicker = () => {
-    // 1. Quita el foco de cualquier TextInput activo
     serviceInputRef.current?.blur();
     costInputRef.current?.blur();
     notesInputRef.current?.blur();
-    // 2. Dispara Keyboard.dismiss() para asegurarse que el teclado baja
     Keyboard.dismiss();
-    // 3. Pequeño delay para que el teclado cierre antes de que aparezca el picker
+    // Sincronizar tempDate con la fecha actual antes de abrir
+    setTempDate(date);
     setTimeout(() => setShowDatePicker(true), Platform.OS === 'android' ? 150 : 50);
+  };
+
+  // ─── Confirmar fecha: aplica tempDate a date y cierra modal ─────────────
+  const confirmDate = () => {
+    setDate(tempDate);
+    setShowDatePicker(false);
+  };
+
+  // ─── Cancelar: descarta cambios y cierra modal ───────────────────────────
+  const cancelDate = () => {
+    setTempDate(date); // revertir
+    setShowDatePicker(false);
   };
 
   useEffect(() => {
@@ -217,6 +232,11 @@ export default function NewAppointmentScreen() {
     weekday: 'long', year: 'numeric', month: 'long', day: 'numeric',
   });
 
+  // Preview de tempDate dentro del modal (se actualiza mientras el usuario gira el scroll)
+  const formattedTempDate = tempDate.toLocaleDateString('es-MX', {
+    weekday: 'long', day: 'numeric', month: 'long', year: 'numeric',
+  });
+
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
       <View style={styles.header}>
@@ -232,7 +252,6 @@ export default function NewAppointmentScreen() {
           style={styles.content}
           showsVerticalScrollIndicator={false}
           keyboardShouldPersistTaps="handled"
-          // Al hacer scroll el usuario también puede querer cerrar el teclado
           keyboardDismissMode="on-drag"
         >
           {/* Cliente */}
@@ -240,10 +259,7 @@ export default function NewAppointmentScreen() {
             <Text style={styles.label}>Cliente *</Text>
             <TouchableOpacity
               style={styles.input}
-              onPress={() => {
-                Keyboard.dismiss();
-                setShowClientPicker(true);
-              }}
+              onPress={() => { Keyboard.dismiss(); setShowClientPicker(true); }}
             >
               <Text style={selectedClient ? styles.inputText : styles.inputPlaceholder}>
                 {selectedClient ? selectedClient.name : 'Seleccionar cliente'}
@@ -267,7 +283,7 @@ export default function NewAppointmentScreen() {
             />
           </View>
 
-          {/* Fecha — ❗ abre picker solo después de cerrar teclado */}
+          {/* Fecha */}
           <View style={styles.section}>
             <Text style={styles.label}>Fecha *</Text>
             <TouchableOpacity style={styles.input} onPress={openDatePicker}>
@@ -276,7 +292,7 @@ export default function NewAppointmentScreen() {
             </TouchableOpacity>
           </View>
 
-          {/* Slots de hora */}
+          {/* Hora */}
           <View style={styles.section}>
             <Text style={styles.label}>Hora *</Text>
             {dayIsClosed ? (
@@ -320,7 +336,6 @@ export default function NewAppointmentScreen() {
                         ]}
                         onPress={() => {
                           if (!slot.available) return;
-                          // Cerrar teclado al seleccionar hora
                           Keyboard.dismiss();
                           if (selectedBlocks.length === 0) {
                             setSelectedBlocks([slot.time]);
@@ -413,16 +428,59 @@ export default function NewAppointmentScreen() {
             onPress={handleSave}
             disabled={loading}
           >
-            {loading ? (
-              <ActivityIndicator color="#ffffff" />
-            ) : (
-              <Text style={styles.saveButtonText}>Guardar Cita</Text>
-            )}
+            {loading ? <ActivityIndicator color="#ffffff" /> : <Text style={styles.saveButtonText}>Guardar Cita</Text>}
           </TouchableOpacity>
         </ScrollView>
       </KeyboardAvoidingView>
 
-      {/* Modal de clientes */}
+      {/* ─── Modal selector de fecha con botón Confirmar ─────────────────── */}
+      <Modal
+        visible={showDatePicker}
+        animationType="slide"
+        transparent={true}
+        onRequestClose={cancelDate}
+      >
+        <View style={styles.dateModalOverlay}>
+          <View style={styles.dateModalContent}>
+
+            {/* Cabecera del modal */}
+            <View style={styles.dateModalHeader}>
+              <TouchableOpacity onPress={cancelDate} style={styles.dateModalCancel}>
+                <Text style={styles.dateModalCancelText}>Cancelar</Text>
+              </TouchableOpacity>
+              <Text style={styles.dateModalTitle}>Seleccionar fecha</Text>
+              <View style={{ width: 80 }} />
+            </View>
+
+            {/* Preview de la fecha mientras el usuario gira el scroll */}
+            <View style={styles.datePreview}>
+              <Text style={styles.datePreviewText}>
+                {formattedTempDate.charAt(0).toUpperCase() + formattedTempDate.slice(1)}
+              </Text>
+            </View>
+
+            {/* El picker — onChange solo actualiza tempDate, NO date */}
+            <DateTimePicker
+              value={tempDate}
+              mode="date"
+              display="spinner"
+              minimumDate={new Date()}
+              onChange={(_event, selected) => {
+                if (selected) setTempDate(selected);
+              }}
+              style={styles.datePicker}
+            />
+
+            {/* Botón Confirmar — aquí sí aplica la fecha */}
+            <TouchableOpacity style={styles.dateConfirmBtn} onPress={confirmDate}>
+              <Text style={styles.dateConfirmText}>Confirmar fecha</Text>
+            </TouchableOpacity>
+
+          </View>
+        </View>
+      </Modal>
+
+      {/* ─── Modal selector de clientes ──────────────────────────────────── */}
       <Modal
         visible={showClientPicker}
         animationType="slide"
@@ -484,20 +542,6 @@ export default function NewAppointmentScreen() {
           </View>
         </View>
       </Modal>
-
-      {/* Date picker — solo se muestra cuando el teclado ya bajó */}
-      {showDatePicker && (
-        <DateTimePicker
-          value={date}
-          mode="date"
-          display="spinner"
-          minimumDate={new Date()}
-          onChange={(event, selectedDate) => {
-            setShowDatePicker(false);
-            if (selectedDate) setDate(selectedDate);
-          }}
-        />
-      )}
 
       <ConfirmModal
         visible={errorModal.visible}
@@ -569,11 +613,84 @@ const styles = StyleSheet.create({
   },
   saveButtonDisabled: { opacity: 0.6 },
   saveButtonText: { fontSize: 16, fontWeight: '600', color: '#ffffff' },
+
+  // ─── Modal de fecha ───────────────────────────────────────────────────────
+  dateModalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.45)',
+    justifyContent: 'flex-end',
+  },
+  dateModalContent: {
+    backgroundColor: '#ffffff',
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
+    paddingBottom: 32,
+  },
+  dateModalHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 20,
+    paddingTop: 20,
+    paddingBottom: 12,
+    borderBottomWidth: 0.5,
+    borderBottomColor: '#E2E8F0',
+  },
+  dateModalTitle: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: '#0F172A',
+  },
+  dateModalCancel: { width: 80 },
+  dateModalCancelText: {
+    fontSize: 15,
+    color: '#94A3B8',
+    fontWeight: '500',
+  },
+  datePreview: {
+    alignItems: 'center',
+    paddingVertical: 14,
+    paddingHorizontal: 20,
+    backgroundColor: '#F8FAFC',
+    marginHorizontal: 20,
+    marginTop: 16,
+    borderRadius: 12,
+    borderWidth: 0.5,
+    borderColor: '#E2E8F0',
+  },
+  datePreviewText: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: '#10B981',
+    textTransform: 'capitalize',
+  },
+  datePicker: {
+    width: '100%',
+  },
+  dateConfirmBtn: {
+    backgroundColor: '#10B981',
+    marginHorizontal: 20,
+    marginTop: 8,
+    paddingVertical: 16,
+    borderRadius: 14,
+    alignItems: 'center',
+  },
+  dateConfirmText: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: '#ffffff',
+  },
+
+  // ─── Modal de clientes ────────────────────────────────────────────────────
   modalOverlay: {
-    flex: 1, backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    flex: 1, backgroundColor: 'rgba(0,0,0,0.5)',
     justifyContent: 'flex-start', paddingTop: 100,
   },
-  modalContent: { backgroundColor: '#ffffff', borderTopLeftRadius: 20, borderTopRightRadius: 20, maxHeight: '80%' },
+  modalContent: {
+    backgroundColor: '#ffffff',
+    borderTopLeftRadius: 20, borderTopRightRadius: 20,
+    maxHeight: '80%',
+  },
   modalHeader: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
     padding: 20, borderBottomWidth: 1, borderBottomColor: '#E5E7EB',
