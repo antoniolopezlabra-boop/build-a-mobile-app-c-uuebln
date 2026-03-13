@@ -1,5 +1,5 @@
 import React, { useState, useCallback } from 'react';
-import { View, Text, ScrollView, StyleSheet, TouchableOpacity, ActivityIndicator, Dimensions } from 'react-native';
+import { View, Text, ScrollView, StyleSheet, TouchableOpacity, ActivityIndicator, Dimensions, RefreshControl } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useFocusEffect } from '@react-navigation/native';
@@ -53,13 +53,15 @@ export default function AdminDashboard() {
   const { signOut } = useAuth();
   const [data, setData] = useState<DashboardData | null>(null);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
 
   useFocusEffect(useCallback(() => {
     if (adminUser) loadData();
   }, [adminUser]));
 
-  const loadData = async () => {
-    setLoading(true);
+  const loadData = async (isPullRefresh = false) => {
+    if (isPullRefresh) setRefreshing(true);
+    else setLoading(true);
     try {
       const monthStart = new Date(); monthStart.setDate(1);
       const monthStartStr = monthStart.toISOString().split('T')[0];
@@ -86,14 +88,11 @@ export default function AdminDashboard() {
           .select('created_at')
           .gte('created_at', new Date(Date.now() - 56 * 86400000).toISOString())
           .order('created_at'),
-        // SECURITY DEFINER function — bypasea RLS para leer todos los planes
         supabase.rpc('get_all_subscription_plans'),
       ]);
 
       if (plansError) console.error('[Admin] Plans RPC error:', plansError);
-      console.log('[Admin] Plans raw:', plans);
 
-      // Contar planes — tolerante a acento y mayúsculas
       const basicCount = plans?.filter((p: any) => {
         const t = (p.plan_type || '').toLowerCase().trim();
         return t === 'basico' || t === 'básico';
@@ -106,12 +105,9 @@ export default function AdminDashboard() {
       ).length || 0;
       const mrr = basicCount * 990 + premiumCount * 1490;
 
-      console.log('[Admin] Counts — basic:', basicCount, 'premium:', premiumCount, 'gratuito:', gratuitoCount);
-
       const activeTenants = sessions?.length || 0;
       const retentionRate = totalTenants ? Math.round((activeTenants / (totalTenants || 1)) * 100) : 0;
 
-      // Agrupar citas por día (14 días)
       const days: Record<string, number> = {};
       for (let i = 13; i >= 0; i--) {
         const d = new Date(); d.setDate(d.getDate() - i);
@@ -123,7 +119,6 @@ export default function AdminDashboard() {
         if (days[key] !== undefined) days[key]++;
       });
 
-      // Agrupar negocios por semana (8 semanas)
       const weeks: Record<string, number> = {};
       for (let i = 7; i >= 0; i--) weeks[`S${8 - i}`] = 0;
       weeklyRegs?.forEach((p: any) => {
@@ -149,6 +144,7 @@ export default function AdminDashboard() {
       console.error('[Admin] Failed to load:', error);
     } finally {
       setLoading(false);
+      setRefreshing(false);
     }
   };
 
@@ -175,8 +171,18 @@ export default function AdminDashboard() {
         </View>
       </View>
 
-      <ScrollView contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>
-
+      <ScrollView
+        contentContainerStyle={styles.scroll}
+        showsVerticalScrollIndicator={false}
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={() => loadData(true)}
+            tintColor="#F59E0B"
+            colors={['#F59E0B']}
+          />
+        }
+      >
         <Text style={styles.sectionTitle}>📊 Resumen Global</Text>
         <View style={styles.kpiGrid}>
           <TouchableOpacity style={[styles.kpiCard, { borderLeftColor: '#10B981' }]} onPress={() => router.push('/admin/tenants')}>
