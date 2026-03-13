@@ -60,23 +60,37 @@ export function PlanProvider({ children }: { children: React.ReactNode }) {
         .eq('user_id', user.id)
         .single();
 
-      if (error || !data) {
-        // Usuario nuevo sin registro — crear plan Gratuito
-        await supabase.from('subscription_plans').insert({
-          user_id: user.id,
-          plan_type: 'Gratuito',
-          price: '0',
-          status: 'active',
-        });
-        setPlan(defaultPlan);
-      } else {
-        setPlan({
-          planType: data.plan_type as PlanType,
-          status: data.status as PlanStatus,
-          trialEndsAt: data.trial_ends_at,
-          price: data.price,
-        });
+      // Fix #5: solo crear plan Gratuito si el error es PGRST116 (no rows found)
+      // No crear si el error es de red u otro tipo — evita INSERTs duplicados
+      if (error) {
+        if (error.code === 'PGRST116') {
+          // Registro no existe — usuario nuevo, crear plan Gratuito
+          await supabase.from('subscription_plans').insert({
+            user_id: user.id,
+            plan_type: 'Gratuito',
+            price: '0',
+            status: 'active',
+          });
+          setPlan(defaultPlan);
+        } else {
+          // Error de red u otro — no hacer INSERT, usar default silenciosamente
+          console.warn('[PlanContext] Error al obtener plan (no se crea registro):', error.message);
+          setPlan(defaultPlan);
+        }
+        return;
       }
+
+      if (!data) {
+        setPlan(defaultPlan);
+        return;
+      }
+
+      setPlan({
+        planType: data.plan_type as PlanType,
+        status: data.status as PlanStatus,
+        trialEndsAt: data.trial_ends_at,
+        price: data.price,
+      });
     } catch (e) {
       console.error('[PlanContext] Error loading plan:', e);
       setPlan(defaultPlan);
@@ -89,7 +103,6 @@ export function PlanProvider({ children }: { children: React.ReactNode }) {
     loadPlan();
   }, [user]);
 
-  // Computed values
   const isGratuito = plan.planType === 'Gratuito';
   const isBasico = plan.planType === 'Básico';
   const isPremium = plan.planType === 'Premium';
@@ -99,7 +112,6 @@ export function PlanProvider({ children }: { children: React.ReactNode }) {
     : 0;
   const isTrialActive = plan.status === 'trial' && daysLeftInTrial > 0;
 
-  // Feature flags
   const canSchedule = isBasico || isPremium || isTrialActive;
   const canViewReports = isBasico || isPremium || isTrialActive;
   const canUseWhatsApp = isBasico || isPremium || isTrialActive;
