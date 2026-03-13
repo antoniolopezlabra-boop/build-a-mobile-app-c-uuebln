@@ -1,11 +1,12 @@
 import React, { createContext, useContext, useEffect, useRef, useState } from 'react';
 import { useAuth } from './AuthContext';
 
-export type PlanType = 'Gratuito' | 'Básico' | 'Premium';
+// Aceptar ambas variantes: con y sin acento, para tolerar inconsistencias en BD
+export type PlanType = 'Gratuito' | 'Básico' | 'Basico' | 'Premium';
 export type PlanStatus = 'active' | 'trial' | 'expired' | 'cancelled';
 
 interface PlanData {
-  planType: PlanType;
+  planType: string; // string amplio para no fallar con variantes de BD
   status: PlanStatus;
   trialEndsAt: string | null;
   price: string;
@@ -36,6 +37,14 @@ const defaultPlan: PlanData = {
   trialEndsAt: null,
   price: '0',
 };
+
+// Helper: normalizar plan_type de BD — tolera acentos y mayúsculas
+function normalizePlanType(raw: string): string {
+  const lower = raw.toLowerCase().trim();
+  if (lower === 'basico' || lower === 'básico') return 'Basico';
+  if (lower === 'premium') return 'Premium';
+  return 'Gratuito';
+}
 
 const PlanContext = createContext<PlanContextType>({} as PlanContextType);
 
@@ -78,9 +87,11 @@ export function PlanProvider({ children }: { children: React.ReactNode }) {
         return;
       }
 
-      console.log('[PlanContext] Plan loaded:', data.plan_type, data.status);
+      const normalized = normalizePlanType(data.plan_type);
+      console.log('[PlanContext] Plan loaded (raw):', data.plan_type, '→ normalized:', normalized, '| status:', data.status);
+
       setPlan({
-        planType: data.plan_type as PlanType,
+        planType: normalized,
         status: data.status as PlanStatus,
         trialEndsAt: data.trial_ends_at,
         price: data.price,
@@ -94,39 +105,29 @@ export function PlanProvider({ children }: { children: React.ReactNode }) {
   };
 
   useEffect(() => {
-    // Esperar a que Auth termine de cargar
-    if (authLoading) {
-      console.log('[PlanContext] Waiting for auth...');
-      return;
-    }
-
-    // Sin usuario — resetear plan
+    if (authLoading) return;
     if (!user?.id) {
-      console.log('[PlanContext] No user, resetting plan');
       lastLoadedUserId.current = null;
       setPlan(defaultPlan);
       setLoading(false);
       return;
     }
-
-    // Evitar recargar el mismo usuario dos veces
-    if (lastLoadedUserId.current === user.id) {
-      console.log('[PlanContext] Plan already loaded for this user, skipping');
-      return;
-    }
-
+    if (lastLoadedUserId.current === user.id) return;
     lastLoadedUserId.current = user.id;
     loadPlan(user.id);
   }, [user?.id, authLoading]);
 
+  // Comparaciones normalizadas — funciona con o sin acento
   const isGratuito = plan.planType === 'Gratuito';
-  const isBasico = plan.planType === 'Básico';
+  const isBasico = plan.planType === 'Basico' || plan.planType === 'Básico';
   const isPremium = plan.planType === 'Premium';
 
   const daysLeftInTrial = plan.trialEndsAt
     ? Math.max(0, Math.ceil((new Date(plan.trialEndsAt).getTime() - Date.now()) / (1000 * 60 * 60 * 24)))
     : 0;
   const isTrialActive = plan.status === 'trial' && daysLeftInTrial > 0;
+
+  console.log('[PlanContext] Feature flags — isBasico:', isBasico, 'isPremium:', isPremium, 'canViewReports:', isBasico || isPremium || isTrialActive);
 
   const canSchedule = isBasico || isPremium || isTrialActive;
   const canViewReports = isBasico || isPremium || isTrialActive;
