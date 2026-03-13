@@ -14,16 +14,14 @@ interface PlanData {
 interface PlanContextType {
   plan: PlanData;
   loading: boolean;
-  // Feature flags
-  canSchedule: boolean;        // Básico+
-  canViewReports: boolean;     // Básico+
-  canUseWhatsApp: boolean;     // Básico+
-  canUseOwnNumber: boolean;    // Premium
-  canOverlap: boolean;         // Premium
-  canUseCollaborators: boolean;// Premium
-  canRunCampaigns: boolean;    // Premium
-  canExportCSV: boolean;       // Premium
-  // Helpers
+  canSchedule: boolean;
+  canViewReports: boolean;
+  canUseWhatsApp: boolean;
+  canUseOwnNumber: boolean;
+  canOverlap: boolean;
+  canUseCollaborators: boolean;
+  canRunCampaigns: boolean;
+  canExportCSV: boolean;
   isGratuito: boolean;
   isBasico: boolean;
   isPremium: boolean;
@@ -42,39 +40,33 @@ const defaultPlan: PlanData = {
 const PlanContext = createContext<PlanContextType>({} as PlanContextType);
 
 export function PlanProvider({ children }: { children: React.ReactNode }) {
-  const { user } = useAuth();
+  const { user, loading: authLoading } = useAuth();
   const [plan, setPlan] = useState<PlanData>(defaultPlan);
+  // Fix: loading inicia en true — nunca mostrar paywall antes de saber el plan real
   const [loading, setLoading] = useState(true);
 
-  const loadPlan = async () => {
-    if (!user) {
-      setPlan(defaultPlan);
-      setLoading(false);
-      return;
-    }
+  const loadPlan = async (userId: string) => {
+    setLoading(true);
     try {
       const { supabase } = await import('@/lib/supabase');
       const { data, error } = await supabase
         .from('subscription_plans')
         .select('plan_type, status, trial_ends_at, price')
-        .eq('user_id', user.id)
+        .eq('user_id', userId)
         .single();
 
-      // Fix #5: solo crear plan Gratuito si el error es PGRST116 (no rows found)
-      // No crear si el error es de red u otro tipo — evita INSERTs duplicados
       if (error) {
         if (error.code === 'PGRST116') {
-          // Registro no existe — usuario nuevo, crear plan Gratuito
+          // Usuario nuevo — crear plan Gratuito
           await supabase.from('subscription_plans').insert({
-            user_id: user.id,
+            user_id: userId,
             plan_type: 'Gratuito',
             price: '0',
             status: 'active',
           });
           setPlan(defaultPlan);
         } else {
-          // Error de red u otro — no hacer INSERT, usar default silenciosamente
-          console.warn('[PlanContext] Error al obtener plan (no se crea registro):', error.message);
+          console.warn('[PlanContext] Error al obtener plan:', error.message);
           setPlan(defaultPlan);
         }
         return;
@@ -99,9 +91,17 @@ export function PlanProvider({ children }: { children: React.ReactNode }) {
     }
   };
 
+  // Fix: dependencia por user?.id (string primitivo) en lugar de user (objeto)
+  // Evita re-renders innecesarios y re-cargas del plan
   useEffect(() => {
-    loadPlan();
-  }, [user]);
+    if (authLoading) return; // Esperar a que Auth termine antes de cargar plan
+    if (!user?.id) {
+      setPlan(defaultPlan);
+      setLoading(false);
+      return;
+    }
+    loadPlan(user.id);
+  }, [user?.id, authLoading]);
 
   const isGratuito = plan.planType === 'Gratuito';
   const isBasico = plan.planType === 'Básico';
@@ -129,7 +129,7 @@ export function PlanProvider({ children }: { children: React.ReactNode }) {
       canRunCampaigns, canExportCSV,
       isGratuito, isBasico, isPremium,
       isTrialActive, daysLeftInTrial,
-      refreshPlan: loadPlan,
+      refreshPlan: () => user?.id ? loadPlan(user.id) : Promise.resolve(),
     }}>
       {children}
     </PlanContext.Provider>
