@@ -7,6 +7,7 @@ import {
   TouchableOpacity,
   ActivityIndicator,
   Image,
+  RefreshControl,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
@@ -42,6 +43,7 @@ export default function HomeScreen() {
   const { user, businessProfile, loading: authLoading } = useAuth();
   const { canSchedule, isGratuito, isBasico, isPremium } = usePlan();
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [stats, setStats] = useState<DashboardStats>({
     todayAppointments: 0,
     confirmedToday: 0,
@@ -55,14 +57,13 @@ export default function HomeScreen() {
   const [todayAppointments, setTodayAppointments] = useState<TodayAppointment[]>([]);
   const [weekAppointments, setWeekAppointments] = useState<TodayAppointment[]>([]);
 
-  // Fix #4: dependencia correcta [user?.id] en lugar de [user]
   useFocusEffect(
     React.useCallback(() => {
       loadDashboardData();
     }, [user?.id])
   );
 
-  const loadDashboardData = async (forceRefresh = false) => {
+  const loadDashboardData = async (forceRefresh = false, isPullRefresh = false) => {
     try {
       const cachedStats = getCached<DashboardStats>('dashboard_stats');
       const cachedApts = getCached<TodayAppointment[]>('today_appointments');
@@ -76,7 +77,9 @@ export default function HomeScreen() {
         return;
       }
 
-      setLoading(true);
+      if (isPullRefresh) setRefreshing(true);
+      else setLoading(true);
+
       const results = await Promise.allSettled([
         apiGet<DashboardStats>('/api/stats/dashboard'),
         apiGet<TodayAppointment[]>('/api/appointments/today'),
@@ -98,6 +101,7 @@ export default function HomeScreen() {
       console.error('[Home] Error loading dashboard:', error);
     } finally {
       setLoading(false);
+      setRefreshing(false);
     }
   };
 
@@ -127,7 +131,17 @@ export default function HomeScreen() {
 
   return (
     <SafeAreaView style={styles.container}>
-      <ScrollView contentContainerStyle={styles.scrollContent}>
+      <ScrollView
+        contentContainerStyle={styles.scrollContent}
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={() => loadDashboardData(true, true)}
+            tintColor={colors.primary}
+            colors={[colors.primary]}
+          />
+        }
+      >
         <View style={styles.header}>
           <View style={styles.headerTop}>
             <View style={styles.headerLeft}>
@@ -255,7 +269,6 @@ export default function HomeScreen() {
           </View>
         </View>
 
-        {/* Fix #3: banner WhatsApp solo visible para plan Básico o Premium */}
         {(isBasico || isPremium) && (
           <TouchableOpacity style={styles.whatsappBanner} onPress={() => router.push('/settings/whatsapp')}>
             <MaterialIcons name="warning" size={24} color={colors.warning} />

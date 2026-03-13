@@ -3,7 +3,7 @@ import React, { useEffect, useState, useCallback } from 'react';
 import { useFocusEffect } from '@react-navigation/native';
 import { useRouter } from 'expo-router';
 import { usePlan } from '@/contexts/PlanContext';
-import { View, Text, ScrollView, ActivityIndicator, StyleSheet, TouchableOpacity } from 'react-native';
+import { View, Text, ScrollView, ActivityIndicator, StyleSheet, TouchableOpacity, RefreshControl } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { supabase } from '@/lib/supabase';
 import { getCurrentUserId } from '@/utils/api';
@@ -47,10 +47,10 @@ const STATUS_CONFIG: Record<string, { color: string; bg: string; label: string }
 };
 
 export default function ReportsScreen() {
-  // Fix: también traer `loading` del PlanContext para no mostrar paywall mientras carga
   const { canViewReports, isGratuito, loading: planLoading } = usePlan();
   const router = useRouter();
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [stats, setStats] = useState<Stats | null>(null);
   const [recent, setRecent] = useState<RecentAppointment[]>([]);
   const [activeTab, setActiveTab] = useState<'hoy' | 'semana' | 'mes'>('hoy');
@@ -63,7 +63,7 @@ export default function ReportsScreen() {
     }, [])
   );
 
-  const loadData = async (forceRefresh = false) => {
+  const loadData = async (forceRefresh = false, isPullRefresh = false) => {
     const cachedStats = getCached<any>('reports_stats');
     const cachedRecent = getCached<any[]>('reports_recent');
     if (!forceRefresh && cachedStats && cachedRecent) {
@@ -72,7 +72,8 @@ export default function ReportsScreen() {
       setLoading(false);
       return;
     }
-    setLoading(true);
+    if (isPullRefresh) setRefreshing(true);
+    else setLoading(true);
     try {
       const userId = await getCurrentUserId();
       const today = getTodayString();
@@ -146,6 +147,7 @@ export default function ReportsScreen() {
       console.error('[Reports] Failed to load:', error);
     } finally {
       setLoading(false);
+      setRefreshing(false);
     }
   };
 
@@ -154,7 +156,6 @@ export default function ReportsScreen() {
     return date.toLocaleDateString('es-MX', { day: 'numeric', month: 'short' });
   };
 
-  // Fix: mostrar spinner mientras el plan está cargando — nunca mostrar paywall prematuramente
   if (planLoading || loading) {
     return (
       <SafeAreaView style={styles.container}>
@@ -165,7 +166,6 @@ export default function ReportsScreen() {
     );
   }
 
-  // Solo mostrar paywall cuando el plan ya cargó y definitivamente no tiene acceso
   if (!canViewReports) {
     return (
       <SafeAreaView style={styles.container}>
@@ -189,7 +189,18 @@ export default function ReportsScreen() {
 
   return (
     <SafeAreaView style={styles.container}>
-      <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.scroll}>
+      <ScrollView
+        showsVerticalScrollIndicator={false}
+        contentContainerStyle={styles.scroll}
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={() => loadData(true, true)}
+            tintColor="#10B981"
+            colors={['#10B981']}
+          />
+        }
+      >
         <View style={styles.header}>
           <Text style={styles.headerTitle}>Reportes</Text>
           <Text style={styles.headerSubtitle}>Resumen de tu negocio</Text>
