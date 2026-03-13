@@ -2,7 +2,8 @@ import { Stack, useRouter, useSegments } from 'expo-router';
 import { StripeProvider } from '@stripe/stripe-react-native';
 import { STRIPE_PUBLISHABLE_KEY } from '@/services/stripe';
 import { LogBox } from 'react-native';
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
 LogBox.ignoreAllLogs();
 import { StatusBar } from 'expo-status-bar';
@@ -16,26 +17,40 @@ function NavigationGuard() {
   const { isAdmin, loading: adminLoading } = useAdmin();
   const router = useRouter();
   const segments = useSegments();
+  const [hasSeenOnboarding, setHasSeenOnboarding] = useState<boolean | null>(null);
+
+  // Leer si el usuario ya vio el onboarding (una sola vez al montar)
+  useEffect(() => {
+    AsyncStorage.getItem('has_seen_onboarding').then(val => {
+      setHasSeenOnboarding(val === 'true');
+    });
+  }, []);
 
   useEffect(() => {
-    // Esperar a que tanto auth como admin terminen de cargar
-    if (authLoading || adminLoading) return;
+    // Esperar a que todo cargue
+    if (authLoading || adminLoading || hasSeenOnboarding === null) return;
 
     const inAuthScreen = segments[0] === 'auth';
     const inAdminScreen = segments[0] === 'admin';
 
+    // Sin sesión activa
     if (!user && !inAuthScreen) {
-      router.replace('/auth/login');
+      if (hasSeenOnboarding) {
+        // Usuario recurrente (cerró sesión) → login directo
+        router.replace('/auth/login');
+      } else {
+        // Usuario nuevo → onboarding
+        router.replace('/auth/onboarding');
+      }
       return;
     }
 
-    // Si el usuario es admin y no está en el panel admin, redirigir
+    // Admin autenticado → panel admin
     if (user && isAdmin && !inAdminScreen) {
-      console.log('[NavigationGuard] Admin detected, redirecting to admin panel');
       router.replace('/admin');
       return;
     }
-  }, [user, isAdmin, authLoading, adminLoading, segments]);
+  }, [user, isAdmin, authLoading, adminLoading, hasSeenOnboarding, segments]);
 
   return null;
 }

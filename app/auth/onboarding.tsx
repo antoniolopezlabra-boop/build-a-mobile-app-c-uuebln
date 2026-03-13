@@ -1,5 +1,5 @@
 
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef } from 'react';
 import {
   View,
   Text,
@@ -10,7 +10,6 @@ import {
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { useAuth } from '@/contexts/AuthContext';
 import { colors } from '@/styles/commonStyles';
 import { IconSymbol } from '@/components/IconSymbol';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -37,13 +36,6 @@ const slides = [
 
 export default function OnboardingScreen() {
   const router = useRouter();
-  const { user, loading } = useAuth();
-
-  useEffect(() => {
-    if (!loading && user) {
-      router.replace('/(tabs)/(home)');
-    }
-  }, [user, loading]);
   const [currentIndex, setCurrentIndex] = useState(0);
   const scrollViewRef = useRef<ScrollView>(null);
 
@@ -53,14 +45,12 @@ export default function OnboardingScreen() {
       setCurrentIndex(nextIndex);
       scrollViewRef.current?.scrollTo({ x: width * nextIndex, animated: true });
     } else {
-      console.log('User completed onboarding, navigating to login');
       await AsyncStorage.setItem('has_seen_onboarding', 'true');
       router.replace('/auth/login');
     }
   };
 
   const handleSkip = async () => {
-    console.log('User skipped onboarding, navigating to login');
     await AsyncStorage.setItem('has_seen_onboarding', 'true');
     router.replace('/auth/login');
   };
