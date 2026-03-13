@@ -1,4 +1,5 @@
 import React, { createContext, useContext, useState, useEffect, ReactNode } from "react";
+import { router } from 'expo-router';
 import { supabase } from "@/lib/supabase";
 import { Session, User } from "@supabase/supabase-js";
 
@@ -41,7 +42,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [authLoading, setAuthLoading] = useState(false);
 
   useEffect(() => {
-    // Escuchar cambios de sesión
     const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
       console.log("[Auth] State change:", event);
       if (event === "USER_UPDATED") return;
@@ -54,7 +54,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       }
     });
 
-    // Verificar sesión inicial
     supabase.auth.getSession().then(async ({ data: { session } }) => {
       if (session?.user) {
         await loadUserData(session.user);
@@ -125,8 +124,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const register = async (params: { email: string; password: string; name: string; businessName: string; businessType: string }) => {
     try {
       setAuthLoading(true);
-      console.log('[Auth] Registering user:', params.email);
-
       const { data, error } = await supabase.auth.signUp({
         email: params.email,
         password: params.password,
@@ -137,9 +134,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
       if (error) throw error;
       if (!data.user) throw new Error('No user returned');
-
-
-      console.log('[Auth] Registration successful');
     } catch (error) {
       console.error('[Auth] Registration error:', error);
       throw error;
@@ -151,12 +145,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const login = async (email: string, password: string) => {
     try {
       setAuthLoading(true);
-      console.log('[Auth] Logging in:', email);
-
       const { data, error } = await supabase.auth.signInWithPassword({ email, password });
       if (error) throw error;
-
-      console.log('[Auth] Login successful');
     } catch (error) {
       console.error('[Auth] Login error:', error);
       throw error;
@@ -165,11 +155,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   };
 
+  // Fix #6: router importado al inicio del archivo, no dinámicamente
   const signOut = async () => {
     try {
       setAuthLoading(true);
       await supabase.auth.signOut();
-      const { router } = await import('expo-router');
       router.replace('/auth/login');
     } catch (error) {
       console.error('[Auth] Sign out error:', error);

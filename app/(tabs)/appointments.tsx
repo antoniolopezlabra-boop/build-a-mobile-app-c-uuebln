@@ -17,6 +17,7 @@ import { useRouter, useFocusEffect } from 'expo-router';
 import { usePlan } from '@/contexts/PlanContext';
 import { Calendar } from 'react-native-calendars';
 
+// Fix #10: tipos de status completos incluyendo Pagado y Reagendada
 interface ApiAppointment {
   id: string;
   clientId: string;
@@ -24,14 +25,12 @@ interface ApiAppointment {
   date: string;
   time: string;
   service: string;
-  status: 'Confirmada' | 'Pendiente' | 'Cancelada' | 'Completada' | 'No-show';
+  status: 'Confirmada' | 'Pendiente' | 'Cancelada' | 'Completada' | 'No-show' | 'Pagado' | 'Reagendada';
   isRescheduled?: boolean;
   notes?: string | null;
   client: { id: string; name: string; phone: string };
   createdAt: string;
 }
-
-type ViewMode = 'month' | 'week' | 'day';
 
 export default function AppointmentsScreen() {
   const router = useRouter();
@@ -39,10 +38,10 @@ export default function AppointmentsScreen() {
   const [loading, setLoading] = useState(true);
   const [appointments, setAppointments] = useState<ApiAppointment[]>([]);
   const [selectedDate, setSelectedDate] = useState(new Date().toISOString().split('T')[0]);
-  const [viewMode, setViewMode] = useState<ViewMode>('month');
   const [markedDates, setMarkedDates] = useState<any>({});
+  const [loadError, setLoadError] = useState(false);
 
-  // Reload appointments when screen comes into focus
+  // Fix #4: dependencia correcta []
   useFocusEffect(
     useCallback(() => {
       loadAppointments();
@@ -61,6 +60,7 @@ export default function AppointmentsScreen() {
       return;
     }
     setLoading(true);
+    setLoadError(false);
     try {
       console.log('[Appointments] Loading all appointments');
       const data = await apiGet<ApiAppointment[]>('/api/appointments');
@@ -69,6 +69,7 @@ export default function AppointmentsScreen() {
       setCached('appointments_list', data);
     } catch (error) {
       console.error('[Appointments] Error loading appointments:', error);
+      setLoadError(true);
     } finally {
       setLoading(false);
     }
@@ -100,30 +101,22 @@ export default function AppointmentsScreen() {
 
   const getStatusColor = (status: string) => {
     switch (status) {
-      case 'Confirmada':
-        return '#10B981';
-      case 'Pendiente':
-        return '#F59E0B';
-      case 'Cancelada':
-        return '#EF4444';
-      case 'Completada':
-        return '#6B7280';
-      case 'No-show':
-        return '#F97316';
-      case 'Reagendada':
-        return '#3B82F6';
-      default:
-        return colors.text;
+      case 'Confirmada': return '#10B981';
+      case 'Pendiente': return '#F59E0B';
+      case 'Cancelada': return '#EF4444';
+      case 'Completada': return '#6B7280';
+      case 'No-show': return '#F97316';
+      case 'Reagendada': return '#3B82F6';
+      case 'Pagado': return '#8B5CF6';
+      default: return colors.text;
     }
   };
 
   const handleDateSelect = (day: any) => {
-    console.log('[Appointments] Date selected:', day.dateString);
     setSelectedDate(day.dateString);
   };
 
   const handleNewAppointment = () => {
-    console.log('[Appointments] Navigate to new appointment');
     if (!canSchedule) {
       router.push('/settings/subscription');
       return;
@@ -132,7 +125,6 @@ export default function AppointmentsScreen() {
   };
 
   const handleAppointmentPress = (appointment: ApiAppointment) => {
-    console.log('[Appointments] Navigate to appointment details:', appointment.id);
     router.push(`/appointments/${appointment.id}`);
   };
 
@@ -158,34 +150,9 @@ export default function AppointmentsScreen() {
 
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
+      {/* Fix #1: header simplificado sin botones Semana/Día no implementados */}
       <View style={styles.header}>
         <Text style={styles.title}>Citas</Text>
-        <View style={styles.viewModeContainer}>
-          <TouchableOpacity
-            style={[styles.viewModeButton, viewMode === 'month' && styles.viewModeButtonActive]}
-            onPress={() => setViewMode('month')}
-          >
-            <Text style={[styles.viewModeText, viewMode === 'month' && styles.viewModeTextActive]}>
-              Mes
-            </Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={[styles.viewModeButton, viewMode === 'week' && styles.viewModeButtonActive]}
-            onPress={() => setViewMode('week')}
-          >
-            <Text style={[styles.viewModeText, viewMode === 'week' && styles.viewModeTextActive]}>
-              Semana
-            </Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={[styles.viewModeButton, viewMode === 'day' && styles.viewModeButtonActive]}
-            onPress={() => setViewMode('day')}
-          >
-            <Text style={[styles.viewModeText, viewMode === 'day' && styles.viewModeTextActive]}>
-              Día
-            </Text>
-          </TouchableOpacity>
-        </View>
       </View>
 
       <ScrollView style={styles.content} showsVerticalScrollIndicator={false}>
@@ -219,8 +186,18 @@ export default function AppointmentsScreen() {
 
         <View style={styles.appointmentsSection}>
           <Text style={styles.sectionTitle}>{formattedDate}</Text>
+
+          {/* Fix #8: mostrar error si falla la carga */}
+          {loadError && (
+            <View style={styles.errorState}>
+              <Text style={styles.errorText}>No se pudieron cargar las citas.</Text>
+              <TouchableOpacity onPress={() => loadAppointments(true)} style={styles.retryButton}>
+                <Text style={styles.retryText}>Reintentar</Text>
+              </TouchableOpacity>
+            </View>
+          )}
           
-          {dateAppointments.length === 0 ? (
+          {!loadError && dateAppointments.length === 0 ? (
             <View style={styles.emptyState}>
               <IconSymbol
                 ios_icon_name="calendar"
@@ -296,20 +273,9 @@ export default function AppointmentsScreen() {
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: colors.background,
-  },
-  loadingContainer: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  loadingText: {
-    marginTop: 16,
-    fontSize: 16,
-    color: colors.textSecondary,
-  },
+  container: { flex: 1, backgroundColor: colors.background },
+  loadingContainer: { flex: 1, justifyContent: 'center', alignItems: 'center' },
+  loadingText: { marginTop: 16, fontSize: 16, color: colors.textSecondary },
   header: {
     paddingHorizontal: 20,
     paddingVertical: 16,
@@ -317,48 +283,10 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     borderBottomColor: '#E5E7EB',
   },
-  title: {
-    fontSize: 28,
-    fontWeight: 'bold',
-    color: colors.text,
-    marginBottom: 12,
-  },
-  viewModeContainer: {
-    flexDirection: 'row',
-    backgroundColor: colors.background,
-    borderRadius: 8,
-    padding: 4,
-  },
-  viewModeButton: {
-    flex: 1,
-    paddingVertical: 8,
-    paddingHorizontal: 12,
-    borderRadius: 6,
-    alignItems: 'center',
-  },
-  viewModeButtonActive: {
-    backgroundColor: '#ffffff',
-  },
-  viewModeText: {
-    fontSize: 14,
-    fontWeight: '500',
-    color: colors.textSecondary,
-  },
-  viewModeTextActive: {
-    color: colors.primary,
-    fontWeight: '600',
-  },
-  content: {
-    flex: 1,
-  },
-  calendarContainer: {
-    backgroundColor: '#ffffff',
-    marginBottom: 16,
-  },
-  appointmentsSection: {
-    paddingHorizontal: 20,
-    paddingBottom: 100,
-  },
+  title: { fontSize: 28, fontWeight: 'bold', color: colors.text },
+  content: { flex: 1 },
+  calendarContainer: { backgroundColor: '#ffffff', marginBottom: 16 },
+  appointmentsSection: { paddingHorizontal: 20, paddingBottom: 100 },
   sectionTitle: {
     fontSize: 18,
     fontWeight: '600',
@@ -366,25 +294,14 @@ const styles = StyleSheet.create({
     marginBottom: 16,
     textTransform: 'capitalize',
   },
-  emptyState: {
-    alignItems: 'center',
-    paddingVertical: 48,
-  },
-  emptyStateTitle: {
-    fontSize: 18,
-    fontWeight: '600',
-    color: colors.text,
-    marginTop: 16,
-    marginBottom: 8,
-  },
-  emptyStateText: {
-    fontSize: 14,
-    color: colors.textSecondary,
-    textAlign: 'center',
-  },
-  appointmentsList: {
-    gap: 12,
-  },
+  errorState: { alignItems: 'center', paddingVertical: 32 },
+  errorText: { fontSize: 15, color: '#EF4444', marginBottom: 12 },
+  retryButton: { backgroundColor: colors.primary, paddingHorizontal: 20, paddingVertical: 10, borderRadius: 8 },
+  retryText: { color: '#fff', fontWeight: '600' },
+  emptyState: { alignItems: 'center', paddingVertical: 48 },
+  emptyStateTitle: { fontSize: 18, fontWeight: '600', color: colors.text, marginTop: 16, marginBottom: 8 },
+  emptyStateText: { fontSize: 14, color: colors.textSecondary, textAlign: 'center' },
+  appointmentsList: { gap: 12 },
   appointmentCard: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -393,43 +310,16 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     gap: 12,
   },
-  appointmentTime: {
-    alignItems: 'center',
-    gap: 4,
-  },
-  timeText: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: colors.text,
-  },
-  appointmentDetails: {
-    flex: 1,
-    gap: 4,
-  },
-  clientName: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: colors.text,
-  },
-  serviceText: {
-    fontSize: 14,
-    color: colors.textSecondary,
-  },
-  statusBadge: {
-    alignSelf: 'flex-start',
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-    borderRadius: 12,
-    marginTop: 4,
-  },
+  appointmentTime: { alignItems: 'center', gap: 4 },
+  timeText: { fontSize: 14, fontWeight: '600', color: colors.text },
+  appointmentDetails: { flex: 1, gap: 4 },
+  clientName: { fontSize: 16, fontWeight: '600', color: colors.text },
+  serviceText: { fontSize: 14, color: colors.textSecondary },
+  statusBadge: { alignSelf: 'flex-start', paddingHorizontal: 10, paddingVertical: 4, borderRadius: 12, marginTop: 4 },
   badgesRow: { flexDirection: 'row', gap: 6, alignItems: 'center', marginTop: 4, flexWrap: 'wrap' },
   rescheduledBadge: { backgroundColor: '#EFF6FF', paddingHorizontal: 8, paddingVertical: 3, borderRadius: 6 },
   rescheduledText: { fontSize: 11, fontWeight: '600', color: '#3B82F6' },
-  statusText: {
-    fontSize: 12,
-    fontWeight: '600',
-    color: '#ffffff',
-  },
+  statusText: { fontSize: 12, fontWeight: '600', color: '#ffffff' },
   fab: {
     position: 'absolute',
     bottom: 90,

@@ -40,8 +40,7 @@ interface TodayAppointment {
 export default function HomeScreen() {
   const router = useRouter();
   const { user, businessProfile, loading: authLoading } = useAuth();
-  const { canSchedule, isGratuito } = usePlan();
-  console.log("[Home] user:", JSON.stringify(user));
+  const { canSchedule, isGratuito, isBasico, isPremium } = usePlan();
   const [loading, setLoading] = useState(true);
   const [stats, setStats] = useState<DashboardStats>({
     todayAppointments: 0,
@@ -56,10 +55,11 @@ export default function HomeScreen() {
   const [todayAppointments, setTodayAppointments] = useState<TodayAppointment[]>([]);
   const [weekAppointments, setWeekAppointments] = useState<TodayAppointment[]>([]);
 
+  // Fix #4: dependencia correcta [user?.id] en lugar de [user]
   useFocusEffect(
     React.useCallback(() => {
       loadDashboardData();
-    }, [user])
+    }, [user?.id])
   );
 
   const loadDashboardData = async (forceRefresh = false) => {
@@ -163,43 +163,43 @@ export default function HomeScreen() {
           </View>
         ) : (
           <>
-        <Text style={styles.sectionLabel}>📅 HOY</Text>
-        <View style={styles.statsContainer}>
-          <View style={styles.statCard}>
-            <MaterialIcons name="calendar-today" size={32} color={colors.primary} />
-            <Text style={styles.statValue}>{stats.todayAppointments}</Text>
-            <Text style={styles.statLabel}>Citas hoy</Text>
-          </View>
-          <View style={styles.statCard}>
-            <MaterialIcons name="check-circle" size={32} color={colors.success} />
-            <Text style={styles.statValue}>{stats.confirmedToday}</Text>
-            <Text style={styles.statLabel}>Confirmadas</Text>
-          </View>
-          <View style={styles.statCard}>
-            <MaterialIcons name="schedule" size={32} color={colors.warning} />
-            <Text style={styles.statValue}>{stats.unconfirmedToday}</Text>
-            <Text style={styles.statLabel}>Sin confirmar</Text>
-          </View>
-        </View>
+            <Text style={styles.sectionLabel}>📅 HOY</Text>
+            <View style={styles.statsContainer}>
+              <View style={styles.statCard}>
+                <MaterialIcons name="calendar-today" size={32} color={colors.primary} />
+                <Text style={styles.statValue}>{stats.todayAppointments}</Text>
+                <Text style={styles.statLabel}>Citas hoy</Text>
+              </View>
+              <View style={styles.statCard}>
+                <MaterialIcons name="check-circle" size={32} color={colors.success} />
+                <Text style={styles.statValue}>{stats.confirmedToday}</Text>
+                <Text style={styles.statLabel}>Confirmadas</Text>
+              </View>
+              <View style={styles.statCard}>
+                <MaterialIcons name="schedule" size={32} color={colors.warning} />
+                <Text style={styles.statValue}>{stats.unconfirmedToday}</Text>
+                <Text style={styles.statLabel}>Sin confirmar</Text>
+              </View>
+            </View>
 
-        <Text style={styles.sectionLabel}>📆 PRÓXIMOS 7 DÍAS</Text>
-        <View style={styles.statsContainer}>
-          <View style={styles.statCard}>
-            <MaterialIcons name="date-range" size={32} color="#6366F1" />
-            <Text style={styles.statValue}>{stats.weekAppointments}</Text>
-            <Text style={styles.statLabel}>Citas semana</Text>
-          </View>
-          <View style={styles.statCard}>
-            <MaterialIcons name="check-circle" size={32} color={colors.success} />
-            <Text style={styles.statValue}>{stats.confirmedWeek}</Text>
-            <Text style={styles.statLabel}>Confirmadas</Text>
-          </View>
-          <View style={styles.statCard}>
-            <MaterialIcons name="schedule" size={32} color={colors.warning} />
-            <Text style={styles.statValue}>{stats.unconfirmedWeek}</Text>
-            <Text style={styles.statLabel}>Sin confirmar</Text>
-          </View>
-        </View>
+            <Text style={styles.sectionLabel}>📆 PRÓXIMOS 7 DÍAS</Text>
+            <View style={styles.statsContainer}>
+              <View style={styles.statCard}>
+                <MaterialIcons name="date-range" size={32} color="#6366F1" />
+                <Text style={styles.statValue}>{stats.weekAppointments}</Text>
+                <Text style={styles.statLabel}>Citas semana</Text>
+              </View>
+              <View style={styles.statCard}>
+                <MaterialIcons name="check-circle" size={32} color={colors.success} />
+                <Text style={styles.statValue}>{stats.confirmedWeek}</Text>
+                <Text style={styles.statLabel}>Confirmadas</Text>
+              </View>
+              <View style={styles.statCard}>
+                <MaterialIcons name="schedule" size={32} color={colors.warning} />
+                <Text style={styles.statValue}>{stats.unconfirmedWeek}</Text>
+                <Text style={styles.statLabel}>Sin confirmar</Text>
+              </View>
+            </View>
           </>
         )}
 
@@ -209,9 +209,11 @@ export default function HomeScreen() {
             <View style={styles.emptyState}>
               <MaterialIcons name="event-available" size={64} color={colors.textSecondary} />
               <Text style={styles.emptyStateText}>Aún no tienes citas hoy</Text>
-              <TouchableOpacity style={styles.emptyStateButton} onPress={() => router.push('/appointments/new')}>
-                <Text style={styles.emptyStateButtonText}>Crear primera cita</Text>
-              </TouchableOpacity>
+              {canSchedule && (
+                <TouchableOpacity style={styles.emptyStateButton} onPress={() => router.push('/appointments/new')}>
+                  <Text style={styles.emptyStateButtonText}>Crear primera cita</Text>
+                </TouchableOpacity>
+              )}
             </View>
           ) : (
             todayAppointments.map((appt) => (
@@ -244,7 +246,7 @@ export default function HomeScreen() {
             </TouchableOpacity>
             <TouchableOpacity style={styles.actionCard} onPress={() => router.push('/(tabs)/appointments')}>
               <MaterialIcons name="list" size={32} color={colors.primary} />
-              <Text style={styles.actionText}>Lista de Espera</Text>
+              <Text style={styles.actionText}>Ver Calendario</Text>
             </TouchableOpacity>
             <TouchableOpacity style={styles.actionCard} onPress={() => router.push('/clients/inactive')}>
               <MaterialIcons name="refresh" size={32} color={colors.primary} />
@@ -253,11 +255,14 @@ export default function HomeScreen() {
           </View>
         </View>
 
-        <TouchableOpacity style={styles.whatsappBanner} onPress={() => router.push('/settings/whatsapp')}>
-          <MaterialIcons name="warning" size={24} color={colors.warning} />
-          <Text style={styles.whatsappText}>WhatsApp: No configurado</Text>
-          <MaterialIcons name="arrow-forward" size={24} color={colors.textSecondary} />
-        </TouchableOpacity>
+        {/* Fix #3: banner WhatsApp solo visible para plan Básico o Premium */}
+        {(isBasico || isPremium) && (
+          <TouchableOpacity style={styles.whatsappBanner} onPress={() => router.push('/settings/whatsapp')}>
+            <MaterialIcons name="warning" size={24} color={colors.warning} />
+            <Text style={styles.whatsappText}>WhatsApp: No configurado</Text>
+            <MaterialIcons name="arrow-forward" size={24} color={colors.textSecondary} />
+          </TouchableOpacity>
+        )}
       </ScrollView>
     </SafeAreaView>
   );
@@ -267,92 +272,24 @@ const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.background },
   loadingContainer: { flex: 1, justifyContent: 'center', alignItems: 'center' },
   scrollContent: { padding: 20, paddingBottom: 100 },
-  headerTop: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-  },
-  headerLeft: {
-    flex: 1,
-    paddingRight: 12,
-  },
-  logoContainer: {
-    alignItems: 'center',
-    gap: 6,
-  },
-  logoImage: {
-    width: 64,
-    height: 64,
-    borderRadius: 16,
-    borderWidth: 2,
-    borderColor: colors.primary,
-  },
-  logoPlaceholder: {
-    width: 64,
-    height: 64,
-    borderRadius: 16,
-    backgroundColor: colors.primary,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  logoPlaceholderText: {
-    fontSize: 28,
-    fontWeight: '800',
-    color: '#ffffff',
-  },
+  headerTop: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+  headerLeft: { flex: 1, paddingRight: 12 },
+  logoContainer: { alignItems: 'center', gap: 6 },
+  logoImage: { width: 64, height: 64, borderRadius: 16, borderWidth: 2, borderColor: colors.primary },
+  logoPlaceholder: { width: 64, height: 64, borderRadius: 16, backgroundColor: colors.primary, justifyContent: 'center', alignItems: 'center' },
+  logoPlaceholderText: { fontSize: 28, fontWeight: '800', color: '#ffffff' },
   header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 },
   greeting: { fontSize: 16, color: colors.textSecondary },
   userName: { fontSize: 28, fontWeight: 'bold', color: colors.text },
   businessName: { fontSize: 16, color: colors.textSecondary, marginTop: 4 },
   date: { fontSize: 14, color: colors.textSecondary, marginBottom: 24 },
-  upgradeCard: {
-    backgroundColor: '#ECFDF5',
-    borderRadius: 16,
-    padding: 24,
-    marginHorizontal: 16,
-    marginBottom: 20,
-    alignItems: 'center',
-    borderWidth: 1,
-    borderColor: '#10B981',
-  },
-  upgradeIcon: {
-    fontSize: 48,
-    marginBottom: 12,
-  },
-  upgradeTitle: {
-    fontSize: 18,
-    fontWeight: '700',
-    color: '#0F172A',
-    marginBottom: 8,
-    textAlign: 'center',
-  },
-  upgradeDesc: {
-    fontSize: 13,
-    color: '#64748B',
-    textAlign: 'center',
-    lineHeight: 20,
-    marginBottom: 16,
-  },
-  upgradeButton: {
-    backgroundColor: '#10B981',
-    paddingHorizontal: 24,
-    paddingVertical: 12,
-    borderRadius: 10,
-  },
-  upgradeButtonText: {
-    color: '#fff',
-    fontWeight: '700',
-    fontSize: 14,
-  },
-  sectionLabel: {
-    fontSize: 11,
-    fontWeight: '800',
-    color: '#94A3B8',
-    letterSpacing: 1.5,
-    marginBottom: 8,
-    marginTop: 16,
-    paddingHorizontal: 4,
-  },
+  upgradeCard: { backgroundColor: '#ECFDF5', borderRadius: 16, padding: 24, marginHorizontal: 16, marginBottom: 20, alignItems: 'center', borderWidth: 1, borderColor: '#10B981' },
+  upgradeIcon: { fontSize: 48, marginBottom: 12 },
+  upgradeTitle: { fontSize: 18, fontWeight: '700', color: '#0F172A', marginBottom: 8, textAlign: 'center' },
+  upgradeDesc: { fontSize: 13, color: '#64748B', textAlign: 'center', lineHeight: 20, marginBottom: 16 },
+  upgradeButton: { backgroundColor: '#10B981', paddingHorizontal: 24, paddingVertical: 12, borderRadius: 10 },
+  upgradeButtonText: { color: '#fff', fontWeight: '700', fontSize: 14 },
+  sectionLabel: { fontSize: 11, fontWeight: '800', color: '#94A3B8', letterSpacing: 1.5, marginBottom: 8, marginTop: 16, paddingHorizontal: 4 },
   statsContainer: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 32 },
   statCard: { flex: 1, backgroundColor: colors.card, borderRadius: 16, padding: 16, alignItems: 'center', marginHorizontal: 4, shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.05, shadowRadius: 8, elevation: 2 },
   statValue: { fontSize: 24, fontWeight: 'bold', color: colors.text, marginTop: 8 },
