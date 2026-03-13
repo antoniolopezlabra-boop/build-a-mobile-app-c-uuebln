@@ -8,6 +8,7 @@ import {
   TouchableOpacity,
   ActivityIndicator,
   Switch,
+  Image,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
@@ -25,14 +26,95 @@ interface WhatsAppConfig {
 }
 
 interface Subscription {
-  planType: 'Básico' | 'Premium';
+  planType: 'Basico' | 'Basico' | 'Premium' | 'Gratuito';
   price: string;
 }
+
+// Fila de ajuste con icono en contenedor de color
+function SettingRow({
+  iconName, iconColor, iconBg, label, sublabel, badge, right, onPress, danger,
+}: {
+  iconName: string; iconColor: string; iconBg: string;
+  label: string; sublabel?: string; badge?: React.ReactNode;
+  right?: React.ReactNode; onPress?: () => void; danger?: boolean;
+}) {
+  return (
+    <TouchableOpacity
+      style={row.container}
+      onPress={onPress}
+      activeOpacity={onPress ? 0.7 : 1}
+      disabled={!onPress}
+    >
+      <View style={[row.iconBox, { backgroundColor: iconBg }]}>
+        <IconSymbol android_material_icon_name={iconName as any} size={20} color={iconColor} />
+      </View>
+      <View style={row.textBox}>
+        <View style={row.labelRow}>
+          <Text style={[row.label, danger && row.labelDanger]}>{label}</Text>
+          {badge}
+        </View>
+        {sublabel ? <Text style={row.sublabel}>{sublabel}</Text> : null}
+      </View>
+      {right !== undefined ? right : (
+        onPress
+          ? <IconSymbol android_material_icon_name="arrow-forward-ios" size={16} color="#CBD5E1" />
+          : null
+      )}
+    </TouchableOpacity>
+  );
+}
+
+const row = StyleSheet.create({
+  container: {
+    flexDirection: 'row', alignItems: 'center', paddingVertical: 13,
+    paddingHorizontal: 16, backgroundColor: '#fff', gap: 14,
+  },
+  iconBox: {
+    width: 36, height: 36, borderRadius: 10,
+    justifyContent: 'center', alignItems: 'center',
+  },
+  textBox: { flex: 1 },
+  labelRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  label: { fontSize: 15, fontWeight: '500', color: '#0F172A' },
+  labelDanger: { color: '#EF4444' },
+  sublabel: { fontSize: 12, color: '#94A3B8', marginTop: 2 },
+});
+
+// Grupo de filas con separador
+function SettingGroup({ title, children }: { title: string; children: React.ReactNode }) {
+  const items = React.Children.toArray(children);
+  return (
+    <View style={grp.wrapper}>
+      <Text style={grp.title}>{title}</Text>
+      <View style={grp.card}>
+        {items.map((child, i) => (
+          <React.Fragment key={i}>
+            {child}
+            {i < items.length - 1 && <View style={grp.divider} />}
+          </React.Fragment>
+        ))}
+      </View>
+    </View>
+  );
+}
+
+const grp = StyleSheet.create({
+  wrapper: { marginBottom: 28 },
+  title: {
+    fontSize: 11, fontWeight: '800', color: '#94A3B8',
+    letterSpacing: 1.2, marginBottom: 8, paddingHorizontal: 4,
+  },
+  card: {
+    backgroundColor: '#fff', borderRadius: 16, overflow: 'hidden',
+    shadowColor: '#000', shadowOpacity: 0.05, shadowRadius: 8, elevation: 2,
+  },
+  divider: { height: 1, backgroundColor: '#F1F5F9', marginLeft: 66 },
+});
 
 export default function SettingsScreen() {
   const router = useRouter();
   const { user, businessProfile, signOut } = useAuth();
-  const { canOverlap, isPremium } = usePlan();
+  const { canOverlap, isPremium, isBasico, isGratuito } = usePlan();
   const [logoutModal, setLogoutModal] = useState(false);
   const [deleteModal, setDeleteModal] = useState(false);
   const [deleting, setDeleting] = useState(false);
@@ -42,9 +124,7 @@ export default function SettingsScreen() {
   const [subscription, setSubscription] = useState<Subscription | null>(null);
   const [loading, setLoading] = useState(true);
 
-  useEffect(() => {
-    loadSettings();
-  }, []);
+  useEffect(() => { loadSettings(); }, []);
 
   const loadSettings = async (forceRefresh = false) => {
     const cachedWA = getCached<any>('settings_whatsapp');
@@ -55,7 +135,6 @@ export default function SettingsScreen() {
       setLoading(false);
       return;
     }
-    console.log('[Settings] Loading settings');
     setLoading(true);
     try {
       const [whatsappData, subscriptionData] = await Promise.all([
@@ -63,16 +142,15 @@ export default function SettingsScreen() {
         apiGet<Subscription>('/api/subscription').catch(() => null),
       ]);
       if (whatsappData) setCached('settings_whatsapp', whatsappData);
-      // Cargar configuración de solapamiento
       const { supabase } = await import('@/lib/supabase');
-      const { data: bpData } = await supabase.from('business_profiles').select('allow_overlapping').eq('user_id', user?.id).single();
+      const { data: bpData } = await supabase
+        .from('business_profiles').select('allow_overlapping').eq('user_id', user?.id).single();
       if (bpData) setAllowOverlapping(bpData.allow_overlapping || false);
       if (subscriptionData) setCached('settings_subscription', subscriptionData);
       setWhatsappConfig(whatsappData);
       setSubscription(subscriptionData);
-      console.log('[Settings] Settings loaded');
     } catch (error) {
-      console.error('[Settings] Failed to load settings:', error);
+      console.error('[Settings] Failed to load:', error);
     } finally {
       setLoading(false);
     }
@@ -80,38 +158,22 @@ export default function SettingsScreen() {
 
   const handleLogout = async () => {
     setLogoutModal(false);
-    console.log('User confirmed logout');
-    try {
-      await signOut();
-    } finally {
-      router.replace('/auth/login');
-    }
+    try { await signOut(); } finally { router.replace('/auth/login'); }
   };
 
   const handleOverlappingToggle = async (value: boolean) => {
-    if (!canOverlap) {
-      router.push('/settings/subscription');
-      return;
-    }
+    if (!canOverlap) { router.push('/settings/subscription'); return; }
     setAllowOverlapping(value);
     setSavingOverlap(true);
     try {
       const { supabase } = await import('@/lib/supabase');
-      await supabase.from('business_profiles')
-        .update({ allow_overlapping: value })
-        .eq('user_id', user?.id);
-    } catch (e) {
-      console.error('Error saving overlapping:', e);
-      setAllowOverlapping(!value); // revert
+      await supabase.from('business_profiles').update({ allow_overlapping: value }).eq('user_id', user?.id);
+    } catch {
+      setAllowOverlapping(!value);
     } finally {
       setSavingOverlap(false);
     }
   };
-
-  const whatsappStatusText = whatsappConfig?.isConnected ? 'Conectado' : 'No configurado';
-  const whatsappStatusColor = whatsappConfig?.isConnected ? colors.primary : colors.warning;
-  const currentPlan = subscription?.planType || 'Básico';
-  const currentPrice = subscription?.planType === 'Gratuito' ? '$0 MXN' : subscription?.planType === 'Premium' ? '$1,490 MXN' : '$990 MXN';
 
   const handleDeleteAccount = async () => {
     setDeleting(true);
@@ -120,406 +182,262 @@ export default function SettingsScreen() {
       const { error } = await supabase.rpc('delete_user_account');
       if (error) throw error;
       await signOut();
-    } catch (error: any) {
-      console.error('[Settings] Failed to delete account:', error);
+    } catch {
       alert('Error al eliminar la cuenta. Intenta de nuevo.');
     } finally {
       setDeleting(false);
     }
   };
 
+  const planLabel = isPremium ? 'Premium' : isBasico ? 'Basico' : 'Gratuito';
+  const planColor = isPremium ? '#6366F1' : isBasico ? '#10B981' : '#94A3B8';
+  const planBg    = isPremium ? '#EDE9FE' : isBasico ? '#ECFDF5' : '#F1F5F9';
+  const planPrice = isPremium ? '$1,490 MXN/mes' : isBasico ? '$990 MXN/mes' : 'Gratis';
+  const planEmoji = isPremium ? '⭐' : isBasico ? '🚀' : '🌱';
+  const planDisplay = isPremium ? 'Premium' : isBasico ? 'Básico' : 'Gratuito';
+  const waConnected = whatsappConfig?.isConnected || false;
+  const initials = user?.name?.split(' ').map((w: string) => w[0]).slice(0, 2).join('').toUpperCase() || 'U';
+
+  if (loading) {
+    return (
+      <SafeAreaView style={s.container}>
+        <View style={s.loading}><ActivityIndicator size="large" color={colors.primary} /></View>
+      </SafeAreaView>
+    );
+  }
+
   return (
-    <SafeAreaView style={styles.container}>
+    <SafeAreaView style={s.container}>
       <ConfirmModal
         visible={logoutModal}
         title="Cerrar sesión"
         message="¿Estás seguro de que deseas cerrar sesión?"
         buttons={[
-          {
-            text: 'Cerrar sesión',
-            onPress: handleLogout,
-            style: 'destructive',
-          },
-          {
-            text: 'Cancelar',
-            onPress: () => setLogoutModal(false),
-            style: 'cancel',
-          },
+          { text: 'Cerrar sesión', onPress: handleLogout, style: 'destructive' },
+          { text: 'Cancelar', onPress: () => setLogoutModal(false), style: 'cancel' },
         ]}
         onDismiss={() => setLogoutModal(false)}
       />
-
-      <View style={styles.header}>
-        <Text style={styles.title}>Configuración</Text>
-      </View>
-
-      {loading ? (
-        <View style={styles.loadingContainer}>
-          <ActivityIndicator size="large" color={colors.primary} />
-        </View>
-      ) : (
-        <ScrollView contentContainerStyle={styles.scrollContent}>
-          {/* User info card */}
-          {user ? (
-            <View style={styles.userCard}>
-              <View style={styles.userAvatar}>
-                <Text style={styles.userAvatarText}>
-                  {user.name?.charAt(0).toUpperCase() || 'U'}
-                </Text>
-              </View>
-              <View style={styles.userInfo}>
-                <Text style={styles.userName}>{user.name}</Text>
-                <Text style={styles.userEmail}>{user.email}</Text>
-                {businessProfile ? (
-                  <Text style={styles.userBusiness}>{businessProfile.businessName}</Text>
-                ) : null}
-              </View>
-            </View>
-          ) : null}
-
-          {/* MI NEGOCIO */}
-          <View style={styles.section}>
-            <Text style={styles.sectionTitle}>MI NEGOCIO</Text>
-
-            <TouchableOpacity
-              style={styles.settingItem}
-              onPress={() => {
-                console.log('User tapped business info');
-                router.push('/settings/business');
-              }}
-            >
-              <View style={styles.settingLeft}>
-                <IconSymbol android_material_icon_name="store" size={24} color={colors.text} />
-                <Text style={styles.settingText}>Información del negocio</Text>
-              </View>
-              <IconSymbol
-                android_material_icon_name="arrow-forward"
-                size={24}
-                color={colors.textSecondary}
-              />
-            </TouchableOpacity>
-
-            <TouchableOpacity
-              style={styles.settingItem}
-              onPress={() => {
-                console.log('User tapped schedule');
-                router.push('/settings/schedule');
-              }}
-            >
-              <View style={styles.settingLeft}>
-                <IconSymbol android_material_icon_name="schedule" size={24} color={colors.text} />
-                <Text style={styles.settingText}>Horarios de atención</Text>
-              </View>
-              <IconSymbol
-                android_material_icon_name="arrow-forward"
-                size={24}
-                color={colors.textSecondary}
-              />
-            </TouchableOpacity>
-            <View style={styles.settingItem}>
-              <View style={styles.settingLeft}>
-                <IconSymbol android_material_icon_name="event-available" size={24} color={colors.text} />
-                <View style={{ flex: 1 }}>
-                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-                    <Text style={styles.settingText}>Citas simultáneas</Text>
-                    {!isPremium && <View style={{ backgroundColor: '#F59E0B', borderRadius: 6, paddingHorizontal: 6, paddingVertical: 2 }}><Text style={{ fontSize: 10, color: '#fff', fontWeight: '700' }}>PREMIUM</Text></View>}
-                  </View>
-                  <Text style={{ fontSize: 11, color: colors.textSecondary, marginTop: 2 }}>
-                    Permite sobreponer citas bajo confirmación
-                  </Text>
-                </View>
-              </View>
-              <Switch
-                value={allowOverlapping}
-                onValueChange={handleOverlappingToggle}
-                trackColor={{ false: '#E2E8F0', true: '#10B981' }}
-                thumbColor={allowOverlapping ? '#fff' : '#fff'}
-                disabled={savingOverlap || !canOverlap}
-              />
-            </View>
-
-          </View>
-
-          {/* WHATSAPP BUSINESS */}
-          <View style={styles.section}>
-            <Text style={styles.sectionTitle}>WHATSAPP BUSINESS</Text>
-
-            <TouchableOpacity
-              style={styles.settingItem}
-              onPress={() => {
-                console.log('User tapped WhatsApp setup');
-                router.push('/settings/whatsapp');
-              }}
-            >
-              <View style={styles.settingLeft}>
-                <IconSymbol android_material_icon_name="message" size={24} color={colors.text} />
-                <View style={styles.settingTextContainer}>
-                  <Text style={styles.settingText}>Configuración de WhatsApp</Text>
-                  <Text style={styles.settingSubtext}>
-                    {whatsappConfig?.phoneNumber || 'Sin configurar'}
-                  </Text>
-                </View>
-              </View>
-              <View style={[styles.statusBadge, { backgroundColor: whatsappStatusColor }]}>
-                <Text style={styles.statusText}>{whatsappStatusText}</Text>
-              </View>
-            </TouchableOpacity>
-          </View>
-
-          {/* PLAN Y SUSCRIPCIÓN */}
-          <View style={styles.section}>
-            <Text style={styles.sectionTitle}>PLAN Y SUSCRIPCIÓN</Text>
-
-            <TouchableOpacity
-              style={styles.settingItem}
-              onPress={() => {
-                console.log('User tapped subscription');
-                router.push('/settings/subscription');
-              }}
-            >
-              <View style={styles.settingLeft}>
-                <IconSymbol android_material_icon_name="star" size={24} color={colors.accent} />
-                <View style={styles.settingTextContainer}>
-                  <Text style={styles.settingText}>Plan {currentPlan}</Text>
-                  <Text style={styles.settingSubtext}>{currentPrice} / mes</Text>
-                </View>
-              </View>
-              <IconSymbol
-                android_material_icon_name="arrow-forward"
-                size={24}
-                color={colors.textSecondary}
-              />
-            </TouchableOpacity>
-          </View>
-
-          {/* CUENTA */}
-          <View style={styles.section}>
-            <Text style={styles.sectionTitle}>CUENTA</Text>
-
-            <TouchableOpacity
-              style={styles.settingItem}
-              onPress={() => {
-                console.log('User tapped edit profile');
-                router.push('/settings/profile');
-              }}
-            >
-              <View style={styles.settingLeft}>
-                <IconSymbol android_material_icon_name="person" size={24} color={colors.text} />
-                <Text style={styles.settingText}>Editar perfil</Text>
-              </View>
-              <IconSymbol
-                android_material_icon_name="arrow-forward"
-                size={24}
-                color={colors.textSecondary}
-              />
-            </TouchableOpacity>
-
-            <TouchableOpacity
-              style={styles.settingItem}
-              onPress={() => {
-                console.log('User tapped change password');
-                router.push('/settings/password');
-              }}
-            >
-              <View style={styles.settingLeft}>
-                <IconSymbol android_material_icon_name="lock" size={24} color={colors.text} />
-                <Text style={styles.settingText}>Cambiar contraseña</Text>
-              </View>
-              <IconSymbol
-                android_material_icon_name="arrow-forward"
-                size={24}
-                color={colors.textSecondary}
-              />
-            </TouchableOpacity>
-
-<TouchableOpacity
-              style={styles.settingItem}
-              onPress={() => router.push('/legal')}
-            >
-              <View style={styles.settingLeft}>
-                <IconSymbol ios_icon_name="doc.text" android_material_icon_name="description" size={24} color={colors.textSecondary} />
-                <Text style={styles.settingText}>Legal y Privacidad</Text>
-              </View>
-              <IconSymbol ios_icon_name="chevron.right" android_material_icon_name="chevron_right" size={20} color={colors.textSecondary} />
-            </TouchableOpacity>
-
-            <TouchableOpacity
-              style={styles.settingItem}
-              onPress={() => {
-                console.log('User tapped logout');
-                setLogoutModal(true);
-              }}
-            >
-              <View style={styles.settingLeft}>
-                <IconSymbol android_material_icon_name="logout" size={24} color={colors.error} />
-                <Text style={[styles.settingText, styles.logoutText]}>Cerrar sesión</Text>
-              </View>
-            </TouchableOpacity>
-
-            <TouchableOpacity
-              style={styles.settingItem}
-              onPress={() => setDeleteModal(true)}
-            >
-              <View style={styles.settingLeft}>
-                <IconSymbol ios_icon_name="trash" android_material_icon_name="delete-forever" size={24} color="#EF4444" />
-                <Text style={[styles.settingText, { color: '#EF4444', fontWeight: '600' }]}>Eliminar mi cuenta</Text>
-              </View>
-            </TouchableOpacity>
-          </View>
-
-          <View style={styles.footer}>
-            <Text style={styles.footerText}>VYLTA v1.0.0</Text>
-            <Text style={styles.footerSubtext}>Cada cliente regresa</Text>
-          </View>
-        </ScrollView>
-      )}
       <ConfirmModal
         visible={deleteModal}
         title="⚠️ Eliminar cuenta"
         message="Se eliminarán TODOS tus datos permanentemente: citas, clientes, configuración y perfil. Esta acción no tiene vuelta atrás. ¿Estás seguro?"
         buttons={[
-          { text: "Cancelar", onPress: () => setDeleteModal(false), style: "cancel" },
-          { text: deleting ? "Eliminando..." : "Sí, eliminar todo", onPress: () => { setDeleteModal(false); handleDeleteAccount(); }, style: "destructive" },
+          { text: 'Cancelar', onPress: () => setDeleteModal(false), style: 'cancel' },
+          { text: deleting ? 'Eliminando...' : 'Sí, eliminar todo', onPress: () => { setDeleteModal(false); handleDeleteAccount(); }, style: 'destructive' },
         ]}
         onDismiss={() => setDeleteModal(false)}
       />
+
+      <View style={s.header}>
+        <Text style={s.headerTitle}>Ajustes</Text>
+      </View>
+
+      <ScrollView contentContainerStyle={s.scroll} showsVerticalScrollIndicator={false}>
+
+        {/* Hero card de perfil */}
+        <TouchableOpacity style={s.heroCard} onPress={() => router.push('/settings/profile')} activeOpacity={0.85}>
+          <View style={s.heroAvatarWrap}>
+            {businessProfile?.logoUrl ? (
+              <Image source={{ uri: businessProfile.logoUrl }} style={s.heroAvatar} />
+            ) : (
+              <View style={[s.heroAvatar, s.heroAvatarFallback]}>
+                <Text style={s.heroAvatarText}>{initials}</Text>
+              </View>
+            )}
+            <View style={s.heroOnline} />
+          </View>
+          <View style={s.heroInfo}>
+            <Text style={s.heroName}>{user?.name || 'Usuario'}</Text>
+            <Text style={s.heroEmail}>{user?.email}</Text>
+            {businessProfile?.businessName
+              ? <Text style={s.heroBusiness}>🏢 {businessProfile.businessName}</Text>
+              : null}
+          </View>
+          <IconSymbol android_material_icon_name="arrow-forward-ios" size={16} color="#CBD5E1" />
+        </TouchableOpacity>
+
+        {/* Card plan */}
+        <TouchableOpacity
+          style={[s.planCard, { borderColor: planColor }]}
+          onPress={() => router.push('/settings/subscription')}
+          activeOpacity={0.85}
+        >
+          <View style={[s.planIconBox, { backgroundColor: planBg }]}>
+            <Text style={s.planEmoji}>{planEmoji}</Text>
+          </View>
+          <View style={s.planInfo}>
+            <View style={s.planRow}>
+              <Text style={s.planName}>Plan {planDisplay}</Text>
+              <View style={[s.planBadge, { backgroundColor: planBg }]}>
+                <Text style={[s.planBadgeText, { color: planColor }]}>{planDisplay.toUpperCase()}</Text>
+              </View>
+            </View>
+            <Text style={s.planPrice}>{planPrice}</Text>
+            {!isPremium && (
+              <Text style={s.planUpgrade}>
+                {isGratuito ? 'Activa WhatsApp y reportes →' : 'Obtén tu número propio →'}
+              </Text>
+            )}
+          </View>
+          <IconSymbol android_material_icon_name="arrow-forward-ios" size={16} color={planColor} />
+        </TouchableOpacity>
+
+        {/* Mi negocio */}
+        <SettingGroup title="MI NEGOCIO">
+          <SettingRow
+            iconName="store" iconColor="#10B981" iconBg="#ECFDF5"
+            label="Información del negocio"
+            sublabel={businessProfile?.businessName || 'Configura tu negocio'}
+            onPress={() => router.push('/settings/business')}
+          />
+          <SettingRow
+            iconName="schedule" iconColor="#3B82F6" iconBg="#EFF6FF"
+            label="Horarios de atención"
+            sublabel="Configura tu disponibilidad"
+            onPress={() => router.push('/settings/schedule')}
+          />
+          <SettingRow
+            iconName="event-available" iconColor="#F59E0B" iconBg="#FFFBEB"
+            label="Citas simultáneas"
+            sublabel="Permite sobreponer citas"
+            badge={
+              !isPremium
+                ? <View style={s.premiumChip}><Text style={s.premiumChipText}>PREMIUM</Text></View>
+                : undefined
+            }
+            right={
+              <Switch
+                value={allowOverlapping}
+                onValueChange={handleOverlappingToggle}
+                trackColor={{ false: '#E2E8F0', true: '#10B981' }}
+                thumbColor="#fff"
+                disabled={savingOverlap || !canOverlap}
+              />
+            }
+          />
+        </SettingGroup>
+
+        {/* WhatsApp */}
+        <SettingGroup title="WHATSAPP BUSINESS">
+          <SettingRow
+            iconName="message" iconColor="#25D366" iconBg="#F0FDF4"
+            label="Configuración de WhatsApp"
+            sublabel={waConnected ? `Conectado · ${whatsappConfig?.phoneNumber || ''}` : 'Sin configurar'}
+            right={
+              <View style={[s.waBadge, { backgroundColor: waConnected ? '#ECFDF5' : '#FEF3C7' }]}>
+                <View style={[s.waDot, { backgroundColor: waConnected ? '#10B981' : '#F59E0B' }]} />
+                <Text style={[s.waText, { color: waConnected ? '#10B981' : '#92400E' }]}>
+                  {waConnected ? 'Activo' : 'Inactivo'}
+                </Text>
+              </View>
+            }
+            onPress={() => router.push('/settings/whatsapp')}
+          />
+        </SettingGroup>
+
+        {/* Cuenta */}
+        <SettingGroup title="CUENTA">
+          <SettingRow
+            iconName="person" iconColor="#6366F1" iconBg="#EEF2FF"
+            label="Editar perfil"
+            onPress={() => router.push('/settings/profile')}
+          />
+          <SettingRow
+            iconName="lock" iconColor="#8B5CF6" iconBg="#F5F3FF"
+            label="Cambiar contraseña"
+            onPress={() => router.push('/settings/password')}
+          />
+          <SettingRow
+            iconName="description" iconColor="#64748B" iconBg="#F8FAFC"
+            label="Legal y Privacidad"
+            onPress={() => router.push('/legal')}
+          />
+        </SettingGroup>
+
+        {/* Sesión */}
+        <SettingGroup title="SESIÓN">
+          <SettingRow
+            iconName="logout" iconColor="#EF4444" iconBg="#FEF2F2"
+            label="Cerrar sesión"
+            danger
+            onPress={() => setLogoutModal(true)}
+          />
+          <SettingRow
+            iconName="delete-forever" iconColor="#EF4444" iconBg="#FEF2F2"
+            label="Eliminar mi cuenta"
+            sublabel="Esta acción es permanente e irreversible"
+            danger
+            onPress={() => setDeleteModal(true)}
+          />
+        </SettingGroup>
+
+        {/* Footer */}
+        <View style={s.footer}>
+          <Text style={s.footerBrand}>VYLTA</Text>
+          <Text style={s.footerTagline}>Cada cliente regresa</Text>
+          <Text style={s.footerVersion}>v1.0.0</Text>
+        </View>
+
+      </ScrollView>
     </SafeAreaView>
   );
 }
 
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: colors.background,
+const s = StyleSheet.create({
+  container: { flex: 1, backgroundColor: '#F8FAFC' },
+  loading: { flex: 1, justifyContent: 'center', alignItems: 'center' },
+  header: { paddingHorizontal: 20, paddingTop: 12, paddingBottom: 16, backgroundColor: '#F8FAFC' },
+  headerTitle: { fontSize: 32, fontWeight: '800', color: '#0F172A', letterSpacing: -0.5 },
+  scroll: { padding: 20, paddingBottom: 100 },
+
+  // Hero
+  heroCard: {
+    backgroundColor: '#fff', borderRadius: 20, padding: 16,
+    flexDirection: 'row', alignItems: 'center', gap: 14, marginBottom: 14,
+    shadowColor: '#000', shadowOpacity: 0.06, shadowRadius: 12, elevation: 3,
   },
-  loadingContainer: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
+  heroAvatarWrap: { position: 'relative' },
+  heroAvatar: { width: 60, height: 60, borderRadius: 30, borderWidth: 2, borderColor: '#E2E8F0' },
+  heroAvatarFallback: { backgroundColor: '#10B981', justifyContent: 'center', alignItems: 'center' },
+  heroAvatarText: { fontSize: 22, fontWeight: '800', color: '#fff' },
+  heroOnline: {
+    position: 'absolute', bottom: 1, right: 1,
+    width: 14, height: 14, borderRadius: 7, backgroundColor: '#10B981', borderWidth: 2, borderColor: '#fff',
   },
-  header: {
-    padding: 20,
-    paddingTop: 48,
-    backgroundColor: colors.card,
-    borderBottomWidth: 1,
-    borderBottomColor: colors.border,
+  heroInfo: { flex: 1 },
+  heroName: { fontSize: 17, fontWeight: '700', color: '#0F172A' },
+  heroEmail: { fontSize: 12, color: '#94A3B8', marginTop: 2 },
+  heroBusiness: { fontSize: 12, color: '#10B981', fontWeight: '600', marginTop: 4 },
+
+  // Plan
+  planCard: {
+    backgroundColor: '#fff', borderRadius: 18, padding: 16,
+    flexDirection: 'row', alignItems: 'center', gap: 14, marginBottom: 28, borderWidth: 1.5,
+    shadowColor: '#000', shadowOpacity: 0.05, shadowRadius: 8, elevation: 2,
   },
-  title: {
-    fontSize: 28,
-    fontWeight: 'bold',
-    color: colors.text,
-  },
-  scrollContent: {
-    padding: 20,
-    paddingBottom: 100,
-  },
-  userCard: {
-    backgroundColor: colors.card,
-    borderRadius: 16,
-    padding: 16,
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: 24,
-    boxShadow: '0px 2px 8px rgba(0, 0, 0, 0.05)',
-    elevation: 2,
-  },
-  userAvatar: {
-    width: 56,
-    height: 56,
-    borderRadius: 28,
-    backgroundColor: colors.primary,
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginRight: 16,
-  },
-  userAvatarText: {
-    fontSize: 24,
-    fontWeight: 'bold',
-    color: '#FFFFFF',
-  },
-  userInfo: {
-    flex: 1,
-  },
-  userName: {
-    fontSize: 18,
-    fontWeight: '700',
-    color: colors.text,
-  },
-  userEmail: {
-    fontSize: 14,
-    color: colors.textSecondary,
-    marginTop: 2,
-  },
-  userBusiness: {
-    fontSize: 13,
-    color: colors.primary,
-    fontWeight: '600',
-    marginTop: 4,
-  },
-  section: {
-    marginBottom: 32,
-  },
-  sectionTitle: {
-    fontSize: 12,
-    fontWeight: '700',
-    color: colors.textSecondary,
-    marginBottom: 12,
-    letterSpacing: 0.5,
-  },
-  settingItem: {
-    backgroundColor: colors.card,
-    borderRadius: 12,
-    padding: 16,
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 8,
-    boxShadow: '0px 1px 4px rgba(0, 0, 0, 0.05)',
-    elevation: 1,
-  },
-  settingLeft: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    flex: 1,
-  },
-  settingTextContainer: {
-    marginLeft: 12,
-    flex: 1,
-  },
-  settingText: {
-    fontSize: 16,
-    color: colors.text,
-    marginLeft: 12,
-  },
-  settingSubtext: {
-    fontSize: 13,
-    color: colors.textSecondary,
-    marginTop: 2,
-  },
-  logoutText: {
-    color: colors.error,
-  },
-  statusBadge: {
-    paddingHorizontal: 12,
-    paddingVertical: 4,
-    borderRadius: 12,
-  },
-  statusText: {
-    fontSize: 11,
-    color: '#FFFFFF',
-    fontWeight: '600',
-  },
-  footer: {
-    alignItems: 'center',
-    marginTop: 32,
-  },
-  footerText: {
-    fontSize: 14,
-    color: colors.textSecondary,
-  },
-  footerSubtext: {
-    fontSize: 12,
-    color: colors.textSecondary,
-    marginTop: 4,
-  },
+  planIconBox: { width: 48, height: 48, borderRadius: 14, justifyContent: 'center', alignItems: 'center' },
+  planEmoji: { fontSize: 24 },
+  planInfo: { flex: 1 },
+  planRow: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 2 },
+  planName: { fontSize: 16, fontWeight: '700', color: '#0F172A' },
+  planBadge: { paddingHorizontal: 7, paddingVertical: 2, borderRadius: 6 },
+  planBadgeText: { fontSize: 10, fontWeight: '800' },
+  planPrice: { fontSize: 13, color: '#64748B', marginBottom: 2 },
+  planUpgrade: { fontSize: 12, color: '#6366F1', fontWeight: '600' },
+
+  // WhatsApp badge
+  waBadge: { flexDirection: 'row', alignItems: 'center', gap: 5, paddingHorizontal: 10, paddingVertical: 5, borderRadius: 20 },
+  waDot: { width: 7, height: 7, borderRadius: 4 },
+  waText: { fontSize: 12, fontWeight: '700' },
+
+  // Premium chip
+  premiumChip: { backgroundColor: '#FFFBEB', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 5 },
+  premiumChipText: { fontSize: 9, fontWeight: '800', color: '#92400E' },
+
+  // Footer
+  footer: { alignItems: 'center', paddingTop: 8, paddingBottom: 16, gap: 4 },
+  footerBrand: { fontSize: 16, fontWeight: '900', color: '#CBD5E1', letterSpacing: 3 },
+  footerTagline: { fontSize: 12, color: '#CBD5E1', fontStyle: 'italic' },
+  footerVersion: { fontSize: 11, color: '#E2E8F0' },
 });
