@@ -59,13 +59,13 @@ export default function TenantsScreen() {
 
       if (!profiles) return;
 
-      // Cargar planes de todos los users en una sola query
-      const userIds = profiles.map((p: any) => p.user_id);
-      const { data: plansData } = await supabase
-        .from('subscription_plans')
-        .select('user_id, plan_type, status')
-        .in('user_id', userIds);
+      // SECURITY DEFINER — bypasea RLS, devuelve todos los planes
+      const { data: plansData, error: plansError } = await supabase
+        .rpc('get_all_subscription_plans');
 
+      if (plansError) console.error('[Tenants] Plans RPC error:', plansError);
+
+      // Construir mapa user_id → plan en memoria
       const planMap: Record<string, { plan_type: string; status: string }> = {};
       plansData?.forEach((p: any) => { planMap[p.user_id] = p; });
 
