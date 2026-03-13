@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useEffect, useState } from 'react';
+import React, { createContext, useContext, useEffect, useRef, useState } from 'react';
 import { useAuth } from './AuthContext';
 
 export type PlanType = 'Gratuito' | 'Básico' | 'Premium';
@@ -42,10 +42,11 @@ const PlanContext = createContext<PlanContextType>({} as PlanContextType);
 export function PlanProvider({ children }: { children: React.ReactNode }) {
   const { user, loading: authLoading } = useAuth();
   const [plan, setPlan] = useState<PlanData>(defaultPlan);
-  // Fix: loading inicia en true — nunca mostrar paywall antes de saber el plan real
   const [loading, setLoading] = useState(true);
+  const lastLoadedUserId = useRef<string | null>(null);
 
   const loadPlan = async (userId: string) => {
+    console.log('[PlanContext] Loading plan for user:', userId);
     setLoading(true);
     try {
       const { supabase } = await import('@/lib/supabase');
@@ -57,7 +58,7 @@ export function PlanProvider({ children }: { children: React.ReactNode }) {
 
       if (error) {
         if (error.code === 'PGRST116') {
-          // Usuario nuevo — crear plan Gratuito
+          console.log('[PlanContext] No plan found, creating Gratuito');
           await supabase.from('subscription_plans').insert({
             user_id: userId,
             plan_type: 'Gratuito',
@@ -66,7 +67,7 @@ export function PlanProvider({ children }: { children: React.ReactNode }) {
           });
           setPlan(defaultPlan);
         } else {
-          console.warn('[PlanContext] Error al obtener plan:', error.message);
+          console.warn('[PlanContext] Error fetching plan:', error.message);
           setPlan(defaultPlan);
         }
         return;
@@ -77,6 +78,7 @@ export function PlanProvider({ children }: { children: React.ReactNode }) {
         return;
       }
 
+      console.log('[PlanContext] Plan loaded:', data.plan_type, data.status);
       setPlan({
         planType: data.plan_type as PlanType,
         status: data.status as PlanStatus,
@@ -91,15 +93,29 @@ export function PlanProvider({ children }: { children: React.ReactNode }) {
     }
   };
 
-  // Fix: dependencia por user?.id (string primitivo) en lugar de user (objeto)
-  // Evita re-renders innecesarios y re-cargas del plan
   useEffect(() => {
-    if (authLoading) return; // Esperar a que Auth termine antes de cargar plan
+    // Esperar a que Auth termine de cargar
+    if (authLoading) {
+      console.log('[PlanContext] Waiting for auth...');
+      return;
+    }
+
+    // Sin usuario — resetear plan
     if (!user?.id) {
+      console.log('[PlanContext] No user, resetting plan');
+      lastLoadedUserId.current = null;
       setPlan(defaultPlan);
       setLoading(false);
       return;
     }
+
+    // Evitar recargar el mismo usuario dos veces
+    if (lastLoadedUserId.current === user.id) {
+      console.log('[PlanContext] Plan already loaded for this user, skipping');
+      return;
+    }
+
+    lastLoadedUserId.current = user.id;
     loadPlan(user.id);
   }, [user?.id, authLoading]);
 
