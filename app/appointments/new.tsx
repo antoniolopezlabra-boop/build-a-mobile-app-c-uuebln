@@ -13,6 +13,7 @@ import {
   Modal,
   Switch,
   Keyboard,
+  Dimensions,
 } from 'react-native';
 import { colors } from '@/styles/commonStyles';
 import { apiGet, apiPost } from '@/utils/api';
@@ -37,6 +38,8 @@ interface TimeSlot {
   isOverlap?: boolean;
 }
 
+const { height: SCREEN_HEIGHT } = Dimensions.get('window');
+
 export default function NewAppointmentScreen() {
   const router = useRouter();
   const { canSchedule, isGratuito } = usePlan();
@@ -48,14 +51,11 @@ export default function NewAppointmentScreen() {
 
   const [service, setService] = useState('');
   const [date, setDate] = useState(new Date());
-
-  // Android: muestra el picker nativo directamente (sin modal wrapper)
-  // iOS: muestra nuestro modal con spinner + botón Confirmar
-  const [showDatePicker, setShowDatePicker] = useState(false);
-  const [showDateModal, setShowDateModal] = useState(false); // solo iOS
-
-  // Fecha temporal — solo para iOS modal; en Android se aplica directo al confirmar
+  const [showDatePanel, setShowDatePanel] = useState(false);
   const [tempDate, setTempDate] = useState(new Date());
+
+  // Android: picker nativo directo
+  const [showDatePickerAndroid, setShowDatePickerAndroid] = useState(false);
 
   const [time, setTime] = useState('09:00');
   const [selectedBlocks, setSelectedBlocks] = useState<string[]>([]);
@@ -72,50 +72,40 @@ export default function NewAppointmentScreen() {
   const costInputRef = useRef<TextInput>(null);
   const notesInputRef = useRef<TextInput>(null);
 
-  // Cierra teclado y abre el selector correcto según plataforma
-  const openDatePicker = () => {
+  const dismissKeyboard = () => {
     serviceInputRef.current?.blur();
     costInputRef.current?.blur();
     notesInputRef.current?.blur();
     Keyboard.dismiss();
+  };
 
+  const openDatePicker = () => {
+    dismissKeyboard();
     if (Platform.OS === 'ios') {
-      // iOS: abre nuestro modal con spinner + botón Confirmar
       setTempDate(date);
-      setTimeout(() => setShowDateModal(true), 50);
+      // Sin setTimeout — el panel es parte del árbol de vistas, no un Modal
+      setShowDatePanel(true);
     } else {
-      // Android: abre el DatePicker nativo directamente
-      // No necesita modal — el OS maneja el dialog con sus propios botones OK/Cancelar
-      setTimeout(() => setShowDatePicker(true), 150);
+      setTimeout(() => setShowDatePickerAndroid(true), 150);
     }
   };
 
-  // iOS: confirmar fecha desde el modal
   const confirmDateIOS = () => {
     setDate(tempDate);
-    setShowDateModal(false);
+    setShowDatePanel(false);
   };
 
-  // iOS: cancelar sin aplicar cambios
   const cancelDateIOS = () => {
     setTempDate(date);
-    setShowDateModal(false);
+    setShowDatePanel(false);
   };
 
-  // Android: el onChange del picker nativo ya trae la fecha confirmada por el usuario
   const onAndroidDateChange = (_event: any, selected?: Date) => {
-    setShowDatePicker(false); // siempre cerrar el picker nativo
-    if (_event.type === 'set' && selected) {
-      // Usuario tocó OK en el dialog nativo
-      setDate(selected);
-    }
-    // Si _event.type === 'dismissed', usuario canceló — no hacemos nada
+    setShowDatePickerAndroid(false);
+    if (_event.type === 'set' && selected) setDate(selected);
   };
 
-  useEffect(() => {
-    loadClients();
-    loadOverlapConfig();
-  }, []);
+  useEffect(() => { loadClients(); loadOverlapConfig(); }, []);
 
   const loadOverlapConfig = async () => {
     try {
@@ -127,9 +117,7 @@ export default function NewAppointmentScreen() {
     } catch (e) {}
   };
 
-  useEffect(() => {
-    checkAvailability();
-  }, [date]);
+  useEffect(() => { checkAvailability(); }, [date]);
 
   const loadClients = async () => {
     try {
@@ -144,10 +132,7 @@ export default function NewAppointmentScreen() {
     const slots: TimeSlot[] = [];
     for (let hour = 9; hour < 19; hour++) {
       for (let minute = 0; minute < 60; minute += 30) {
-        slots.push({
-          time: `${hour.toString().padStart(2, '0')}:${minute.toString().padStart(2, '0')}`,
-          available: true,
-        });
+        slots.push({ time: `${hour.toString().padStart(2, '0')}:${minute.toString().padStart(2, '0')}`, available: true });
       }
     }
     setTimeSlots(slots);
@@ -275,14 +260,13 @@ export default function NewAppointmentScreen() {
           showsVerticalScrollIndicator={false}
           keyboardShouldPersistTaps="handled"
           keyboardDismissMode="on-drag"
+          // Bloquear scroll del formulario mientras el panel de fecha está abierto
+          scrollEnabled={!showDatePanel}
         >
           {/* Cliente */}
           <View style={styles.section}>
             <Text style={styles.label}>Cliente *</Text>
-            <TouchableOpacity
-              style={styles.input}
-              onPress={() => { Keyboard.dismiss(); setShowClientPicker(true); }}
-            >
+            <TouchableOpacity style={styles.input} onPress={() => { dismissKeyboard(); setShowClientPicker(true); }}>
               <Text style={selectedClient ? styles.inputText : styles.inputPlaceholder}>
                 {selectedClient ? selectedClient.name : 'Seleccionar cliente'}
               </Text>
@@ -308,7 +292,10 @@ export default function NewAppointmentScreen() {
           {/* Fecha */}
           <View style={styles.section}>
             <Text style={styles.label}>Fecha *</Text>
-            <TouchableOpacity style={styles.input} onPress={openDatePicker}>
+            <TouchableOpacity
+              style={[styles.input, showDatePanel && styles.inputActive]}
+              onPress={openDatePicker}
+            >
               <Text style={styles.inputText}>{formattedDate}</Text>
               <IconSymbol android_material_icon_name="event" size={20} color={colors.primary} />
             </TouchableOpacity>
@@ -338,12 +325,7 @@ export default function NewAppointmentScreen() {
                     </TouchableOpacity>
                   </View>
                 )}
-                <ScrollView
-                  horizontal
-                  showsHorizontalScrollIndicator={false}
-                  style={styles.timeSlotsContainer}
-                  keyboardShouldPersistTaps="handled"
-                >
+                <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.timeSlotsContainer} keyboardShouldPersistTaps="handled">
                   {timeSlots.map((slot) => {
                     const isSelected = selectedBlocks.includes(slot.time);
                     const isOverlap = slot.isOverlap && !isSelected;
@@ -360,19 +342,15 @@ export default function NewAppointmentScreen() {
                           if (!slot.available) return;
                           Keyboard.dismiss();
                           if (selectedBlocks.length === 0) {
-                            setSelectedBlocks([slot.time]);
-                            setTime(slot.time);
+                            setSelectedBlocks([slot.time]); setTime(slot.time);
                           } else {
                             const firstIdx = timeSlots.findIndex(s => s.time === selectedBlocks[0]);
                             const thisIdx  = timeSlots.findIndex(s => s.time === slot.time);
                             if (thisIdx < firstIdx) {
-                              setSelectedBlocks([slot.time]);
-                              setTime(slot.time);
+                              setSelectedBlocks([slot.time]); setTime(slot.time);
                             } else {
                               const range = timeSlots.slice(firstIdx, thisIdx + 1);
-                              if (range.every(s => s.available)) {
-                                setSelectedBlocks(range.map(s => s.time));
-                              }
+                              if (range.every(s => s.available)) setSelectedBlocks(range.map(s => s.time));
                             }
                           }
                         }}
@@ -455,8 +433,63 @@ export default function NewAppointmentScreen() {
         </ScrollView>
       </KeyboardAvoidingView>
 
-      {/* ─── Android: picker nativo directo (dialog del OS con OK/Cancelar) ── */}
-      {Platform.OS === 'android' && showDatePicker && (
+      {/* ─── iOS: panel de fecha FUERA del Modal — posicionado absolutamente ── */}
+      {/* Renderizar siempre en el árbol para que el UIDatePicker nativo funcione */}
+      {Platform.OS === 'ios' && showDatePanel && (
+        <>
+          {/* Overlay oscuro que cierra el panel al tocar */}
+          <TouchableOpacity
+            style={styles.dateOverlay}
+            activeOpacity={1}
+            onPress={cancelDateIOS}
+          />
+
+          {/* Panel blanco en la parte inferior */}
+          <View style={styles.datePanelContainer}>
+
+            {/* Cabecera */}
+            <View style={styles.datePanelHeader}>
+              <TouchableOpacity onPress={cancelDateIOS}>
+                <Text style={styles.datePanelCancel}>Cancelar</Text>
+              </TouchableOpacity>
+              <Text style={styles.datePanelTitle}>Seleccionar fecha</Text>
+              <TouchableOpacity onPress={confirmDateIOS}>
+                <Text style={styles.datePanelConfirmText}>Listo</Text>
+              </TouchableOpacity>
+            </View>
+
+            {/* Preview de la fecha seleccionada */}
+            <View style={styles.datePanelPreview}>
+              <Text style={styles.datePanelPreviewText}>
+                {formattedTempDate.charAt(0).toUpperCase() + formattedTempDate.slice(1)}
+              </Text>
+            </View>
+
+            {/* DateTimePicker nativo — directamente en el árbol de vistas, sin Modal */}
+            <DateTimePicker
+              value={tempDate}
+              mode="date"
+              display="spinner"
+              minimumDate={new Date()}
+              locale="es-MX"
+              onChange={(_event, selected) => {
+                if (selected) setTempDate(selected);
+              }}
+              style={{ backgroundColor: '#ffffff', width: '100%' }}
+              textColor="#0F172A"
+            />
+
+            {/* Botón confirmar */}
+            <TouchableOpacity style={styles.datePanelConfirmBtn} onPress={confirmDateIOS}>
+              <Text style={styles.datePanelConfirmBtnText}>Confirmar fecha</Text>
+            </TouchableOpacity>
+
+          </View>
+        </>
+      )}
+
+      {/* ─── Android: picker nativo directo ─────────────────────────────── */}
+      {Platform.OS === 'android' && showDatePickerAndroid && (
         <DateTimePicker
           value={date}
           mode="date"
@@ -466,58 +499,8 @@ export default function NewAppointmentScreen() {
         />
       )}
 
-      {/* ─── iOS: modal propio con spinner + botón Confirmar ─────────────── */}
-      {Platform.OS === 'ios' && (
-        <Modal
-          visible={showDateModal}
-          animationType="slide"
-          transparent={true}
-          onRequestClose={cancelDateIOS}
-        >
-          <View style={styles.dateModalOverlay}>
-            <View style={styles.dateModalContent}>
-
-              <View style={styles.dateModalHeader}>
-                <TouchableOpacity onPress={cancelDateIOS} style={styles.dateModalCancelWrap}>
-                  <Text style={styles.dateModalCancelText}>Cancelar</Text>
-                </TouchableOpacity>
-                <Text style={styles.dateModalTitle}>Seleccionar fecha</Text>
-                <View style={{ width: 80 }} />
-              </View>
-
-              <View style={styles.datePreview}>
-                <Text style={styles.datePreviewText}>
-                  {formattedTempDate.charAt(0).toUpperCase() + formattedTempDate.slice(1)}
-                </Text>
-              </View>
-
-              <DateTimePicker
-                value={tempDate}
-                mode="date"
-                display="spinner"
-                minimumDate={new Date()}
-                onChange={(_event, selected) => {
-                  if (selected) setTempDate(selected);
-                }}
-                style={styles.datePicker}
-              />
-
-              <TouchableOpacity style={styles.dateConfirmBtn} onPress={confirmDateIOS}>
-                <Text style={styles.dateConfirmText}>Confirmar fecha</Text>
-              </TouchableOpacity>
-
-            </View>
-          </View>
-        </Modal>
-      )}
-
       {/* ─── Modal selector de clientes ──────────────────────────────────── */}
-      <Modal
-        visible={showClientPicker}
-        animationType="slide"
-        transparent={true}
-        onRequestClose={() => setShowClientPicker(false)}
-      >
+      <Modal visible={showClientPicker} animationType="slide" transparent={true} onRequestClose={() => setShowClientPicker(false)}>
         <View style={styles.modalOverlay}>
           <View style={styles.modalContent}>
             <View style={styles.modalHeader}>
@@ -541,10 +524,7 @@ export default function NewAppointmentScreen() {
                     {searchQuery ? 'No se encontraron clientes' : 'No tienes clientes registrados'}
                   </Text>
                   {!searchQuery && (
-                    <TouchableOpacity
-                      style={styles.addClientButton}
-                      onPress={() => { setShowClientPicker(false); router.push('/clients/new'); }}
-                    >
+                    <TouchableOpacity style={styles.addClientButton} onPress={() => { setShowClientPicker(false); router.push('/clients/new'); }}>
                       <Text style={styles.addClientButtonText}>Agregar cliente</Text>
                     </TouchableOpacity>
                   )}
@@ -604,6 +584,7 @@ const styles = StyleSheet.create({
     backgroundColor: '#ffffff', borderRadius: 12, padding: 16,
     borderWidth: 1, borderColor: '#E5E7EB',
   },
+  inputActive: { borderColor: colors.primary, borderWidth: 2 },
   inputText: { fontSize: 16, color: colors.text },
   inputPlaceholder: { fontSize: 16, color: colors.textSecondary },
   textInput: {
@@ -645,33 +626,38 @@ const styles = StyleSheet.create({
   saveButtonDisabled: { opacity: 0.6 },
   saveButtonText: { fontSize: 16, fontWeight: '600', color: '#ffffff' },
 
-  // ─── Modal fecha (iOS) ────────────────────────────────────────────────────
-  dateModalOverlay: {
-    flex: 1, backgroundColor: 'rgba(0,0,0,0.45)', justifyContent: 'flex-end',
+  // ─── Panel de fecha iOS (posición absoluta, NO Modal) ─────────────────────
+  dateOverlay: {
+    position: 'absolute', top: 0, left: 0, right: 0, bottom: 0,
+    backgroundColor: 'rgba(0,0,0,0.40)',
   },
-  dateModalContent: {
-    backgroundColor: '#ffffff', borderTopLeftRadius: 24, borderTopRightRadius: 24, paddingBottom: 32,
+  datePanelContainer: {
+    position: 'absolute', bottom: 0, left: 0, right: 0,
+    backgroundColor: '#ffffff',
+    borderTopLeftRadius: 24, borderTopRightRadius: 24,
+    paddingBottom: 40,
   },
-  dateModalHeader: {
+  datePanelHeader: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
-    paddingHorizontal: 20, paddingTop: 20, paddingBottom: 12,
+    paddingHorizontal: 20, paddingTop: 18, paddingBottom: 14,
     borderBottomWidth: 0.5, borderBottomColor: '#E2E8F0',
   },
-  dateModalTitle: { fontSize: 16, fontWeight: '700', color: '#0F172A' },
-  dateModalCancelWrap: { width: 80 },
-  dateModalCancelText: { fontSize: 15, color: '#94A3B8', fontWeight: '500' },
-  datePreview: {
-    alignItems: 'center', paddingVertical: 14, paddingHorizontal: 20,
-    backgroundColor: '#F8FAFC', marginHorizontal: 20, marginTop: 16,
-    borderRadius: 12, borderWidth: 0.5, borderColor: '#E2E8F0',
+  datePanelTitle: { fontSize: 16, fontWeight: '700', color: '#0F172A' },
+  datePanelCancel: { fontSize: 15, color: '#94A3B8', fontWeight: '500' },
+  datePanelConfirmText: { fontSize: 15, color: '#10B981', fontWeight: '700' },
+  datePanelPreview: {
+    alignItems: 'center', paddingVertical: 12, marginHorizontal: 20, marginTop: 14,
+    backgroundColor: '#F0FDF4', borderRadius: 12,
+    borderWidth: 0.5, borderColor: '#BBF7D0',
   },
-  datePreviewText: { fontSize: 15, fontWeight: '600', color: '#10B981', textTransform: 'capitalize' },
-  datePicker: { width: '100%' },
-  dateConfirmBtn: {
-    backgroundColor: '#10B981', marginHorizontal: 20, marginTop: 8,
+  datePanelPreviewText: {
+    fontSize: 15, fontWeight: '600', color: '#10B981', textTransform: 'capitalize',
+  },
+  datePanelConfirmBtn: {
+    backgroundColor: '#10B981', marginHorizontal: 20, marginTop: 12,
     paddingVertical: 16, borderRadius: 14, alignItems: 'center',
   },
-  dateConfirmText: { fontSize: 16, fontWeight: '700', color: '#ffffff' },
+  datePanelConfirmBtnText: { fontSize: 16, fontWeight: '700', color: '#ffffff' },
 
   // ─── Modal clientes ───────────────────────────────────────────────────────
   modalOverlay: {
