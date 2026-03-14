@@ -223,15 +223,23 @@ export default function SettingsScreen() {
         <SettingGroup title="AUTOMATIZACIONES">
           <SettingRow
             iconName="cake" iconColor="#EC4899" iconBg="#FDF2F8"
-            label="Recordatorios de cumpleaños"
-            sublabel={birthdayEnabled ? 'Activado — mensaje automático el día del cumpleaños' : 'Desactivado'}
+            label="Cumpleaños automáticos"
+            sublabel={birthdayEnabled ? 'Activado — envía WhatsApp el día del cumpleaños' : 'Desactivado'}
             right={
-              <View style={s.birthdayRight}>
-                {birthdayEnabled && <View style={s.activeDot} />}
+              <View style={s.statusRight}>
+                {birthdayEnabled && <View style={[s.statusDot, { backgroundColor: '#EC4899' }]} />}
                 <IconSymbol android_material_icon_name="arrow-forward-ios" size={16} color="#CBD5E1" />
               </View>
             }
             onPress={() => router.push('/settings/birthday')}
+          />
+          {/* Email Marketing */}
+          <SettingRow
+            iconName="email" iconColor="#6366F1" iconBg="#EEF2FF"
+            label="Email Marketing"
+            sublabel="Envía campañas y promociones a tus clientes"
+            badge={!isPremium ? <View style={s.premiumChip}><Text style={s.premiumChipText}>PREMIUM</Text></View> : undefined}
+            onPress={() => isPremium ? router.push('/marketing') : router.push('/settings/subscription')}
           />
         </SettingGroup>
 
@@ -305,8 +313,8 @@ const s = StyleSheet.create({
   waText: { fontSize: 12, fontWeight: '700' },
   premiumChip: { backgroundColor: '#FFFBEB', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 5 },
   premiumChipText: { fontSize: 9, fontWeight: '800', color: '#92400E' },
-  birthdayRight: { flexDirection: 'row', alignItems: 'center', gap: 6 },
-  activeDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: '#EC4899' },
+  statusRight: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  statusDot: { width: 8, height: 8, borderRadius: 4 },
   footer: { alignItems: 'center', paddingTop: 8, paddingBottom: 16, gap: 4 },
   footerBrand: { fontSize: 16, fontWeight: '900', color: '#CBD5E1', letterSpacing: 3 },
   footerTagline: { fontSize: 12, color: '#CBD5E1', fontStyle: 'italic' },
