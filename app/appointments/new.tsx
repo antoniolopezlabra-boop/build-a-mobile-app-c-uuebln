@@ -1,19 +1,9 @@
 
 import { SafeAreaView } from 'react-native-safe-area-context';
 import {
-  View,
-  Text,
-  StyleSheet,
-  ScrollView,
-  KeyboardAvoidingView,
-  Platform,
-  TouchableOpacity,
-  TextInput,
-  ActivityIndicator,
-  Modal,
-  Switch,
-  Keyboard,
-  Dimensions,
+  View, Text, StyleSheet, ScrollView, KeyboardAvoidingView,
+  Platform, TouchableOpacity, TextInput, ActivityIndicator,
+  Modal, Switch, Keyboard, Dimensions,
 } from 'react-native';
 import { colors } from '@/styles/commonStyles';
 import { apiGet, apiPost } from '@/utils/api';
@@ -24,6 +14,7 @@ import { useRouter } from 'expo-router';
 import { usePlan } from '@/contexts/PlanContext';
 import { ConfirmModal } from '@/components/button';
 import DateTimePicker from '@react-native-community/datetimepicker';
+import MaterialIcons from '@expo/vector-icons/MaterialIcons';
 
 interface Client {
   id: string;
@@ -38,6 +29,17 @@ interface TimeSlot {
   isOverlap?: boolean;
 }
 
+interface CatalogService {
+  id: string;
+  name: string;
+  description?: string | null;
+  price: number;
+  durationMinutes: number;
+}
+
+const durationLabel = (min: number) =>
+  min < 60 ? `${min} min` : min === 60 ? '1 hora' : `${Math.floor(min / 60)}h${min % 60 > 0 ? ` ${min % 60}min` : ''}`;
+
 const { height: SCREEN_HEIGHT } = Dimensions.get('window');
 
 export default function NewAppointmentScreen() {
@@ -50,11 +52,14 @@ export default function NewAppointmentScreen() {
   const [searchQuery, setSearchQuery] = useState('');
 
   const [service, setService] = useState('');
+  const [selectedCatalogService, setSelectedCatalogService] = useState<CatalogService | null>(null);
+  const [catalogServices, setCatalogServices] = useState<CatalogService[]>([]);
+  const [showServicePicker, setShowServicePicker] = useState(false);
+  const [serviceSearchQuery, setServiceSearchQuery] = useState('');
+
   const [date, setDate] = useState(new Date());
   const [showDatePanel, setShowDatePanel] = useState(false);
   const [tempDate, setTempDate] = useState(new Date());
-
-  // Android: picker nativo directo
   const [showDatePickerAndroid, setShowDatePickerAndroid] = useState(false);
 
   const [time, setTime] = useState('09:00');
@@ -83,29 +88,60 @@ export default function NewAppointmentScreen() {
     dismissKeyboard();
     if (Platform.OS === 'ios') {
       setTempDate(date);
-      // Sin setTimeout — el panel es parte del árbol de vistas, no un Modal
       setShowDatePanel(true);
     } else {
       setTimeout(() => setShowDatePickerAndroid(true), 150);
     }
   };
 
-  const confirmDateIOS = () => {
-    setDate(tempDate);
-    setShowDatePanel(false);
-  };
-
-  const cancelDateIOS = () => {
-    setTempDate(date);
-    setShowDatePanel(false);
-  };
-
+  const confirmDateIOS = () => { setDate(tempDate); setShowDatePanel(false); };
+  const cancelDateIOS = () => { setTempDate(date); setShowDatePanel(false); };
   const onAndroidDateChange = (_event: any, selected?: Date) => {
     setShowDatePickerAndroid(false);
     if (_event.type === 'set' && selected) setDate(selected);
   };
 
-  useEffect(() => { loadClients(); loadOverlapConfig(); }, []);
+  // Al seleccionar del catálogo: rellena nombre, precio y duración
+  const handleSelectCatalogService = (svc: CatalogService) => {
+    setSelectedCatalogService(svc);
+    setService(svc.name);
+    setServiceCost(svc.price.toString());
+    // Calcular cuántos bloques de 30 min ocupa la duración
+    const blocks = Math.ceil(svc.durationMinutes / 30);
+    // Si ya hay un bloque de inicio seleccionado, extender; si no, lo dejamos para que el usuario elija hora
+    if (selectedBlocks.length > 0 && timeSlots.length > 0) {
+      const firstIdx = timeSlots.findIndex(s => s.time === selectedBlocks[0]);
+      if (firstIdx !== -1) {
+        const range = timeSlots.slice(firstIdx, firstIdx + blocks);
+        if (range.length > 0 && range.every(s => s.available)) {
+          setSelectedBlocks(range.map(s => s.time));
+        }
+      }
+    }
+    setShowServicePicker(false);
+    setServiceSearchQuery('');
+  };
+
+  const clearCatalogService = () => {
+    setSelectedCatalogService(null);
+    setService('');
+    setServiceCost('');
+  };
+
+  useEffect(() => {
+    loadClients();
+    loadOverlapConfig();
+    loadCatalogServices();
+  }, []);
+
+  const loadCatalogServices = async () => {
+    try {
+      const data = await apiGet<CatalogService[]>('/api/services');
+      setCatalogServices(data);
+    } catch (e) {
+      // Si falla, funciona como texto libre
+    }
+  };
 
   const loadOverlapConfig = async () => {
     try {
@@ -236,6 +272,10 @@ export default function NewAppointmentScreen() {
     c.name.toLowerCase().includes(searchQuery.toLowerCase()) || c.phone.includes(searchQuery)
   );
 
+  const filteredCatalogServices = catalogServices.filter((s) =>
+    s.name.toLowerCase().includes(serviceSearchQuery.toLowerCase())
+  );
+
   const formattedDate = date.toLocaleDateString('es-MX', {
     weekday: 'long', year: 'numeric', month: 'long', day: 'numeric',
   });
@@ -243,6 +283,8 @@ export default function NewAppointmentScreen() {
   const formattedTempDate = tempDate.toLocaleDateString('es-MX', {
     weekday: 'long', day: 'numeric', month: 'long', year: 'numeric',
   });
+
+  const hasCatalog = catalogServices.length > 0;
 
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
@@ -260,7 +302,6 @@ export default function NewAppointmentScreen() {
           showsVerticalScrollIndicator={false}
           keyboardShouldPersistTaps="handled"
           keyboardDismissMode="on-drag"
-          // Bloquear scroll del formulario mientras el panel de fecha está abierto
           scrollEnabled={!showDatePanel}
         >
           {/* Cliente */}
@@ -274,19 +315,49 @@ export default function NewAppointmentScreen() {
             </TouchableOpacity>
           </View>
 
-          {/* Servicio */}
+          {/* Servicio — con catálogo si existe */}
           <View style={styles.section}>
-            <Text style={styles.label}>Servicio *</Text>
-            <TextInput
-              ref={serviceInputRef}
-              style={styles.textInput}
-              value={service}
-              onChangeText={setService}
-              returnKeyType="done"
-              onSubmitEditing={() => Keyboard.dismiss()}
-              placeholder="Ej: Corte de cabello, Manicure, etc."
-              placeholderTextColor={colors.textSecondary}
-            />
+            <View style={styles.labelRow}>
+              <Text style={styles.label}>Servicio *</Text>
+              {hasCatalog && (
+                <TouchableOpacity
+                  style={styles.catalogBtn}
+                  onPress={() => { dismissKeyboard(); setShowServicePicker(true); }}
+                >
+                  <MaterialIcons name="menu-book" size={14} color="#10B981" />
+                  <Text style={styles.catalogBtnText}>Ver catálogo</Text>
+                </TouchableOpacity>
+              )}
+            </View>
+
+            {/* Si hay un servicio del catálogo seleccionado: mostrar chip */}
+            {selectedCatalogService ? (
+              <View style={styles.catalogSelected}>
+                <View style={styles.catalogSelectedIcon}>
+                  <MaterialIcons name="content-cut" size={16} color="#10B981" />
+                </View>
+                <View style={styles.catalogSelectedInfo}>
+                  <Text style={styles.catalogSelectedName}>{selectedCatalogService.name}</Text>
+                  <Text style={styles.catalogSelectedMeta}>
+                    {durationLabel(selectedCatalogService.durationMinutes)} · ${selectedCatalogService.price.toLocaleString('es-MX')} MXN
+                  </Text>
+                </View>
+                <TouchableOpacity onPress={clearCatalogService} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+                  <MaterialIcons name="close" size={18} color="#94A3B8" />
+                </TouchableOpacity>
+              </View>
+            ) : (
+              <TextInput
+                ref={serviceInputRef}
+                style={styles.textInput}
+                value={service}
+                onChangeText={setService}
+                returnKeyType="done"
+                onSubmitEditing={() => Keyboard.dismiss()}
+                placeholder={hasCatalog ? 'Escribe o selecciona del catálogo' : 'Ej: Corte de cabello, Manicure...'}
+                placeholderTextColor={colors.textSecondary}
+              />
+            )}
           </View>
 
           {/* Fecha */}
@@ -342,6 +413,17 @@ export default function NewAppointmentScreen() {
                           if (!slot.available) return;
                           Keyboard.dismiss();
                           if (selectedBlocks.length === 0) {
+                            // Si hay servicio del catálogo, pre-seleccionar bloques según duración
+                            if (selectedCatalogService) {
+                              const blocks = Math.ceil(selectedCatalogService.durationMinutes / 30);
+                              const thisIdx = timeSlots.findIndex(s => s.time === slot.time);
+                              const range = timeSlots.slice(thisIdx, thisIdx + blocks);
+                              if (range.length > 0 && range.every(s => s.available)) {
+                                setSelectedBlocks(range.map(s => s.time));
+                                setTime(slot.time);
+                                return;
+                              }
+                            }
                             setSelectedBlocks([slot.time]); setTime(slot.time);
                           } else {
                             const firstIdx = timeSlots.findIndex(s => s.time === selectedBlocks[0]);
@@ -433,21 +515,11 @@ export default function NewAppointmentScreen() {
         </ScrollView>
       </KeyboardAvoidingView>
 
-      {/* ─── iOS: panel de fecha FUERA del Modal — posicionado absolutamente ── */}
-      {/* Renderizar siempre en el árbol para que el UIDatePicker nativo funcione */}
+      {/* ─── iOS: panel de fecha ──────────────────────────────────────────── */}
       {Platform.OS === 'ios' && showDatePanel && (
         <>
-          {/* Overlay oscuro que cierra el panel al tocar */}
-          <TouchableOpacity
-            style={styles.dateOverlay}
-            activeOpacity={1}
-            onPress={cancelDateIOS}
-          />
-
-          {/* Panel blanco en la parte inferior */}
+          <TouchableOpacity style={styles.dateOverlay} activeOpacity={1} onPress={cancelDateIOS} />
           <View style={styles.datePanelContainer}>
-
-            {/* Cabecera */}
             <View style={styles.datePanelHeader}>
               <TouchableOpacity onPress={cancelDateIOS}>
                 <Text style={styles.datePanelCancel}>Cancelar</Text>
@@ -457,50 +529,120 @@ export default function NewAppointmentScreen() {
                 <Text style={styles.datePanelConfirmText}>Listo</Text>
               </TouchableOpacity>
             </View>
-
-            {/* Preview de la fecha seleccionada */}
             <View style={styles.datePanelPreview}>
               <Text style={styles.datePanelPreviewText}>
                 {formattedTempDate.charAt(0).toUpperCase() + formattedTempDate.slice(1)}
               </Text>
             </View>
-
-            {/* DateTimePicker nativo — directamente en el árbol de vistas, sin Modal */}
             <DateTimePicker
               value={tempDate}
               mode="date"
               display="spinner"
               minimumDate={new Date()}
               locale="es-MX"
-              onChange={(_event, selected) => {
-                if (selected) setTempDate(selected);
-              }}
+              onChange={(_event, selected) => { if (selected) setTempDate(selected); }}
               style={{ backgroundColor: '#ffffff', width: '100%' }}
               textColor="#0F172A"
             />
-
-            {/* Botón confirmar */}
             <TouchableOpacity style={styles.datePanelConfirmBtn} onPress={confirmDateIOS}>
               <Text style={styles.datePanelConfirmBtnText}>Confirmar fecha</Text>
             </TouchableOpacity>
-
           </View>
         </>
       )}
 
-      {/* ─── Android: picker nativo directo ─────────────────────────────── */}
+      {/* ─── Android: picker nativo ───────────────────────────────────────── */}
       {Platform.OS === 'android' && showDatePickerAndroid && (
-        <DateTimePicker
-          value={date}
-          mode="date"
-          display="default"
-          minimumDate={new Date()}
-          onChange={onAndroidDateChange}
-        />
+        <DateTimePicker value={date} mode="date" display="default" minimumDate={new Date()} onChange={onAndroidDateChange} />
       )}
 
-      {/* ─── Modal selector de clientes ──────────────────────────────────── */}
-      <Modal visible={showClientPicker} animationType="slide" transparent={true} onRequestClose={() => setShowClientPicker(false)}>
+      {/* ─── Modal catálogo de servicios ─────────────────────────────────── */}
+      <Modal visible={showServicePicker} animationType="slide" transparent onRequestClose={() => setShowServicePicker(false)}>
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContent}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>Catálogo de servicios</Text>
+              <TouchableOpacity onPress={() => setShowServicePicker(false)}>
+                <MaterialIcons name="close" size={24} color={colors.text} />
+              </TouchableOpacity>
+            </View>
+
+            {/* Buscador */}
+            <View style={styles.serviceSearch}>
+              <MaterialIcons name="search" size={18} color="#94A3B8" />
+              <TextInput
+                style={styles.serviceSearchInput}
+                value={serviceSearchQuery}
+                onChangeText={setServiceSearchQuery}
+                placeholder="Buscar servicio..."
+                placeholderTextColor="#CBD5E1"
+                autoFocus={false}
+              />
+              {serviceSearchQuery ? (
+                <TouchableOpacity onPress={() => setServiceSearchQuery('')}>
+                  <MaterialIcons name="close" size={16} color="#94A3B8" />
+                </TouchableOpacity>
+              ) : null}
+            </View>
+
+            <ScrollView style={styles.serviceList}>
+              {filteredCatalogServices.length === 0 ? (
+                <View style={styles.serviceEmpty}>
+                  <MaterialIcons name="content-cut" size={40} color="#CBD5E1" />
+                  <Text style={styles.serviceEmptyText}>
+                    {serviceSearchQuery ? 'Sin resultados' : 'No tienes servicios en el catálogo'}
+                  </Text>
+                  {!serviceSearchQuery && (
+                    <TouchableOpacity
+                      style={styles.serviceEmptyBtn}
+                      onPress={() => { setShowServicePicker(false); router.push('/settings/services'); }}
+                    >
+                      <Text style={styles.serviceEmptyBtnText}>Ir al catálogo →</Text>
+                    </TouchableOpacity>
+                  )}
+                </View>
+              ) : (
+                filteredCatalogServices.map((svc) => (
+                  <TouchableOpacity
+                    key={svc.id}
+                    style={[
+                      styles.serviceItem,
+                      selectedCatalogService?.id === svc.id && styles.serviceItemSelected,
+                    ]}
+                    onPress={() => handleSelectCatalogService(svc)}
+                    activeOpacity={0.7}
+                  >
+                    <View style={styles.serviceItemIcon}>
+                      <MaterialIcons name="content-cut" size={18} color="#10B981" />
+                    </View>
+                    <View style={styles.serviceItemInfo}>
+                      <Text style={styles.serviceItemName}>{svc.name}</Text>
+                      {svc.description ? <Text style={styles.serviceItemDesc}>{svc.description}</Text> : null}
+                      <View style={styles.serviceItemMeta}>
+                        <View style={styles.serviceMetaChip}>
+                          <MaterialIcons name="access-time" size={11} color="#94A3B8" />
+                          <Text style={styles.serviceMetaText}>{durationLabel(svc.durationMinutes)}</Text>
+                        </View>
+                      </View>
+                    </View>
+                    <View style={styles.serviceItemPrice}>
+                      <Text style={styles.serviceItemPriceText}>${svc.price.toLocaleString('es-MX')}</Text>
+                      <Text style={styles.serviceItemPriceSub}>MXN</Text>
+                    </View>
+                    {selectedCatalogService?.id === svc.id && (
+                      <MaterialIcons name="check-circle" size={20} color="#10B981" style={{ marginLeft: 8 }} />
+                    )}
+                  </TouchableOpacity>
+                ))
+              )}
+              <View style={{ height: 40 }} />
+            </ScrollView>
+          </View>
+        </View>
+      </Modal>
+
+      {/* ─── Modal clientes ───────────────────────────────────────────────── */}
+      <Modal visible={showClientPicker} animationType="slide" transparent onRequestClose={() => setShowClientPicker(false)}>
         <View style={styles.modalOverlay}>
           <View style={styles.modalContent}>
             <View style={styles.modalHeader}>
@@ -578,7 +720,13 @@ const styles = StyleSheet.create({
   content: { flex: 1, padding: 20 },
   section: { marginBottom: 24 },
   inputGroup: { marginBottom: 24 },
-  label: { fontSize: 16, fontWeight: '600', color: colors.text, marginBottom: 8 },
+  labelRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 },
+  label: { fontSize: 16, fontWeight: '600', color: colors.text },
+  catalogBtn: {
+    flexDirection: 'row', alignItems: 'center', gap: 4,
+    backgroundColor: '#ECFDF5', paddingHorizontal: 10, paddingVertical: 5, borderRadius: 20,
+  },
+  catalogBtnText: { fontSize: 12, fontWeight: '600', color: '#10B981' },
   input: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
     backgroundColor: '#ffffff', borderRadius: 12, padding: 16,
@@ -592,6 +740,18 @@ const styles = StyleSheet.create({
     fontSize: 16, color: colors.text, borderWidth: 1, borderColor: '#E5E7EB',
   },
   textArea: { minHeight: 100 },
+
+  // Chip servicio del catálogo seleccionado
+  catalogSelected: {
+    flexDirection: 'row', alignItems: 'center', gap: 12,
+    backgroundColor: '#F0FDF4', borderRadius: 12, padding: 14,
+    borderWidth: 1, borderColor: '#BBF7D0',
+  },
+  catalogSelectedIcon: { width: 36, height: 36, borderRadius: 10, backgroundColor: '#DCFCE7', justifyContent: 'center', alignItems: 'center' },
+  catalogSelectedInfo: { flex: 1 },
+  catalogSelectedName: { fontSize: 15, fontWeight: '700', color: '#065F46' },
+  catalogSelectedMeta: { fontSize: 12, color: '#10B981', marginTop: 2, fontWeight: '500' },
+
   dayClosedContainer: { backgroundColor: '#FEF2F2', borderRadius: 12, padding: 16, marginTop: 8 },
   dayClosedText: { fontSize: 15, fontWeight: '600', color: '#EF4444', textAlign: 'center' },
   dayClosedSubtext: { fontSize: 13, color: '#9CA3AF', textAlign: 'center', marginTop: 4 },
@@ -626,65 +786,60 @@ const styles = StyleSheet.create({
   saveButtonDisabled: { opacity: 0.6 },
   saveButtonText: { fontSize: 16, fontWeight: '600', color: '#ffffff' },
 
-  // ─── Panel de fecha iOS (posición absoluta, NO Modal) ─────────────────────
-  dateOverlay: {
-    position: 'absolute', top: 0, left: 0, right: 0, bottom: 0,
-    backgroundColor: 'rgba(0,0,0,0.40)',
-  },
-  datePanelContainer: {
-    position: 'absolute', bottom: 0, left: 0, right: 0,
-    backgroundColor: '#ffffff',
-    borderTopLeftRadius: 24, borderTopRightRadius: 24,
-    paddingBottom: 40,
-  },
-  datePanelHeader: {
-    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
-    paddingHorizontal: 20, paddingTop: 18, paddingBottom: 14,
-    borderBottomWidth: 0.5, borderBottomColor: '#E2E8F0',
-  },
+  // Panel fecha iOS
+  dateOverlay: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.40)' },
+  datePanelContainer: { position: 'absolute', bottom: 0, left: 0, right: 0, backgroundColor: '#ffffff', borderTopLeftRadius: 24, borderTopRightRadius: 24, paddingBottom: 40 },
+  datePanelHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 20, paddingTop: 18, paddingBottom: 14, borderBottomWidth: 0.5, borderBottomColor: '#E2E8F0' },
   datePanelTitle: { fontSize: 16, fontWeight: '700', color: '#0F172A' },
   datePanelCancel: { fontSize: 15, color: '#94A3B8', fontWeight: '500' },
   datePanelConfirmText: { fontSize: 15, color: '#10B981', fontWeight: '700' },
-  datePanelPreview: {
-    alignItems: 'center', paddingVertical: 12, marginHorizontal: 20, marginTop: 14,
-    backgroundColor: '#F0FDF4', borderRadius: 12,
-    borderWidth: 0.5, borderColor: '#BBF7D0',
-  },
-  datePanelPreviewText: {
-    fontSize: 15, fontWeight: '600', color: '#10B981', textTransform: 'capitalize',
-  },
-  datePanelConfirmBtn: {
-    backgroundColor: '#10B981', marginHorizontal: 20, marginTop: 12,
-    paddingVertical: 16, borderRadius: 14, alignItems: 'center',
-  },
+  datePanelPreview: { alignItems: 'center', paddingVertical: 12, marginHorizontal: 20, marginTop: 14, backgroundColor: '#F0FDF4', borderRadius: 12, borderWidth: 0.5, borderColor: '#BBF7D0' },
+  datePanelPreviewText: { fontSize: 15, fontWeight: '600', color: '#10B981', textTransform: 'capitalize' },
+  datePanelConfirmBtn: { backgroundColor: '#10B981', marginHorizontal: 20, marginTop: 12, paddingVertical: 16, borderRadius: 14, alignItems: 'center' },
   datePanelConfirmBtnText: { fontSize: 16, fontWeight: '700', color: '#ffffff' },
 
-  // ─── Modal clientes ───────────────────────────────────────────────────────
-  modalOverlay: {
-    flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-start', paddingTop: 100,
+  // Modal servicios
+  modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-end' },
+  modalContent: { backgroundColor: '#ffffff', borderTopLeftRadius: 24, borderTopRightRadius: 24, maxHeight: '85%' },
+  modalHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', padding: 20, borderBottomWidth: 0.5, borderBottomColor: '#E2E8F0' },
+  modalTitle: { fontSize: 18, fontWeight: '700', color: colors.text },
+  serviceSearch: {
+    flexDirection: 'row', alignItems: 'center', gap: 8,
+    backgroundColor: '#F8FAFC', borderRadius: 12, marginHorizontal: 16, marginTop: 14,
+    paddingHorizontal: 12, paddingVertical: 10, borderWidth: 0.5, borderColor: '#E2E8F0',
   },
-  modalContent: {
-    backgroundColor: '#ffffff', borderTopLeftRadius: 20, borderTopRightRadius: 20, maxHeight: '80%',
+  serviceSearchInput: { flex: 1, fontSize: 14, color: '#0F172A' },
+  serviceList: { padding: 16 },
+  serviceEmpty: { alignItems: 'center', paddingVertical: 40, gap: 10 },
+  serviceEmptyText: { fontSize: 15, color: '#94A3B8', textAlign: 'center' },
+  serviceEmptyBtn: { backgroundColor: '#ECFDF5', borderRadius: 10, paddingVertical: 10, paddingHorizontal: 20 },
+  serviceEmptyBtnText: { color: '#10B981', fontWeight: '700', fontSize: 14 },
+  serviceItem: {
+    flexDirection: 'row', alignItems: 'center', gap: 12,
+    backgroundColor: '#fff', borderRadius: 14, padding: 14, marginBottom: 8,
+    borderWidth: 0.5, borderColor: '#E2E8F0',
   },
-  modalHeader: {
-    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
-    padding: 20, borderBottomWidth: 1, borderBottomColor: '#E5E7EB',
-  },
-  modalTitle: { fontSize: 20, fontWeight: '600', color: colors.text },
-  searchInput: {
-    backgroundColor: colors.background, borderRadius: 12,
-    padding: 12, margin: 20, marginBottom: 0, fontSize: 16, color: colors.text,
-  },
+  serviceItemSelected: { borderColor: '#10B981', borderWidth: 1.5, backgroundColor: '#F0FDF4' },
+  serviceItemIcon: { width: 38, height: 38, borderRadius: 10, backgroundColor: '#ECFDF5', justifyContent: 'center', alignItems: 'center' },
+  serviceItemInfo: { flex: 1 },
+  serviceItemName: { fontSize: 14, fontWeight: '700', color: '#0F172A' },
+  serviceItemDesc: { fontSize: 12, color: '#94A3B8', marginTop: 2 },
+  serviceItemMeta: { flexDirection: 'row', gap: 8, marginTop: 5 },
+  serviceMetaChip: { flexDirection: 'row', alignItems: 'center', gap: 3 },
+  serviceMetaText: { fontSize: 11, color: '#94A3B8', fontWeight: '500' },
+  serviceItemPrice: { alignItems: 'flex-end' },
+  serviceItemPriceText: { fontSize: 16, fontWeight: '800', color: '#10B981' },
+  serviceItemPriceSub: { fontSize: 10, color: '#94A3B8' },
+
+  // Modal clientes
+  searchInput: { backgroundColor: colors.background, borderRadius: 12, padding: 12, margin: 20, marginBottom: 0, fontSize: 16, color: colors.text },
   clientsList: { padding: 20 },
   emptyClientState: { alignItems: 'center', paddingVertical: 40 },
   emptyClientText: { fontSize: 16, color: colors.textSecondary, marginBottom: 16 },
   addClientButton: { backgroundColor: colors.primary, borderRadius: 12, paddingVertical: 12, paddingHorizontal: 24 },
   addClientButtonText: { color: '#FFFFFF', fontSize: 16, fontWeight: '600' },
   clientItem: { flexDirection: 'row', alignItems: 'center', paddingVertical: 12, gap: 12 },
-  clientAvatar: {
-    width: 48, height: 48, borderRadius: 24,
-    backgroundColor: colors.primary, justifyContent: 'center', alignItems: 'center',
-  },
+  clientAvatar: { width: 48, height: 48, borderRadius: 24, backgroundColor: colors.primary, justifyContent: 'center', alignItems: 'center' },
   clientAvatarText: { fontSize: 20, fontWeight: '600', color: '#ffffff' },
   clientInfo: { flex: 1 },
   clientName: { fontSize: 16, fontWeight: '600', color: colors.text },
