@@ -1,14 +1,8 @@
 
 import React, { useState, useEffect } from 'react';
 import {
-  View,
-  Text,
-  StyleSheet,
-  ScrollView,
-  TouchableOpacity,
-  ActivityIndicator,
-  Switch,
-  Image,
+  View, Text, StyleSheet, ScrollView, TouchableOpacity,
+  ActivityIndicator, Switch, Image,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
@@ -20,15 +14,8 @@ import { getCached, setCached } from '@/utils/cache';
 import { useAuth } from '@/contexts/AuthContext';
 import { apiGet } from '@/utils/api';
 
-interface WhatsAppConfig {
-  isConnected: boolean;
-  phoneNumber?: string;
-}
-
-interface Subscription {
-  planType: 'Basico' | 'Premium' | 'Gratuito';
-  price: string;
-}
+interface WhatsAppConfig { isConnected: boolean; phoneNumber?: string; }
+interface Subscription { planType: 'Basico' | 'Premium' | 'Gratuito'; price: string; }
 
 function SettingRow({
   iconName, iconColor, iconBg, label, sublabel, badge, right, onPress, danger,
@@ -38,12 +25,7 @@ function SettingRow({
   right?: React.ReactNode; onPress?: () => void; danger?: boolean;
 }) {
   return (
-    <TouchableOpacity
-      style={row.container}
-      onPress={onPress}
-      activeOpacity={onPress ? 0.7 : 1}
-      disabled={!onPress}
-    >
+    <TouchableOpacity style={row.container} onPress={onPress} activeOpacity={onPress ? 0.7 : 1} disabled={!onPress}>
       <View style={[row.iconBox, { backgroundColor: iconBg }]}>
         <IconSymbol android_material_icon_name={iconName as any} size={20} color={iconColor} />
       </View>
@@ -54,20 +36,13 @@ function SettingRow({
         </View>
         {sublabel ? <Text style={row.sublabel}>{sublabel}</Text> : null}
       </View>
-      {right !== undefined ? right : (
-        onPress
-          ? <IconSymbol android_material_icon_name="arrow-forward-ios" size={16} color="#CBD5E1" />
-          : null
-      )}
+      {right !== undefined ? right : (onPress ? <IconSymbol android_material_icon_name="arrow-forward-ios" size={16} color="#CBD5E1" /> : null)}
     </TouchableOpacity>
   );
 }
 
 const row = StyleSheet.create({
-  container: {
-    flexDirection: 'row', alignItems: 'center', paddingVertical: 13,
-    paddingHorizontal: 16, backgroundColor: '#fff', gap: 14,
-  },
+  container: { flexDirection: 'row', alignItems: 'center', paddingVertical: 13, paddingHorizontal: 16, backgroundColor: '#fff', gap: 14 },
   iconBox: { width: 36, height: 36, borderRadius: 10, justifyContent: 'center', alignItems: 'center' },
   textBox: { flex: 1 },
   labelRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
@@ -110,6 +85,7 @@ export default function SettingsScreen() {
   const [whatsappConfig, setWhatsappConfig] = useState<WhatsAppConfig | null>(null);
   const [allowOverlapping, setAllowOverlapping] = useState(false);
   const [savingOverlap, setSavingOverlap] = useState(false);
+  const [birthdayEnabled, setBirthdayEnabled] = useState(false);
   const [subscription, setSubscription] = useState<Subscription | null>(null);
   const [loading, setLoading] = useState(true);
 
@@ -129,8 +105,14 @@ export default function SettingsScreen() {
       ]);
       if (whatsappData) setCached('settings_whatsapp', whatsappData);
       const { supabase } = await import('@/lib/supabase');
-      const { data: bpData } = await supabase.from('business_profiles').select('allow_overlapping').eq('user_id', user?.id).single();
-      if (bpData) setAllowOverlapping(bpData.allow_overlapping || false);
+      const { data: bpData } = await supabase
+        .from('business_profiles')
+        .select('allow_overlapping, birthday_reminders_enabled')
+        .eq('user_id', user?.id).single();
+      if (bpData) {
+        setAllowOverlapping(bpData.allow_overlapping || false);
+        setBirthdayEnabled(bpData.birthday_reminders_enabled || false);
+      }
       if (subscriptionData) setCached('settings_subscription', subscriptionData);
       setWhatsappConfig(whatsappData); setSubscription(subscriptionData);
     } catch (error) {
@@ -164,7 +146,6 @@ export default function SettingsScreen() {
     } catch { alert('Error al eliminar la cuenta. Intenta de nuevo.'); } finally { setDeleting(false); }
   };
 
-  const planLabel   = isPremium ? 'Premium' : isBasico ? 'Basico' : 'Gratuito';
   const planColor   = isPremium ? '#6366F1' : isBasico ? '#10B981' : '#94A3B8';
   const planBg      = isPremium ? '#EDE9FE' : isBasico ? '#ECFDF5' : '#F1F5F9';
   const planPrice   = isPremium ? '$1,490 MXN/mes' : isBasico ? '$990 MXN/mes' : 'Gratis';
@@ -229,23 +210,28 @@ export default function SettingsScreen() {
         <SettingGroup title="MI NEGOCIO">
           <SettingRow iconName="store" iconColor="#10B981" iconBg="#ECFDF5" label="Información del negocio" sublabel={businessProfile?.businessName || 'Configura tu negocio'} onPress={() => router.push('/settings/business')} />
           <SettingRow iconName="schedule" iconColor="#3B82F6" iconBg="#EFF6FF" label="Horarios de atención" sublabel="Configura tu disponibilidad" onPress={() => router.push('/settings/schedule')} />
-          {/* ─── Catálogo de servicios ─── */}
-          <SettingRow
-            iconName="content-cut" iconColor="#F59E0B" iconBg="#FFFBEB"
-            label="Catálogo de servicios"
-            sublabel="Gestiona tus servicios y precios"
-            onPress={() => router.push('/settings/services')}
-          />
+          <SettingRow iconName="content-cut" iconColor="#F59E0B" iconBg="#FFFBEB" label="Catálogo de servicios" sublabel="Gestiona tus servicios y precios" onPress={() => router.push('/settings/services')} />
           <SettingRow
             iconName="event-available" iconColor="#8B5CF6" iconBg="#F5F3FF"
-            label="Citas simultáneas"
-            sublabel="Permite sobreponer citas"
+            label="Citas simultáneas" sublabel="Permite sobreponer citas"
             badge={!isPremium ? <View style={s.premiumChip}><Text style={s.premiumChipText}>PREMIUM</Text></View> : undefined}
+            right={<Switch value={allowOverlapping} onValueChange={handleOverlappingToggle} trackColor={{ false: '#E2E8F0', true: '#10B981' }} thumbColor="#fff" disabled={savingOverlap || !canOverlap} />}
+          />
+        </SettingGroup>
+
+        {/* AUTOMATIZACIONES */}
+        <SettingGroup title="AUTOMATIZACIONES">
+          <SettingRow
+            iconName="cake" iconColor="#EC4899" iconBg="#FDF2F8"
+            label="Recordatorios de cumpleaños"
+            sublabel={birthdayEnabled ? 'Activado — mensaje automático el día del cumpleaños' : 'Desactivado'}
             right={
-              <Switch value={allowOverlapping} onValueChange={handleOverlappingToggle}
-                trackColor={{ false: '#E2E8F0', true: '#10B981' }} thumbColor="#fff"
-                disabled={savingOverlap || !canOverlap} />
+              <View style={s.birthdayRight}>
+                {birthdayEnabled && <View style={s.activeDot} />}
+                <IconSymbol android_material_icon_name="arrow-forward-ios" size={16} color="#CBD5E1" />
+              </View>
             }
+            onPress={() => router.push('/settings/birthday')}
           />
         </SettingGroup>
 
@@ -319,6 +305,8 @@ const s = StyleSheet.create({
   waText: { fontSize: 12, fontWeight: '700' },
   premiumChip: { backgroundColor: '#FFFBEB', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 5 },
   premiumChipText: { fontSize: 9, fontWeight: '800', color: '#92400E' },
+  birthdayRight: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  activeDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: '#EC4899' },
   footer: { alignItems: 'center', paddingTop: 8, paddingBottom: 16, gap: 4 },
   footerBrand: { fontSize: 16, fontWeight: '900', color: '#CBD5E1', letterSpacing: 3 },
   footerTagline: { fontSize: 12, color: '#CBD5E1', fontStyle: 'italic' },
