@@ -1,7 +1,7 @@
 import { Stack, useRouter, useSegments } from 'expo-router';
 import { StripeProvider } from '@stripe/stripe-react-native';
 import { STRIPE_PUBLISHABLE_KEY } from '@/services/stripe';
-import { LogBox } from 'react-native';
+import { LogBox, View, ActivityIndicator } from 'react-native';
 import { useEffect, useState, useRef } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
@@ -17,22 +17,25 @@ function NavigationGuard() {
   const { isAdmin, loading: adminLoading } = useAdmin();
   const router = useRouter();
   const segments = useSegments();
+
   const [hasSeenOnboarding, setHasSeenOnboarding] = useState<boolean | null>(null);
+  // null = aún leyendo AsyncStorage, true = primera vez, false = ya visto antes
   const [isFirstLogin, setIsFirstLogin] = useState<boolean | null>(null);
 
-  // Bandera de un solo disparo — evita que el guard redirija más de una vez al onboarding
   const hasRedirectedToOnboarding = useRef(false);
-  // Bandera para evitar redirects mientras ya se está navegando
   const isNavigating = useRef(false);
 
+  // Leer si ya vio el onboarding (se ejecuta UNA sola vez al montar)
   useEffect(() => {
     AsyncStorage.getItem('has_seen_onboarding').then(val => {
       setHasSeenOnboarding(val === 'true');
     });
   }, []);
 
+  // Cuando cambia el usuario, verificar si es su primera sesión
   useEffect(() => {
     if (!user) {
+      // Usuario cerró sesión — resetear todo
       setIsFirstLogin(null);
       hasRedirectedToOnboarding.current = false;
       return;
@@ -40,6 +43,7 @@ function NavigationGuard() {
     const key = `first_login_${user.id}`;
     AsyncStorage.getItem(key).then(async val => {
       if (val === null) {
+        // Primera vez que este user_id entra en este dispositivo
         await AsyncStorage.setItem(key, 'done');
         await AsyncStorage.setItem('has_seen_onboarding', 'true');
         setIsFirstLogin(true);
@@ -50,51 +54,46 @@ function NavigationGuard() {
   }, [user?.id]);
 
   useEffect(() => {
-    if (authLoading || adminLoading || hasSeenOnboarding === null) return;
+    // ── CONDICIÓN CRÍTICA: no navegar hasta tener TODOS los estados resueltos ──
+    // Si cualquiera sigue en null/loading, esperar — evita el flash visual
+    if (authLoading || adminLoading) return;
+    if (hasSeenOnboarding === null) return;
+    // Si hay usuario pero isFirstLogin aún no se resolvió, ESPERAR
+    // Este es el fix del flash — antes navegaba antes de tener este dato
+    if (user && isFirstLogin === null) return;
     if (isNavigating.current) return;
 
     const inAuthScreen  = segments[0] === 'auth';
     const inAdminScreen = segments[0] === 'admin';
     const inOnboarding  = segments[1] === 'onboarding';
 
-    // Sin sesión
+    const navigate = (path: string) => {
+      isNavigating.current = true;
+      router.replace(path as any);
+      setTimeout(() => { isNavigating.current = false; }, 600);
+    };
+
+    // Sin sesión → login o onboarding según si ya lo vio
     if (!user && !inAuthScreen) {
-      isNavigating.current = true;
-      if (hasSeenOnboarding) {
-        router.replace('/auth/login');
-      } else {
-        router.replace('/auth/onboarding');
-      }
-      setTimeout(() => { isNavigating.current = false; }, 500);
+      navigate(hasSeenOnboarding ? '/auth/login' : '/auth/onboarding');
       return;
     }
 
-    // Primera sesión del usuario → onboarding (solo una vez)
-    if (
-      user &&
-      isFirstLogin === true &&
-      !inOnboarding &&
-      !hasRedirectedToOnboarding.current
-    ) {
+    // Usuario nuevo (primera sesión) → onboarding (solo una vez)
+    if (user && isFirstLogin === true && !inOnboarding && !hasRedirectedToOnboarding.current) {
       hasRedirectedToOnboarding.current = true;
-      isNavigating.current = true;
-      router.replace('/auth/onboarding');
-      setTimeout(() => { isNavigating.current = false; }, 500);
+      navigate('/auth/onboarding');
       return;
     }
 
-    // Admin autenticado → panel admin (solo si ya terminó el onboarding)
-    if (
-      user &&
-      isAdmin &&
-      !inAdminScreen &&
-      isFirstLogin === false
-    ) {
-      isNavigating.current = true;
-      router.replace('/admin');
-      setTimeout(() => { isNavigating.current = false; }, 500);
+    // Admin autenticado → panel admin
+    if (user && isAdmin && isFirstLogin === false && !inAdminScreen) {
+      navigate('/admin');
       return;
     }
+
+    // Usuario normal autenticado con sesión previa → no hacer nada
+    // Expo Router lo lleva a la última ruta o al index automáticamente
   }, [user, isAdmin, authLoading, adminLoading, hasSeenOnboarding, isFirstLogin, segments]);
 
   return null;
