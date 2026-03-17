@@ -1,34 +1,29 @@
 import { SafeAreaView } from 'react-native-safe-area-context';
 import {
-  View,
-  Text,
-  StyleSheet,
-  ScrollView,
-  TouchableOpacity,
-  ActivityIndicator,
+  View, Text, StyleSheet, ScrollView,
+  TouchableOpacity, ActivityIndicator,
 } from 'react-native';
 import { colors } from '@/styles/commonStyles';
-import { getCached, setCached } from '@/utils/cache';
+import { getCached, setCached, CACHE_TTL } from '@/utils/cache';
 import { apiGet } from '@/utils/api';
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useEffect, useState, useCallback, useMemo } from 'react';
 import { IconSymbol } from '@/components/IconSymbol';
 import { useRouter, useFocusEffect } from 'expo-router';
 import { usePlan } from '@/contexts/PlanContext';
 import { Calendar } from 'react-native-calendars';
 import MaterialIcons from '@expo/vector-icons/MaterialIcons';
+import { getStatusColor } from '@/utils/appointmentUtils';
 
 interface ApiAppointment {
   id: string;
   clientId: string;
-  userId: string;
   date: string;
   time: string;
   service: string;
-  status: 'Confirmada' | 'Pendiente' | 'Cancelada' | 'Completada' | 'No-show' | 'Pagado' | 'Reagendada';
+  status: string;
   isRescheduled?: boolean;
   notes?: string | null;
   client: { id: string; name: string; phone: string };
-  createdAt: string;
 }
 
 const STATUS_META: Record<string, { color: string; bg: string; label: string }> = {
@@ -47,40 +42,58 @@ export default function AppointmentsScreen() {
   const [loading, setLoading] = useState(true);
   const [appointments, setAppointments] = useState<ApiAppointment[]>([]);
   const [selectedDate, setSelectedDate] = useState(new Date().toISOString().split('T')[0]);
-  const [markedDates, setMarkedDates] = useState<any>({});
   const [loadError, setLoadError] = useState(false);
 
+  // FIX: useFocusEffect solo recarga si el cache expiró — no spinner en cada visita
   useFocusEffect(
-    useCallback(() => { loadAppointments(); }, [])
+    useCallback(() => {
+      const cached = getCached<ApiAppointment[]>('appointments_list');
+      if (cached) {
+        // Cache fresco: actualizar estado sin loading visible
+        setAppointments(cached);
+        setLoading(false);
+        // Refresco silencioso en background sin mostrar spinner
+        loadAppointments(false, true);
+      } else {
+        loadAppointments();
+      }
+    }, [])
   );
 
-  useEffect(() => { updateMarkedDates(); }, [appointments, selectedDate]);
-
-  const loadAppointments = async (forceRefresh = false) => {
-    const cached = getCached<any[]>('appointments_list');
-    if (!forceRefresh && cached) { setAppointments(cached); setLoading(false); return; }
-    setLoading(true); setLoadError(false);
+  const loadAppointments = async (showLoading = true, silent = false) => {
+    if (showLoading && !silent) setLoading(true);
+    setLoadError(false);
     try {
       const data = await apiGet<ApiAppointment[]>('/api/appointments');
-      setAppointments(data); setCached('appointments_list', data);
-    } catch (error) {
-      setLoadError(true);
+      setAppointments(data);
+      setCached('appointments_list', data, CACHE_TTL.APPOINTMENTS);
+    } catch {
+      if (!silent) setLoadError(true);
     } finally {
-      setLoading(false);
+      if (showLoading && !silent) setLoading(false);
     }
   };
 
-  const updateMarkedDates = () => {
-    const marked: any = {};
+  // FIX: calcular markedDates con useMemo — elimina el useEffect extra y el re-render doble
+  const markedDates = useMemo(() => {
+    const marked: Record<string, any> = {};
     appointments.forEach((appt) => {
-      if (!marked[appt.date]) marked[appt.date] = { marked: true, dotColor: colors.primary };
+      if (!marked[appt.date]) {
+        marked[appt.date] = { marked: true, dotColor: colors.primary };
+      }
     });
-    marked[selectedDate] = { ...marked[selectedDate], selected: true, selectedColor: colors.primary };
-    setMarkedDates(marked);
-  };
+    // Merge con la fecha seleccionada
+    marked[selectedDate] = {
+      ...(marked[selectedDate] || {}),
+      selected: true,
+      selectedColor: colors.primary,
+    };
+    return marked;
+  }, [appointments, selectedDate]);
 
-  const getAppointmentsForDate = (date: string) =>
-    appointments.filter((a) => a.date === date).sort((a, b) => a.time.localeCompare(b.time));
+  const getAppointmentsForDate = useCallback((date: string) =>
+    appointments.filter(a => a.date === date).sort((a, b) => a.time.localeCompare(b.time)),
+  [appointments]);
 
   const handleNewAppointment = () => {
     if (!canSchedule) { router.push('/settings/subscription'); return; }
@@ -89,13 +102,11 @@ export default function AppointmentsScreen() {
 
   const dateAppointments = getAppointmentsForDate(selectedDate);
   const confirmedCount = dateAppointments.filter(a => a.status === 'Confirmada').length;
-  const pendingCount = dateAppointments.filter(a => a.status === 'Pendiente').length;
+  const pendingCount   = dateAppointments.filter(a => a.status === 'Pendiente').length;
 
   const selectedDateObj = new Date(selectedDate + 'T12:00:00');
-  const formattedDate = selectedDateObj.toLocaleDateString('es-MX', {
-    weekday: 'long', month: 'long', day: 'numeric',
-  });
-  const monthYear = selectedDateObj.toLocaleDateString('es-MX', { month: 'long', year: 'numeric' });
+  const formattedDate = selectedDateObj.toLocaleDateString('es-MX', { weekday: 'long', month: 'long', day: 'numeric' });
+  const monthYear     = selectedDateObj.toLocaleDateString('es-MX', { month: 'long', year: 'numeric' });
 
   if (loading) {
     return (
@@ -107,7 +118,6 @@ export default function AppointmentsScreen() {
 
   return (
     <SafeAreaView style={s.container} edges={['top']}>
-      {/* Header */}
       <View style={s.header}>
         <View>
           <Text style={s.title}>Citas</Text>
@@ -119,7 +129,6 @@ export default function AppointmentsScreen() {
       </View>
 
       <ScrollView style={s.content} showsVerticalScrollIndicator={false}>
-        {/* Calendario */}
         <View style={s.calendarWrap}>
           <Calendar
             current={selectedDate}
@@ -149,7 +158,6 @@ export default function AppointmentsScreen() {
         </View>
 
         <View style={s.listSection}>
-          {/* Resumen del día seleccionado */}
           <View style={s.dayHeader}>
             <View style={s.dayTitleWrap}>
               <Text style={s.dayTitle}>{formattedDate.charAt(0).toUpperCase() + formattedDate.slice(1)}</Text>
@@ -178,7 +186,7 @@ export default function AppointmentsScreen() {
           {loadError && (
             <View style={s.errorState}>
               <Text style={s.errorText}>No se pudieron cargar las citas.</Text>
-              <TouchableOpacity onPress={() => loadAppointments(true)} style={s.retryBtn}>
+              <TouchableOpacity onPress={() => loadAppointments()} style={s.retryBtn}>
                 <Text style={s.retryText}>Reintentar</Text>
               </TouchableOpacity>
             </View>
@@ -201,15 +209,10 @@ export default function AppointmentsScreen() {
                     onPress={() => router.push(`/appointments/${appt.id}`)}
                     activeOpacity={0.75}
                   >
-                    {/* Barra lateral de color */}
                     <View style={[s.stripe, { backgroundColor: meta.color }]} />
-
-                    {/* Hora */}
                     <View style={s.timeCol}>
                       <Text style={s.timeText}>{appt.time}</Text>
                     </View>
-
-                    {/* Info */}
                     <View style={s.infoCol}>
                       <Text style={s.clientName}>{appt.client?.name || 'Cliente'}</Text>
                       <Text style={s.serviceName}>{appt.service || 'Servicio'}</Text>
@@ -219,12 +222,9 @@ export default function AppointmentsScreen() {
                         </View>
                       )}
                     </View>
-
-                    {/* Status badge */}
                     <View style={[s.statusBadge, { backgroundColor: meta.bg }]}>
                       <Text style={[s.statusText, { color: meta.color }]}>{meta.label}</Text>
                     </View>
-
                     <MaterialIcons name="chevron-right" size={18} color="#CBD5E1" />
                   </TouchableOpacity>
                 );
@@ -234,7 +234,6 @@ export default function AppointmentsScreen() {
         </View>
       </ScrollView>
 
-      {/* FAB */}
       <TouchableOpacity
         style={[s.fab, !canSchedule && s.fabDisabled]}
         onPress={handleNewAppointment}
@@ -248,24 +247,14 @@ export default function AppointmentsScreen() {
 const s = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#F8FAFC' },
   loading: { flex: 1, justifyContent: 'center', alignItems: 'center' },
-
-  header: {
-    paddingHorizontal: 20, paddingVertical: 14,
-    backgroundColor: '#fff',
-    borderBottomWidth: 0.5, borderBottomColor: '#E2E8F0',
-    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
-  },
+  header: { paddingHorizontal: 20, paddingVertical: 14, backgroundColor: '#fff', borderBottomWidth: 0.5, borderBottomColor: '#E2E8F0', flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   title: { fontSize: 28, fontWeight: '800', color: '#0F172A', letterSpacing: -0.5 },
   subtitle: { fontSize: 13, color: '#94A3B8', marginTop: 2, textTransform: 'capitalize' },
   headerBadge: { backgroundColor: '#ECFDF5', paddingHorizontal: 12, paddingVertical: 6, borderRadius: 20 },
   headerBadgeText: { fontSize: 13, fontWeight: '700', color: '#10B981' },
-
   content: { flex: 1 },
   calendarWrap: { backgroundColor: '#fff', marginBottom: 8 },
-
   listSection: { paddingHorizontal: 16, paddingBottom: 100 },
-
-  // Resumen del día
   dayHeader: { paddingVertical: 14, gap: 8 },
   dayTitleWrap: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   dayTitle: { fontSize: 16, fontWeight: '700', color: '#0F172A', textTransform: 'capitalize', flex: 1 },
@@ -274,25 +263,15 @@ const s = StyleSheet.create({
   summaryChip: { flexDirection: 'row', alignItems: 'center', gap: 5, backgroundColor: '#fff', paddingHorizontal: 10, paddingVertical: 4, borderRadius: 99, borderWidth: 0.5, borderColor: '#E2E8F0' },
   summaryDot: { width: 7, height: 7, borderRadius: 4 },
   summaryText: { fontSize: 12, color: '#64748B', fontWeight: '500' },
-
   errorState: { alignItems: 'center', paddingVertical: 32 },
   errorText: { fontSize: 14, color: '#EF4444', marginBottom: 12 },
   retryBtn: { backgroundColor: colors.primary, paddingHorizontal: 20, paddingVertical: 10, borderRadius: 10 },
   retryText: { color: '#fff', fontWeight: '600' },
-
   empty: { alignItems: 'center', paddingVertical: 48 },
   emptyTitle: { fontSize: 16, fontWeight: '600', color: '#0F172A', marginTop: 12 },
   emptyDesc: { fontSize: 13, color: '#94A3B8', marginTop: 4 },
-
   list: { gap: 8 },
-
-  // Appointment card
-  apptCard: {
-    backgroundColor: '#fff', borderRadius: 14,
-    flexDirection: 'row', alignItems: 'center',
-    overflow: 'hidden',
-    shadowColor: '#000', shadowOpacity: 0.04, shadowRadius: 6, elevation: 1,
-  },
+  apptCard: { backgroundColor: '#fff', borderRadius: 14, flexDirection: 'row', alignItems: 'center', overflow: 'hidden', shadowColor: '#000', shadowOpacity: 0.04, shadowRadius: 6, elevation: 1 },
   stripe: { width: 4, alignSelf: 'stretch' },
   timeCol: { paddingHorizontal: 12, paddingVertical: 16, minWidth: 64, alignItems: 'center' },
   timeText: { fontSize: 14, fontWeight: '700', color: '#0F172A' },
@@ -303,14 +282,6 @@ const s = StyleSheet.create({
   rescheduledText: { fontSize: 10, fontWeight: '700', color: '#3B82F6' },
   statusBadge: { paddingHorizontal: 10, paddingVertical: 5, borderRadius: 10, marginRight: 6 },
   statusText: { fontSize: 11, fontWeight: '700' },
-
-  // FAB
-  fab: {
-    position: 'absolute', bottom: 90, right: 20,
-    width: 56, height: 56, borderRadius: 28,
-    backgroundColor: colors.primary,
-    justifyContent: 'center', alignItems: 'center',
-    elevation: 4, shadowColor: '#000', shadowOpacity: 0.2, shadowRadius: 8,
-  },
+  fab: { position: 'absolute', bottom: 90, right: 20, width: 56, height: 56, borderRadius: 28, backgroundColor: colors.primary, justifyContent: 'center', alignItems: 'center', elevation: 4, shadowColor: '#000', shadowOpacity: 0.2, shadowRadius: 8 },
   fabDisabled: { backgroundColor: '#94A3B8' },
 });

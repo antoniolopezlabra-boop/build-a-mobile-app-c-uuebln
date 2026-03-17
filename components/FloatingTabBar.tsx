@@ -1,10 +1,8 @@
 import React from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, Dimensions } from 'react-native';
+import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
 import { useRouter, usePathname, Href } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import MaterialIcons from '@expo/vector-icons/MaterialIcons';
-
-const { width: screenWidth } = Dimensions.get('window');
 
 export interface TabBarItem {
   name: string;
@@ -15,9 +13,6 @@ export interface TabBarItem {
 
 interface FloatingTabBarProps {
   tabs: TabBarItem[];
-  containerWidth?: number;
-  borderRadius?: number;
-  bottomMargin?: number;
 }
 
 export default function FloatingTabBar({ tabs }: FloatingTabBarProps) {
@@ -39,7 +34,12 @@ export default function FloatingTabBar({ tabs }: FloatingTabBarProps) {
           <TouchableOpacity
             key={index}
             style={styles.tab}
-            onPress={() => router.push(tab.route)}
+            // FIX: usar replace en lugar de push para tabs
+            // push apila pantallas — con el tiempo el stack crece y la nav se ralentiza
+            // replace mantiene el stack limpio y la navegación instantánea
+            onPress={() => {
+              if (!active) router.replace(tab.route as any);
+            }}
             activeOpacity={0.7}
           >
             <MaterialIcons
@@ -60,12 +60,10 @@ export default function FloatingTabBar({ tabs }: FloatingTabBarProps) {
 const styles = StyleSheet.create({
   container: {
     position: 'absolute',
-    bottom: 0,
-    left: 0,
-    right: 0,
+    bottom: 0, left: 0, right: 0,
     flexDirection: 'row',
     backgroundColor: '#FFFFFF',
-    borderTopWidth: 1,
+    borderTopWidth: 0.5,
     borderTopColor: '#E2E8F0',
     paddingTop: 8,
     zIndex: 100,
@@ -76,13 +74,6 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     paddingVertical: 4,
   },
-  label: {
-    fontSize: 10,
-    marginTop: 2,
-    color: '#94A3B8',
-  },
-  labelActive: {
-    color: '#10B981',
-    fontWeight: '600',
-  },
+  label: { fontSize: 10, marginTop: 2, color: '#94A3B8' },
+  labelActive: { color: '#10B981', fontWeight: '600' },
 });
