@@ -93,14 +93,13 @@ export async function apiGet<T>(path: string): Promise<T> {
 
   if (path === '/api/subscription') {
     const { data, error } = await supabase.from('subscription_plans').select('*').eq('user_id', userId).single();
-    // ✅ FIX: si no hay plan o hay error, siempre devolver Gratuito — NUNCA Básico
     if (error || !data) return { planType: 'Gratuito', price: '0', features: [] } as T;
     return { planType: data.plan_type, price: data.price, features: data.features || [] } as T;
   }
 
   if (path === '/api/whatsapp-config') {
     const { data } = await supabase.from('whatsapp_config').select('*').eq('user_id', userId).single();
-    if (!data) return { isConnected: false, phoneNumber: null, apiKey: null, reminder24h: false, reminder2h: false, confirmationOnBooking: false, waitlistNotification: false } as T;
+    if (!data) return { isConnected: false, phoneNumber: null, apiKey: null, reminder24h: true, reminder2h: true, confirmationOnBooking: true, waitlistNotification: false } as T;
     return { id: data.id, isConnected: data.is_connected, phoneNumber: data.phone_number, apiKey: data.api_key, reminder24h: data.reminder_24h, reminder2h: data.reminder_2h, confirmationOnBooking: data.confirmation_on_booking, waitlistNotification: data.waitlist_notification } as T;
   }
 
@@ -259,6 +258,36 @@ export async function apiPut<T>(path: string, body: any): Promise<T> {
     const { data, error } = await supabase.from('clients').update({ name: body.name, phone: body.phone, email: body.email || null, notes: body.notes || null, birthday: body.birthday || null, updated_at: new Date().toISOString() }).eq('id', id).eq('user_id', userId).select().single();
     if (error) throw error;
     return data as T;
+  }
+
+  // ─── WhatsApp config — upsert (crea si no existe, actualiza si ya existe) ───
+  if (path === '/api/whatsapp-config') {
+    const { data, error } = await supabase
+      .from('whatsapp_config')
+      .upsert({
+        user_id: userId,
+        is_connected: body.isConnected ?? false,
+        phone_number: body.phoneNumber ?? null,
+        api_key: body.apiKey ?? null,
+        reminder_24h: body.reminder24h ?? true,
+        reminder_2h: body.reminder2h ?? true,
+        confirmation_on_booking: body.confirmationOnBooking ?? true,
+        waitlist_notification: body.waitlistNotification ?? false,
+        updated_at: new Date().toISOString(),
+      }, { onConflict: 'user_id' })
+      .select()
+      .single();
+    if (error) throw error;
+    return {
+      id: data.id,
+      isConnected: data.is_connected,
+      phoneNumber: data.phone_number,
+      apiKey: data.api_key,
+      reminder24h: data.reminder_24h,
+      reminder2h: data.reminder_2h,
+      confirmationOnBooking: data.confirmation_on_booking,
+      waitlistNotification: data.waitlist_notification,
+    } as T;
   }
 
   throw new Error(`Unknown API path: ${path}`);
