@@ -2,7 +2,7 @@ import { Stack, useRouter, useSegments } from 'expo-router';
 import { StripeProvider } from '@stripe/stripe-react-native';
 import { STRIPE_PUBLISHABLE_KEY } from '@/services/stripe';
 import { LogBox } from 'react-native';
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 LogBox.ignoreAllLogs();
@@ -18,8 +18,12 @@ function NavigationGuard() {
   const router = useRouter();
   const segments = useSegments();
   const [hasSeenOnboarding, setHasSeenOnboarding] = useState<boolean | null>(null);
-  // Bandera para saber si es la primera sesión del usuario en este dispositivo
   const [isFirstLogin, setIsFirstLogin] = useState<boolean | null>(null);
+
+  // Bandera de un solo disparo — evita que el guard redirija más de una vez al onboarding
+  const hasRedirectedToOnboarding = useRef(false);
+  // Bandera para evitar redirects mientras ya se está navegando
+  const isNavigating = useRef(false);
 
   useEffect(() => {
     AsyncStorage.getItem('has_seen_onboarding').then(val => {
@@ -27,16 +31,15 @@ function NavigationGuard() {
     });
   }, []);
 
-  // Cuando el usuario se autentica, verificar si es su primera vez
   useEffect(() => {
     if (!user) {
       setIsFirstLogin(null);
+      hasRedirectedToOnboarding.current = false;
       return;
     }
     const key = `first_login_${user.id}`;
     AsyncStorage.getItem(key).then(async val => {
       if (val === null) {
-        // Primera vez que este user_id inicia sesión en este dispositivo
         await AsyncStorage.setItem(key, 'done');
         await AsyncStorage.setItem('has_seen_onboarding', 'true');
         setIsFirstLogin(true);
@@ -48,32 +51,48 @@ function NavigationGuard() {
 
   useEffect(() => {
     if (authLoading || adminLoading || hasSeenOnboarding === null) return;
+    if (isNavigating.current) return;
 
-    const inAuthScreen    = segments[0] === 'auth';
-    const inAdminScreen   = segments[0] === 'admin';
-    const inOnboarding    = segments[0] === 'auth' && segments[1] === 'onboarding';
+    const inAuthScreen  = segments[0] === 'auth';
+    const inAdminScreen = segments[0] === 'admin';
+    const inOnboarding  = segments[1] === 'onboarding';
 
-    // Sin sesión activa
+    // Sin sesión
     if (!user && !inAuthScreen) {
+      isNavigating.current = true;
       if (hasSeenOnboarding) {
         router.replace('/auth/login');
       } else {
-        // Dispositivo nunca vio el onboarding (primer install, nunca logueado)
         router.replace('/auth/onboarding');
       }
+      setTimeout(() => { isNavigating.current = false; }, 500);
       return;
     }
 
-    // Usuario autenticado — verificar si es primera vez
-    if (user && isFirstLogin === true && !inOnboarding) {
-      // Primera sesión en este dispositivo → mostrar onboarding
+    // Primera sesión del usuario → onboarding (solo una vez)
+    if (
+      user &&
+      isFirstLogin === true &&
+      !inOnboarding &&
+      !hasRedirectedToOnboarding.current
+    ) {
+      hasRedirectedToOnboarding.current = true;
+      isNavigating.current = true;
       router.replace('/auth/onboarding');
+      setTimeout(() => { isNavigating.current = false; }, 500);
       return;
     }
 
-    // Admin autenticado → panel admin
-    if (user && isAdmin && !inAdminScreen && isFirstLogin === false) {
+    // Admin autenticado → panel admin (solo si ya terminó el onboarding)
+    if (
+      user &&
+      isAdmin &&
+      !inAdminScreen &&
+      isFirstLogin === false
+    ) {
+      isNavigating.current = true;
       router.replace('/admin');
+      setTimeout(() => { isNavigating.current = false; }, 500);
       return;
     }
   }, [user, isAdmin, authLoading, adminLoading, hasSeenOnboarding, isFirstLogin, segments]);
