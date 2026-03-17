@@ -22,23 +22,10 @@ export async function apiGet<T>(path: string): Promise<T> {
     return (data?.map(c => ({ id: c.id, name: c.name, phone: c.phone, email: c.email, birthday: c.birthday, notes: c.notes, isActive: c.is_active, lastVisit: c.last_visit, totalVisits: c.total_visits })) || []) as T;
   }
 
-  // ─── Catálogo de servicios ──────────────────────────────────────────────
   if (path === '/api/services') {
-    const { data, error } = await supabase
-      .from('services')
-      .select('*')
-      .eq('user_id', userId)
-      .eq('is_active', true)
-      .order('name');
+    const { data, error } = await supabase.from('services').select('*').eq('user_id', userId).eq('is_active', true).order('name');
     if (error) throw error;
-    return (data?.map(s => ({
-      id: s.id,
-      name: s.name,
-      description: s.description,
-      price: s.price,
-      durationMinutes: s.duration_minutes,
-      isActive: s.is_active,
-    })) || []) as T;
+    return (data?.map(s => ({ id: s.id, name: s.name, description: s.description, price: s.price, durationMinutes: s.duration_minutes, isActive: s.is_active })) || []) as T;
   }
 
   if (path === '/api/appointments') {
@@ -106,7 +93,8 @@ export async function apiGet<T>(path: string): Promise<T> {
 
   if (path === '/api/subscription') {
     const { data, error } = await supabase.from('subscription_plans').select('*').eq('user_id', userId).single();
-    if (error || !data) return { planType: 'Básico', price: '990', features: [] } as T;
+    // ✅ FIX: si no hay plan o hay error, siempre devolver Gratuito — NUNCA Básico
+    if (error || !data) return { planType: 'Gratuito', price: '0', features: [] } as T;
     return { planType: data.plan_type, price: data.price, features: data.features || [] } as T;
   }
 
@@ -136,20 +124,8 @@ export async function apiPost<T>(path: string, body: any): Promise<T> {
     return data as T;
   }
 
-  // ─── Crear servicio ─────────────────────────────────────────────────────
   if (path === '/api/services') {
-    const { data, error } = await supabase
-      .from('services')
-      .insert({
-        user_id: userId,
-        name: body.name,
-        description: body.description || null,
-        price: body.price,
-        duration_minutes: body.durationMinutes,
-        is_active: true,
-      })
-      .select()
-      .single();
+    const { data, error } = await supabase.from('services').insert({ user_id: userId, name: body.name, description: body.description || null, price: body.price, duration_minutes: body.durationMinutes, is_active: true }).select().single();
     if (error) throw error;
     return { id: data.id, name: data.name, description: data.description, price: data.price, durationMinutes: data.duration_minutes, isActive: data.is_active } as T;
   }
@@ -188,22 +164,9 @@ export async function apiPatch<T>(path: string, body: any): Promise<T> {
     return data as T;
   }
 
-  // ─── Actualizar servicio ────────────────────────────────────────────────
   if (path.startsWith('/api/services/')) {
     const id = path.split('/').pop();
-    const { data, error } = await supabase
-      .from('services')
-      .update({
-        name: body.name,
-        description: body.description || null,
-        price: body.price,
-        duration_minutes: body.durationMinutes,
-        updated_at: new Date().toISOString(),
-      })
-      .eq('id', id)
-      .eq('user_id', userId)
-      .select()
-      .single();
+    const { data, error } = await supabase.from('services').update({ name: body.name, description: body.description || null, price: body.price, duration_minutes: body.durationMinutes, updated_at: new Date().toISOString() }).eq('id', id).eq('user_id', userId).select().single();
     if (error) throw error;
     return { id: data.id, name: data.name, description: data.description, price: data.price, durationMinutes: data.duration_minutes, isActive: data.is_active } as T;
   }
@@ -241,14 +204,9 @@ export async function apiDelete<T>(path: string): Promise<T> {
     return { success: true } as T;
   }
 
-  // ─── Archivar (soft-delete) servicio ───────────────────────────────────
   if (path.startsWith('/api/services/')) {
     const id = path.split('/').pop();
-    const { error } = await supabase
-      .from('services')
-      .update({ is_active: false, updated_at: new Date().toISOString() })
-      .eq('id', id)
-      .eq('user_id', userId);
+    const { error } = await supabase.from('services').update({ is_active: false, updated_at: new Date().toISOString() }).eq('id', id).eq('user_id', userId);
     if (error) throw error;
     return { success: true } as T;
   }
