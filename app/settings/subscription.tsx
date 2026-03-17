@@ -1,8 +1,8 @@
 
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import {
   View, Text, StyleSheet, ScrollView,
-  TouchableOpacity, ActivityIndicator,
+  TouchableOpacity, ActivityIndicator, Linking,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
@@ -10,6 +10,8 @@ import { colors } from '@/styles/commonStyles';
 import { IconSymbol } from '@/components/IconSymbol';
 import { ConfirmModal } from '@/components/button';
 import { usePlan } from '@/contexts/PlanContext';
+import { PLAN_PRICES } from '@/services/stripe';
+import MaterialIcons from '@expo/vector-icons/MaterialIcons';
 
 const PLAN_FEATURES = {
   Gratuito: [
@@ -53,159 +55,193 @@ const PLAN_EMOJI: Record<string, string> = {
   Premium:  '⭐',
 };
 
+type PlanTarget = 'Basico' | 'Premium';
+
 export default function SubscriptionScreen() {
   const router = useRouter();
-  const { plan, loading, isGratuito, isBasico, isPremium, refreshPlan } = usePlan();
-  const [upgrading, setUpgrading] = useState(false);
-  const [confirmModal, setConfirmModal] = useState(false);
+  const { plan, loading, isGratuito, isBasico, isPremium } = usePlan();
+  const [confirmModal, setConfirmModal] = useState<{ visible: boolean; target: PlanTarget | null }>({
+    visible: false, target: null,
+  });
   const [errorModal, setErrorModal] = useState({ visible: false, message: '' });
-  const [successModal, setSuccessModal] = useState(false);
 
   const currentPlan = plan.planType;
-  const priceLabel = PLAN_PRICE[currentPlan] || 'Gratis';
-  const emoji = PLAN_EMOJI[currentPlan] || '🌱';
+  const priceLabel  = PLAN_PRICE[currentPlan] || 'Gratis';
+  const emoji       = PLAN_EMOJI[currentPlan] || '🌱';
 
-  // Redirige al Payment Link de Stripe según el plan deseado
-  const handleGoToStripe = (planTarget: 'Basico' | 'Premium') => {
-    // Aquí irán los Payment Links reales de Stripe cuando estén en producción
-    setErrorModal({
-      visible: true,
-      message: planTarget === 'Premium'
-        ? 'Para activar Premium, accede al link de pago que te compartimos o contáctanos por WhatsApp.'
-        : 'Para activar el Plan Básico, accede al link de pago que te compartimos o contáctanos por WhatsApp.',
-    });
+  const handleActivatePlan = (target: PlanTarget) => {
+    // Mostrar modal de confirmación antes de abrir el navegador
+    setConfirmModal({ visible: true, target });
+  };
+
+  const handleConfirmRedirect = async () => {
+    const target = confirmModal.target;
+    setConfirmModal({ visible: false, target: null });
+    if (!target) return;
+
+    const url = target === 'Premium'
+      ? PLAN_PRICES.premium.link
+      : PLAN_PRICES.basico.link;
+
+    try {
+      const supported = await Linking.canOpenURL(url);
+      if (supported) {
+        await Linking.openURL(url);
+      } else {
+        setErrorModal({ visible: true, message: 'No se pudo abrir el navegador. Por favor intenta desde Safari o Chrome.' });
+      }
+    } catch {
+      setErrorModal({ visible: true, message: 'Error al abrir el link de pago. Intenta de nuevo.' });
+    }
   };
 
   if (loading) {
     return (
-      <SafeAreaView style={styles.container}>
-        <View style={styles.loadingContainer}>
-          <ActivityIndicator size="large" color={colors.primary} />
-        </View>
+      <SafeAreaView style={s.container}>
+        <View style={s.loading}><ActivityIndicator size="large" color={colors.primary} /></View>
       </SafeAreaView>
     );
   }
 
+  const targetName  = confirmModal.target === 'Premium' ? 'Premium' : 'Básico';
+  const targetPrice = confirmModal.target === 'Premium' ? '$1,490 MXN/mes' : '$990 MXN/mes';
+
   return (
-    <SafeAreaView style={styles.container}>
+    <SafeAreaView style={s.container}>
+
+      {/* Modal confirmación antes de abrir Stripe */}
+      <ConfirmModal
+        visible={confirmModal.visible}
+        title={`Activar Plan ${targetName}`}
+        message={`Serás redirigido a la página de pago seguro de Stripe para completar tu suscripción de ${targetPrice}.\n\n¿Continuar?`}
+        buttons={[
+          { text: 'Cancelar', onPress: () => setConfirmModal({ visible: false, target: null }), style: 'cancel' },
+          { text: 'Ir al pago →', onPress: handleConfirmRedirect, style: 'default' },
+        ]}
+        onDismiss={() => setConfirmModal({ visible: false, target: null })}
+      />
+
       <ConfirmModal
         visible={errorModal.visible}
-        title="Activar plan"
+        title="Error"
         message={errorModal.message}
-        buttons={[{ text: 'Entendido', onPress: () => setErrorModal({ visible: false, message: '' }), style: 'default' }]}
+        buttons={[{ text: 'Aceptar', onPress: () => setErrorModal({ visible: false, message: '' }), style: 'default' }]}
         onDismiss={() => setErrorModal({ visible: false, message: '' })}
       />
 
-      <View style={styles.header}>
-        <TouchableOpacity onPress={() => router.back()} style={styles.backButton}>
+      <View style={s.header}>
+        <TouchableOpacity onPress={() => router.back()} style={s.back}>
           <IconSymbol android_material_icon_name="arrow-back" size={24} color={colors.text} />
         </TouchableOpacity>
-        <Text style={styles.title}>Plan y Suscripción</Text>
-        <View style={styles.placeholder} />
+        <Text style={s.title}>Plan y Suscripción</Text>
+        <View style={{ width: 32 }} />
       </View>
 
-      <ScrollView contentContainerStyle={styles.scrollContent}>
+      <ScrollView contentContainerStyle={s.scroll}>
 
         {/* Card plan actual */}
-        <View style={styles.currentPlanCard}>
-          <View style={styles.currentPlanHeader}>
-            <View style={[styles.currentPlanIconBox, {
+        <View style={s.currentCard}>
+          <View style={s.currentRow}>
+            <View style={[s.currentIconBox, {
               backgroundColor: isPremium ? '#EDE9FE' : isBasico ? '#ECFDF5' : '#F1F5F9',
             }]}>
-              <Text style={styles.currentPlanEmoji}>{emoji}</Text>
+              <Text style={s.currentEmoji}>{emoji}</Text>
             </View>
-            <View style={styles.currentPlanInfo}>
-              <Text style={styles.currentPlanLabel}>Plan actual</Text>
-              <Text style={[styles.currentPlanName, {
+            <View style={s.currentInfo}>
+              <Text style={s.currentLabel}>Plan actual</Text>
+              <Text style={[s.currentName, {
                 color: isPremium ? '#6366F1' : isBasico ? '#10B981' : '#64748B',
               }]}>
                 {isPremium ? 'Premium' : isBasico ? 'Básico' : 'Gratuito'}
               </Text>
-              <Text style={styles.currentPlanPrice}>{priceLabel}</Text>
+              <Text style={s.currentPrice}>{priceLabel}</Text>
             </View>
           </View>
           {isGratuito && (
-            <View style={styles.upgradeBanner}>
-              <Text style={styles.upgradeBannerText}>
+            <View style={s.upgradeBanner}>
+              <Text style={s.upgradeBannerText}>
                 Activa el Plan Básico para empezar a agendar citas y enviar recordatorios por WhatsApp.
               </Text>
             </View>
           )}
         </View>
 
-        <Text style={styles.sectionTitle}>PLANES DISPONIBLES</Text>
+        <Text style={s.sectionLabel}>PLANES DISPONIBLES</Text>
 
         {/* Plan Gratuito */}
-        <View style={[styles.planCard, isGratuito && styles.planCardActive]}>
-          <View style={styles.planHeader}>
-            <Text style={styles.planName}>🌱 Gratuito</Text>
-            {isGratuito && <View style={styles.currentBadge}><Text style={styles.currentBadgeText}>Tu plan actual</Text></View>}
+        <View style={[s.planCard, isGratuito && s.planCardActive]}>
+          <View style={s.planHeader}>
+            <Text style={s.planName}>🌱 Gratuito</Text>
+            {isGratuito && <View style={s.activeBadge}><Text style={s.activeBadgeText}>Tu plan actual</Text></View>}
           </View>
-          <Text style={styles.planPrice}>Gratis</Text>
-          <Text style={styles.planPeriod}>siempre</Text>
-          <View style={styles.featuresList}>
+          <Text style={s.planPrice}>Gratis</Text>
+          <Text style={s.planPeriod}>siempre</Text>
+          <View style={s.features}>
             {PLAN_FEATURES.Gratuito.map((f, i) => (
-              <View key={i} style={styles.featureItem}>
-                <IconSymbol android_material_icon_name="check" size={18} color="#94A3B8" />
-                <Text style={[styles.featureText, { color: colors.textSecondary }]}>{f}</Text>
+              <View key={i} style={s.featureRow}>
+                <MaterialIcons name="check" size={16} color="#94A3B8" />
+                <Text style={[s.featureText, { color: colors.textSecondary }]}>{f}</Text>
               </View>
             ))}
           </View>
         </View>
 
         {/* Plan Básico */}
-        <View style={[styles.planCard, isBasico && styles.planCardActive]}>
-          <View style={styles.planHeader}>
-            <Text style={styles.planName}>🚀 Básico</Text>
-            {isBasico && <View style={styles.currentBadge}><Text style={styles.currentBadgeText}>Tu plan actual</Text></View>}
+        <View style={[s.planCard, isBasico && s.planCardActive]}>
+          <View style={s.planHeader}>
+            <Text style={s.planName}>🚀 Básico</Text>
+            {isBasico && <View style={s.activeBadge}><Text style={s.activeBadgeText}>Tu plan actual</Text></View>}
           </View>
-          <Text style={styles.planPrice}>$990 MXN</Text>
-          <Text style={styles.planPeriod}>por mes</Text>
-          <View style={styles.featuresList}>
+          <Text style={s.planPrice}>$990 MXN</Text>
+          <Text style={s.planPeriod}>por mes</Text>
+          <View style={s.features}>
             {PLAN_FEATURES.Basico.map((f, i) => (
-              <View key={i} style={styles.featureItem}>
-                <IconSymbol android_material_icon_name="check" size={18} color={colors.primary} />
-                <Text style={styles.featureText}>{f}</Text>
+              <View key={i} style={s.featureRow}>
+                <MaterialIcons name="check" size={16} color={colors.primary} />
+                <Text style={s.featureText}>{f}</Text>
               </View>
             ))}
           </View>
           {isGratuito && (
-            <TouchableOpacity style={styles.upgradeButton} onPress={() => handleGoToStripe('Basico')}>
-              <Text style={styles.upgradeButtonText}>Activar Plan Básico</Text>
+            <TouchableOpacity style={s.ctaBtn} onPress={() => handleActivatePlan('Basico')}>
+              <MaterialIcons name="lock-open" size={18} color="#fff" />
+              <Text style={s.ctaBtnText}>Activar Plan Básico</Text>
             </TouchableOpacity>
           )}
         </View>
 
         {/* Plan Premium */}
-        <View style={[styles.planCard, styles.planCardPremium, isPremium && styles.planCardPremiumActive]}>
-          <View style={styles.premiumBadgeTop}>
-            <Text style={styles.premiumBadgeTopText}>⭐ RECOMENDADO</Text>
+        <View style={[s.planCard, s.planCardPremium, isPremium && s.planCardPremiumActive]}>
+          <View style={s.premiumBadge}>
+            <Text style={s.premiumBadgeText}>⭐ RECOMENDADO</Text>
           </View>
-          <View style={styles.planHeader}>
-            <Text style={[styles.planName, { color: '#6366F1' }]}>Premium</Text>
-            {isPremium && <View style={[styles.currentBadge, { backgroundColor: '#6366F1' }]}><Text style={styles.currentBadgeText}>Tu plan actual</Text></View>}
+          <View style={s.planHeader}>
+            <Text style={[s.planName, { color: '#6366F1' }]}>Premium</Text>
+            {isPremium && <View style={[s.activeBadge, { backgroundColor: '#6366F1' }]}><Text style={s.activeBadgeText}>Tu plan actual</Text></View>}
           </View>
-          <Text style={[styles.planPrice, { color: '#6366F1' }]}>$1,490 MXN</Text>
-          <Text style={styles.planPeriod}>por mes</Text>
-          <View style={styles.featuresList}>
+          <Text style={[s.planPrice, { color: '#6366F1' }]}>$1,490 MXN</Text>
+          <Text style={s.planPeriod}>por mes</Text>
+          <View style={s.features}>
             {PLAN_FEATURES.Premium.map((f, i) => (
-              <View key={i} style={styles.featureItem}>
-                <IconSymbol android_material_icon_name="check" size={18} color="#6366F1" />
-                <Text style={styles.featureText}>{f}</Text>
+              <View key={i} style={s.featureRow}>
+                <MaterialIcons name="check" size={16} color="#6366F1" />
+                <Text style={s.featureText}>{f}</Text>
               </View>
             ))}
           </View>
           {!isPremium && (
-            <TouchableOpacity style={[styles.upgradeButton, { backgroundColor: '#6366F1' }]} onPress={() => handleGoToStripe('Premium')}>
-              <Text style={styles.upgradeButtonText}>Activar Plan Premium</Text>
+            <TouchableOpacity style={[s.ctaBtn, { backgroundColor: '#6366F1' }]} onPress={() => handleActivatePlan('Premium')}>
+              <MaterialIcons name="lock-open" size={18} color="#fff" />
+              <Text style={s.ctaBtnText}>Activar Plan Premium</Text>
             </TouchableOpacity>
           )}
         </View>
 
-        <View style={styles.infoCard}>
-          <IconSymbol android_material_icon_name="info" size={18} color={colors.primary} />
-          <Text style={styles.infoText}>
-            Los planes se pagan mensualmente. Puedes cancelar en cualquier momento desde tu cuenta de Stripe.
+        {/* Nota de pago seguro */}
+        <View style={s.secureNote}>
+          <MaterialIcons name="lock" size={14} color="#94A3B8" />
+          <Text style={s.secureNoteText}>
+            Pago seguro procesado por Stripe. Puedes cancelar tu suscripción en cualquier momento.
           </Text>
         </View>
 
@@ -214,43 +250,36 @@ export default function SubscriptionScreen() {
   );
 }
 
-const styles = StyleSheet.create({
+const s = StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.background },
-  loadingContainer: { flex: 1, justifyContent: 'center', alignItems: 'center' },
+  loading: { flex: 1, justifyContent: 'center', alignItems: 'center' },
   header: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
     padding: 20, paddingTop: 16, backgroundColor: colors.card,
     borderBottomWidth: 1, borderBottomColor: colors.border,
   },
-  backButton: { padding: 4 },
+  back: { padding: 4 },
   title: { fontSize: 20, fontWeight: 'bold', color: colors.text },
-  placeholder: { width: 32 },
-  scrollContent: { padding: 20, paddingBottom: 60 },
+  scroll: { padding: 20, paddingBottom: 60 },
 
   // Plan actual
-  currentPlanCard: {
+  currentCard: {
     backgroundColor: colors.card, borderRadius: 16, padding: 20,
     marginBottom: 24, shadowColor: '#000', shadowOpacity: 0.05, shadowRadius: 8, elevation: 2,
   },
-  currentPlanHeader: { flexDirection: 'row', alignItems: 'center', gap: 16 },
-  currentPlanIconBox: { width: 56, height: 56, borderRadius: 16, justifyContent: 'center', alignItems: 'center' },
-  currentPlanEmoji: { fontSize: 28 },
-  currentPlanInfo: { flex: 1 },
-  currentPlanLabel: { fontSize: 11, color: colors.textSecondary, fontWeight: '600', textTransform: 'uppercase', letterSpacing: 0.5 },
-  currentPlanName: { fontSize: 22, fontWeight: '800', marginTop: 2 },
-  currentPlanPrice: { fontSize: 14, color: colors.textSecondary, marginTop: 3, fontWeight: '500' },
-  upgradeBanner: {
-    marginTop: 14, backgroundColor: '#ECFDF5', borderRadius: 10, padding: 12,
-    borderWidth: 1, borderColor: '#10B981',
-  },
+  currentRow: { flexDirection: 'row', alignItems: 'center', gap: 16 },
+  currentIconBox: { width: 56, height: 56, borderRadius: 16, justifyContent: 'center', alignItems: 'center' },
+  currentEmoji: { fontSize: 28 },
+  currentInfo: { flex: 1 },
+  currentLabel: { fontSize: 11, color: colors.textSecondary, fontWeight: '600', textTransform: 'uppercase', letterSpacing: 0.5 },
+  currentName: { fontSize: 22, fontWeight: '800', marginTop: 2 },
+  currentPrice: { fontSize: 14, color: colors.textSecondary, marginTop: 3, fontWeight: '500' },
+  upgradeBanner: { marginTop: 14, backgroundColor: '#ECFDF5', borderRadius: 10, padding: 12, borderWidth: 1, borderColor: '#10B981' },
   upgradeBannerText: { fontSize: 13, color: '#065F46', lineHeight: 18 },
 
-  sectionTitle: {
-    fontSize: 11, fontWeight: '800', color: colors.textSecondary,
-    marginBottom: 12, letterSpacing: 1,
-  },
+  sectionLabel: { fontSize: 11, fontWeight: '800', color: colors.textSecondary, marginBottom: 12, letterSpacing: 1 },
 
-  // Cards de planes
+  // Cards planes
   planCard: {
     backgroundColor: colors.card, borderRadius: 16, padding: 20,
     marginBottom: 16, borderWidth: 1.5, borderColor: 'transparent',
@@ -259,31 +288,29 @@ const styles = StyleSheet.create({
   planCardActive: { borderColor: colors.primary },
   planCardPremium: { borderColor: '#C7D2FE' },
   planCardPremiumActive: { borderColor: '#6366F1' },
-  premiumBadgeTop: {
-    alignSelf: 'flex-start', backgroundColor: '#EEF2FF',
-    borderRadius: 8, paddingHorizontal: 10, paddingVertical: 4, marginBottom: 12,
-  },
-  premiumBadgeTopText: { fontSize: 11, fontWeight: '800', color: '#6366F1' },
+  premiumBadge: { alignSelf: 'flex-start', backgroundColor: '#EEF2FF', borderRadius: 8, paddingHorizontal: 10, paddingVertical: 4, marginBottom: 12 },
+  premiumBadgeText: { fontSize: 11, fontWeight: '800', color: '#6366F1' },
   planHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 },
   planName: { fontSize: 20, fontWeight: '700', color: colors.text },
-  currentBadge: {
-    backgroundColor: colors.primary, borderRadius: 10,
-    paddingHorizontal: 10, paddingVertical: 4,
-  },
-  currentBadgeText: { fontSize: 11, fontWeight: '700', color: '#fff' },
+  activeBadge: { backgroundColor: colors.primary, borderRadius: 10, paddingHorizontal: 10, paddingVertical: 4 },
+  activeBadgeText: { fontSize: 11, fontWeight: '700', color: '#fff' },
   planPrice: { fontSize: 28, fontWeight: '800', color: colors.text },
   planPeriod: { fontSize: 13, color: colors.textSecondary, marginBottom: 16 },
-  featuresList: { gap: 10 },
-  featureItem: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  features: { gap: 10 },
+  featureRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
   featureText: { fontSize: 14, color: colors.text, flex: 1 },
-  upgradeButton: {
-    backgroundColor: colors.primary, borderRadius: 12, padding: 14,
-    alignItems: 'center', marginTop: 18,
+
+  // CTA button
+  ctaBtn: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8,
+    backgroundColor: colors.primary, borderRadius: 12, padding: 14, marginTop: 18,
   },
-  upgradeButtonText: { color: '#fff', fontSize: 15, fontWeight: '700' },
-  infoCard: {
-    backgroundColor: colors.card, borderRadius: 12, padding: 14,
-    flexDirection: 'row', alignItems: 'flex-start', gap: 10, marginTop: 4,
+  ctaBtnText: { color: '#fff', fontSize: 15, fontWeight: '700' },
+
+  // Nota seguridad
+  secureNote: {
+    flexDirection: 'row', alignItems: 'center', gap: 6,
+    backgroundColor: colors.card, borderRadius: 10, padding: 12, marginTop: 4,
   },
-  infoText: { flex: 1, fontSize: 13, color: colors.textSecondary, lineHeight: 18 },
+  secureNoteText: { flex: 1, fontSize: 12, color: colors.textSecondary, lineHeight: 18 },
 });
