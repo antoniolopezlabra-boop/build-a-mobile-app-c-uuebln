@@ -2,6 +2,8 @@ import React, { createContext, useContext, useState, useEffect, ReactNode } from
 import { router } from 'expo-router';
 import { supabase } from "@/lib/supabase";
 import { Session, User } from "@supabase/supabase-js";
+import { invalidateCache } from "@/utils/cache";
+import { logger } from "@/utils/logger";
 
 interface AppUser {
   id: string;
@@ -18,7 +20,7 @@ interface BusinessProfile {
   phone?: string | null;
   alternativePhone?: string | null;
   logoUrl?: string | null;
-  weeklySchedule?: any;
+  weeklySchedule?: Record<string, any>;
 }
 
 interface AuthContextType {
@@ -43,7 +45,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
-      console.log("[Auth] State change:", event);
+      logger.log("[Auth] State change:", event);
       if (event === "USER_UPDATED") return;
       if (session?.user) {
         await loadUserData(session.user);
@@ -85,7 +87,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setUser(appUser);
       await loadBusinessProfile(supabaseUser.id);
     } catch (error) {
-      console.error('[Auth] Error loading user data:', error);
+      logger.error('[Auth] Error loading user data:', error);
     } finally {
       setLoading(false);
     }
@@ -116,7 +118,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         weeklySchedule: data.weekly_schedule,
       });
     } catch (error) {
-      console.error('[Auth] Error loading business profile:', error);
+      logger.error('[Auth] Error loading business profile:', error);
       setBusinessProfile(null);
     }
   };
@@ -131,11 +133,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           data: { name: params.name, businessName: params.businessName, businessType: params.businessType },
         },
       });
-
       if (error) throw error;
       if (!data.user) throw new Error('No user returned');
     } catch (error) {
-      console.error('[Auth] Registration error:', error);
+      logger.error('[Auth] Registration error:', error);
       throw error;
     } finally {
       setAuthLoading(false);
@@ -148,21 +149,23 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       const { data, error } = await supabase.auth.signInWithPassword({ email, password });
       if (error) throw error;
     } catch (error) {
-      console.error('[Auth] Login error:', error);
+      logger.error('[Auth] Login error:', error);
       throw error;
     } finally {
       setAuthLoading(false);
     }
   };
 
-  // Fix #6: router importado al inicio del archivo, no dinámicamente
   const signOut = async () => {
     try {
       setAuthLoading(true);
+      // FIX: limpiar TODO el cache antes de cerrar sesión
+      // Evita que el próximo usuario vea datos del usuario anterior
+      invalidateCache();
       await supabase.auth.signOut();
       router.replace('/auth/login');
     } catch (error) {
-      console.error('[Auth] Sign out error:', error);
+      logger.error('[Auth] Sign out error:', error);
     } finally {
       setAuthLoading(false);
     }

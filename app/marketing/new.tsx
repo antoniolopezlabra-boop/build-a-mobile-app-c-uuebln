@@ -1,12 +1,13 @@
 import React, { useState, useEffect } from 'react';
 import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity,
-  TextInput, ActivityIndicator, Keyboard, Modal,
+  TextInput, ActivityIndicator, Modal,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import MaterialIcons from '@expo/vector-icons/MaterialIcons';
 import { useAuth } from '@/contexts/AuthContext';
+import { usePlan } from '@/contexts/PlanContext';
 import { ConfirmModal } from '@/components/button';
 
 type Segment = 'todos' | 'activos' | 'inactivos';
@@ -25,6 +26,9 @@ const VARIABLES = [
 export default function NewCampaignScreen() {
   const router = useRouter();
   const { user, businessProfile } = useAuth();
+  // FIX: verificar plan Premium en runtime — bloquea acceso por deeplink sin plan
+  const { isPremium } = usePlan();
+
   const [subject, setSubject] = useState('');
   const [body, setBody] = useState('');
   const [segment, setSegment] = useState<Segment>('todos');
@@ -37,6 +41,13 @@ export default function NewCampaignScreen() {
   const [errorModal, setErrorModal] = useState({ visible: false, message: '' });
   const [successModal, setSuccessModal] = useState({ visible: false, count: 0 });
 
+  // FIX: redirigir si no es Premium
+  useEffect(() => {
+    if (!isPremium) {
+      router.replace('/settings/subscription');
+    }
+  }, [isPremium]);
+
   useEffect(() => { countRecipients(); }, [segment]);
 
   const countRecipients = async () => {
@@ -48,9 +59,8 @@ export default function NewCampaignScreen() {
         .eq('user_id', user?.id)
         .not('email', 'is', null)
         .neq('email', '');
-      if (segment === 'activos') {
-        query = query.eq('is_active', true);
-      } else if (segment === 'inactivos') {
+      if (segment === 'activos') query = query.eq('is_active', true);
+      else if (segment === 'inactivos') {
         const d90 = new Date(); d90.setDate(d90.getDate() - 90);
         query = query.lt('last_visit', d90.toISOString().split('T')[0]);
       }
@@ -66,17 +76,13 @@ export default function NewCampaignScreen() {
   const validate = () => {
     if (!subject.trim()) { setErrorModal({ visible: true, message: 'El asunto del email es requerido' }); return false; }
     if (!body.trim())    { setErrorModal({ visible: true, message: 'El contenido del email es requerido' }); return false; }
-    if (recipientCount === 0) {
-      setErrorModal({ visible: true, message: 'No hay clientes con email registrado para este segmento' });
-      return false;
-    }
+    if (recipientCount === 0) { setErrorModal({ visible: true, message: 'No hay clientes con email registrado para este segmento' }); return false; }
     return true;
   };
 
   const saveDraft = async () => {
     if (!subject.trim() && !body.trim()) {
-      setErrorModal({ visible: true, message: 'Agrega al menos un asunto o contenido para guardar el borrador' });
-      return;
+      setErrorModal({ visible: true, message: 'Agrega al menos un asunto o contenido para guardar el borrador' }); return;
     }
     setSavingDraft(true);
     try {
@@ -97,32 +103,25 @@ export default function NewCampaignScreen() {
     }
   };
 
+  // FIX: el INSERT en BD ahora ocurre DENTRO de la Edge Function, no antes
+  // Así no quedan registros fantasma si el usuario cancela
   const sendCampaign = async () => {
     setConfirmSend(false);
     setSending(true);
     try {
       const { supabase } = await import('@/lib/supabase');
-      // Guardar la campaña primero
-      const { data: campaign, error: insertError } = await supabase
-        .from('email_campaigns')
-        .insert({
-          user_id: user?.id,
+      const { data, error } = await supabase.functions.invoke('send-campaign', {
+        body: {
+          // Pasar los datos directamente — la Edge Function crea el registro
+          userId: user?.id,
           subject: subject.trim(),
           body: body.trim(),
           segment,
-          status: 'borrador',
-          recipient_count: recipientCount || 0,
-        })
-        .select()
-        .single();
-      if (insertError) throw insertError;
-
-      // Llamar a la Edge Function que envía los emails vía Resend
-      const { data, error } = await supabase.functions.invoke('send-campaign', {
-        body: { campaignId: campaign.id },
+          recipientCount: recipientCount || 0,
+        },
       });
       if (error) throw error;
-
+      if (data?.error) throw new Error(data.error);
       setSuccessModal({ visible: true, count: data?.sent || recipientCount || 0 });
     } catch (e: any) {
       setErrorModal({ visible: true, message: e?.message || 'Error al enviar la campaña' });
@@ -131,116 +130,65 @@ export default function NewCampaignScreen() {
     }
   };
 
-  // Preview con datos reales del negocio
-  const previewBody = body
-    .replace(/{{nombre}}/g, 'María')
-    .replace(/{{negocio}}/g, businessProfile?.businessName || 'Tu Negocio');
+  const previewBody    = body.replace(/{{nombre}}/g, 'María').replace(/{{negocio}}/g, businessProfile?.businessName || 'Tu Negocio');
+  const previewSubject = subject.replace(/{{nombre}}/g, 'María').replace(/{{negocio}}/g, businessProfile?.businessName || 'Tu Negocio');
 
-  const previewSubject = subject
-    .replace(/{{nombre}}/g, 'María')
-    .replace(/{{negocio}}/g, businessProfile?.businessName || 'Tu Negocio');
+  if (!isPremium) return null; // no renderizar mientras redirige
 
   return (
     <SafeAreaView style={s.container} edges={['top']}>
-      <ConfirmModal
-        visible={errorModal.visible}
-        title="Error"
-        message={errorModal.message}
+      <ConfirmModal visible={errorModal.visible} title="Error" message={errorModal.message}
         buttons={[{ text: 'Aceptar', onPress: () => setErrorModal({ visible: false, message: '' }), style: 'default' }]}
-        onDismiss={() => setErrorModal({ visible: false, message: '' })}
-      />
-      <ConfirmModal
-        visible={confirmSend}
-        title="Enviar campaña"
+        onDismiss={() => setErrorModal({ visible: false, message: '' })} />
+      <ConfirmModal visible={confirmSend} title="Enviar campaña"
         message={`Se enviará a ${recipientCount} cliente${recipientCount !== 1 ? 's' : ''} con email registrado. ¿Continuar?`}
         buttons={[
           { text: 'Cancelar', onPress: () => setConfirmSend(false), style: 'cancel' },
           { text: 'Sí, enviar ahora', onPress: sendCampaign, style: 'default' },
         ]}
-        onDismiss={() => setConfirmSend(false)}
-      />
-      <ConfirmModal
-        visible={successModal.visible}
-        title="¡Campaña enviada!"
+        onDismiss={() => setConfirmSend(false)} />
+      <ConfirmModal visible={successModal.visible} title="¡Campaña enviada!"
         message={`Tu campaña fue enviada exitosamente a ${successModal.count} cliente${successModal.count !== 1 ? 's' : ''}.`}
         buttons={[{ text: 'Ver campañas', onPress: () => { setSuccessModal({ visible: false, count: 0 }); router.back(); }, style: 'default' }]}
-        onDismiss={() => { setSuccessModal({ visible: false, count: 0 }); router.back(); }}
-      />
+        onDismiss={() => { setSuccessModal({ visible: false, count: 0 }); router.back(); }} />
 
-      {/* Header */}
       <View style={s.header}>
         <TouchableOpacity onPress={() => router.back()} style={s.back}>
           <MaterialIcons name="arrow-back" size={24} color="#0F172A" />
         </TouchableOpacity>
-        <View style={s.headerMid}>
-          <Text style={s.title}>Nueva campaña</Text>
-        </View>
+        <View style={s.headerMid}><Text style={s.title}>Nueva campaña</Text></View>
         <TouchableOpacity onPress={saveDraft} disabled={savingDraft} style={s.draftBtn}>
-          {savingDraft
-            ? <ActivityIndicator size="small" color="#6366F1" />
-            : <Text style={s.draftText}>Guardar borrador</Text>
-          }
+          {savingDraft ? <ActivityIndicator size="small" color="#6366F1" /> : <Text style={s.draftText}>Guardar borrador</Text>}
         </TouchableOpacity>
       </View>
 
       <ScrollView contentContainerStyle={s.scroll} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
-
-        {/* Segmento */}
         <Text style={s.sectionLabel}>DESTINATARIOS</Text>
         <View style={s.segmentRow}>
           {SEGMENTS.map(seg => (
-            <TouchableOpacity
-              key={seg.key}
-              style={[s.segBtn, segment === seg.key && s.segBtnActive]}
-              onPress={() => setSegment(seg.key)}
-            >
-              <MaterialIcons name={seg.icon as any} size={16}
-                color={segment === seg.key ? '#6366F1' : '#94A3B8'} />
+            <TouchableOpacity key={seg.key} style={[s.segBtn, segment === seg.key && s.segBtnActive]} onPress={() => setSegment(seg.key)}>
+              <MaterialIcons name={seg.icon as any} size={16} color={segment === seg.key ? '#6366F1' : '#94A3B8'} />
               <Text style={[s.segLabel, segment === seg.key && s.segLabelActive]}>{seg.label}</Text>
               <Text style={[s.segDesc, segment === seg.key && s.segDescActive]}>{seg.desc}</Text>
             </TouchableOpacity>
           ))}
         </View>
 
-        {/* Contador de destinatarios */}
         <View style={s.recipientBanner}>
           <MaterialIcons name="email" size={16} color="#6366F1" />
-          {loadingCount ? (
-            <ActivityIndicator size="small" color="#6366F1" />
-          ) : (
-            <Text style={s.recipientText}>
-              {recipientCount === null ? '—' : recipientCount} cliente{recipientCount !== 1 ? 's' : ''} con email registrado
-            </Text>
-          )}
+          {loadingCount ? <ActivityIndicator size="small" color="#6366F1" /> :
+            <Text style={s.recipientText}>{recipientCount === null ? '—' : recipientCount} cliente{recipientCount !== 1 ? 's' : ''} con email registrado</Text>
+          }
         </View>
 
-        {/* Asunto */}
         <Text style={s.sectionLabel}>ASUNTO DEL EMAIL</Text>
         <View style={s.card}>
-          <TextInput
-            style={s.subjectInput}
-            value={subject}
-            onChangeText={setSubject}
-            placeholder="Ej: ¡Oferta especial solo para ti! 🎉"
-            placeholderTextColor="#CBD5E1"
-            returnKeyType="next"
-          />
+          <TextInput style={s.subjectInput} value={subject} onChangeText={setSubject} placeholder="Ej: ¡Oferta especial solo para ti!" placeholderTextColor="#CBD5E1" returnKeyType="next" />
         </View>
 
-        {/* Cuerpo */}
         <Text style={s.sectionLabel}>CONTENIDO</Text>
         <View style={s.card}>
-          <TextInput
-            style={s.bodyInput}
-            value={body}
-            onChangeText={setBody}
-            placeholder="Escribe el contenido de tu email..."
-            placeholderTextColor="#CBD5E1"
-            multiline
-            numberOfLines={8}
-            textAlignVertical="top"
-          />
-          {/* Variables */}
+          <TextInput style={s.bodyInput} value={body} onChangeText={setBody} placeholder="Escribe el contenido de tu email..." placeholderTextColor="#CBD5E1" multiline numberOfLines={8} textAlignVertical="top" />
           <View style={s.varsRow}>
             {VARIABLES.map(v => (
               <TouchableOpacity key={v.key} style={s.varChip} onPress={() => setBody(p => p + ` ${v.key}`)}>
@@ -254,54 +202,36 @@ export default function NewCampaignScreen() {
           </View>
         </View>
 
-        {/* Botones */}
-        <TouchableOpacity
-          style={[s.sendBtn, (sending || recipientCount === 0) && s.sendBtnDisabled]}
+        <TouchableOpacity style={[s.sendBtn, (sending || recipientCount === 0) && s.sendBtnDisabled]}
           onPress={() => { if (validate()) setConfirmSend(true); }}
-          disabled={sending || recipientCount === 0}
-        >
-          {sending ? (
-            <ActivityIndicator color="#fff" />
-          ) : (
-            <>
-              <MaterialIcons name="send" size={18} color="#fff" />
-              <Text style={s.sendBtnText}>Enviar ahora{recipientCount !== null ? ` · ${recipientCount} destinatarios` : ''}</Text>
-            </>
+          disabled={sending || recipientCount === 0}>
+          {sending ? <ActivityIndicator color="#fff" /> : (
+            <><MaterialIcons name="send" size={18} color="#fff" />
+              <Text style={s.sendBtnText}>Enviar ahora{recipientCount !== null ? ` · ${recipientCount} destinatarios` : ''}</Text></>
           )}
         </TouchableOpacity>
-
         <View style={{ height: 40 }} />
       </ScrollView>
 
-      {/* Modal preview del email */}
       <Modal visible={showPreview} animationType="slide" transparent onRequestClose={() => setShowPreview(false)}>
         <View style={s.previewOverlay}>
           <View style={s.previewSheet}>
             <View style={s.previewHeader}>
               <Text style={s.previewTitle}>Vista previa del email</Text>
-              <TouchableOpacity onPress={() => setShowPreview(false)}>
-                <MaterialIcons name="close" size={22} color="#64748B" />
-              </TouchableOpacity>
+              <TouchableOpacity onPress={() => setShowPreview(false)}><MaterialIcons name="close" size={22} color="#64748B" /></TouchableOpacity>
             </View>
             <ScrollView style={s.previewBody} showsVerticalScrollIndicator={false}>
-              {/* Simula un email */}
               <View style={s.emailFrame}>
                 <View style={s.emailHeader}>
-                  <View style={s.emailLogo}>
-                    <MaterialIcons name="storefront" size={20} color="#fff" />
-                  </View>
+                  <View style={s.emailLogo}><MaterialIcons name="storefront" size={20} color="#fff" /></View>
                   <Text style={s.emailFromName}>{businessProfile?.businessName || 'Tu Negocio'}</Text>
                 </View>
                 <Text style={s.emailSubject}>{previewSubject || '(sin asunto)'}</Text>
                 <View style={s.emailDivider} />
                 <Text style={s.emailBody}>{previewBody || '(sin contenido)'}</Text>
-                <View style={s.emailFooter}>
-                  <Text style={s.emailFooterText}>Enviado con VYLTA · Cancelar suscripción</Text>
-                </View>
+                <View style={s.emailFooter}><Text style={s.emailFooterText}>Enviado con VYLTA</Text></View>
               </View>
-              <Text style={s.previewNote}>
-                El nombre "María" es solo un ejemplo. Cada cliente verá su propio nombre.
-              </Text>
+              <Text style={s.previewNote}>El nombre "María" es solo un ejemplo.</Text>
               <View style={{ height: 30 }} />
             </ScrollView>
           </View>
@@ -313,11 +243,7 @@ export default function NewCampaignScreen() {
 
 const s = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#F8FAFC' },
-  header: {
-    flexDirection: 'row', alignItems: 'center',
-    paddingHorizontal: 20, paddingVertical: 14,
-    backgroundColor: '#fff', borderBottomWidth: 0.5, borderBottomColor: '#E2E8F0',
-  },
+  header: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 20, paddingVertical: 14, backgroundColor: '#fff', borderBottomWidth: 0.5, borderBottomColor: '#E2E8F0' },
   back: { padding: 4 },
   headerMid: { flex: 1, paddingHorizontal: 12 },
   title: { fontSize: 18, fontWeight: '700', color: '#0F172A' },
@@ -325,32 +251,16 @@ const s = StyleSheet.create({
   draftText: { fontSize: 13, color: '#6366F1', fontWeight: '600' },
   scroll: { padding: 16 },
   sectionLabel: { fontSize: 11, fontWeight: '800', color: '#94A3B8', letterSpacing: 1.2, marginBottom: 8, marginTop: 16 },
-
-  // Segmentos
   segmentRow: { flexDirection: 'row', gap: 8 },
-  segBtn: {
-    flex: 1, backgroundColor: '#fff', borderRadius: 12, padding: 10,
-    alignItems: 'center', gap: 4, borderWidth: 0.5, borderColor: '#E2E8F0',
-  },
+  segBtn: { flex: 1, backgroundColor: '#fff', borderRadius: 12, padding: 10, alignItems: 'center', gap: 4, borderWidth: 0.5, borderColor: '#E2E8F0' },
   segBtnActive: { borderColor: '#6366F1', borderWidth: 1.5, backgroundColor: '#EEF2FF' },
   segLabel: { fontSize: 11, fontWeight: '700', color: '#94A3B8', textAlign: 'center' },
   segLabelActive: { color: '#6366F1' },
   segDesc: { fontSize: 10, color: '#CBD5E1', textAlign: 'center' },
   segDescActive: { color: '#818CF8' },
-
-  // Contador
-  recipientBanner: {
-    flexDirection: 'row', alignItems: 'center', gap: 8,
-    backgroundColor: '#EEF2FF', borderRadius: 10, padding: 10,
-    marginTop: 8, borderWidth: 0.5, borderColor: '#C7D2FE',
-  },
+  recipientBanner: { flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: '#EEF2FF', borderRadius: 10, padding: 10, marginTop: 8, borderWidth: 0.5, borderColor: '#C7D2FE' },
   recipientText: { fontSize: 13, color: '#4338CA', fontWeight: '600' },
-
-  // Card inputs
-  card: {
-    backgroundColor: '#fff', borderRadius: 14, padding: 14,
-    shadowColor: '#000', shadowOpacity: 0.04, shadowRadius: 6, elevation: 1,
-  },
+  card: { backgroundColor: '#fff', borderRadius: 14, padding: 14, shadowColor: '#000', shadowOpacity: 0.04, shadowRadius: 6, elevation: 1 },
   subjectInput: { fontSize: 15, color: '#0F172A', paddingVertical: 4 },
   bodyInput: { fontSize: 14, color: '#0F172A', minHeight: 180, lineHeight: 22 },
   varsRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginTop: 10, borderTopWidth: 0.5, borderTopColor: '#E2E8F0', paddingTop: 10 },
@@ -358,34 +268,16 @@ const s = StyleSheet.create({
   varChipText: { fontSize: 12, fontWeight: '700', color: '#065F46' },
   previewChip: { flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: '#EEF2FF', borderRadius: 8, paddingHorizontal: 10, paddingVertical: 5, borderWidth: 0.5, borderColor: '#C7D2FE' },
   previewChipText: { fontSize: 12, fontWeight: '700', color: '#6366F1' },
-
-  // Botón enviar
-  sendBtn: {
-    flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8,
-    backgroundColor: '#6366F1', borderRadius: 14, padding: 16, marginTop: 20,
-  },
+  sendBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, backgroundColor: '#6366F1', borderRadius: 14, padding: 16, marginTop: 20 },
   sendBtnDisabled: { opacity: 0.5 },
   sendBtnText: { color: '#fff', fontWeight: '700', fontSize: 15 },
-
-  // Modal preview
   previewOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-end' },
   previewSheet: { backgroundColor: '#F1F5F9', borderTopLeftRadius: 24, borderTopRightRadius: 24, maxHeight: '90%' },
-  previewHeader: {
-    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
-    padding: 18, backgroundColor: '#fff',
-    borderTopLeftRadius: 24, borderTopRightRadius: 24,
-    borderBottomWidth: 0.5, borderBottomColor: '#E2E8F0',
-  },
+  previewHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', padding: 18, backgroundColor: '#fff', borderTopLeftRadius: 24, borderTopRightRadius: 24, borderBottomWidth: 0.5, borderBottomColor: '#E2E8F0' },
   previewTitle: { fontSize: 16, fontWeight: '700', color: '#0F172A' },
   previewBody: { padding: 16 },
-  emailFrame: {
-    backgroundColor: '#fff', borderRadius: 16,
-    overflow: 'hidden', borderWidth: 0.5, borderColor: '#E2E8F0',
-  },
-  emailHeader: {
-    flexDirection: 'row', alignItems: 'center', gap: 10,
-    padding: 16, backgroundColor: '#6366F1',
-  },
+  emailFrame: { backgroundColor: '#fff', borderRadius: 16, overflow: 'hidden', borderWidth: 0.5, borderColor: '#E2E8F0' },
+  emailHeader: { flexDirection: 'row', alignItems: 'center', gap: 10, padding: 16, backgroundColor: '#6366F1' },
   emailLogo: { width: 32, height: 32, borderRadius: 8, backgroundColor: 'rgba(255,255,255,0.2)', justifyContent: 'center', alignItems: 'center' },
   emailFromName: { fontSize: 14, fontWeight: '700', color: '#fff' },
   emailSubject: { fontSize: 16, fontWeight: '700', color: '#0F172A', padding: 16, paddingBottom: 8 },
