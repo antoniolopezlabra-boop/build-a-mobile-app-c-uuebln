@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { View, Text, ScrollView, StyleSheet, TouchableOpacity, ActivityIndicator, TextInput, Switch, Alert } from 'react-native';
+import { View, Text, ScrollView, StyleSheet, TouchableOpacity, ActivityIndicator, TextInput, Switch } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { supabase } from '@/lib/supabase';
@@ -9,7 +9,7 @@ interface PromoCode {
   code: string;
   discountType: string;
   discountValue: number;
-  durationDays: number | null;
+  durationMonths: number | null;
   maxUses: number;
   currentUses: number;
   isActive: boolean;
@@ -30,9 +30,9 @@ export default function PromoCodesScreen() {
   const [code, setCode] = useState('');
   const [notes, setNotes] = useState('');
   const [isFree, setIsFree] = useState(true);
-  const [discountValue, setDiscountValue] = useState('100');
-  const [isPermanent, setIsPermanent] = useState(true);
-  const [durationDays, setDurationDays] = useState('30');
+  const [discountValue, setDiscountValue] = useState('50');
+  const [isPermanent, setIsPermanent] = useState(false); // default: no permanente
+  const [durationMonths, setDurationMonths] = useState('1'); // default: 1 mes
   const [maxUses, setMaxUses] = useState('1');
 
   useEffect(() => { loadCodes(); }, []);
@@ -49,7 +49,8 @@ export default function PromoCodesScreen() {
         code: c.code,
         discountType: c.discount_type,
         discountValue: c.discount_value,
-        durationDays: c.duration_days,
+        // duration_days en BD se interpreta ahora como meses
+        durationMonths: c.duration_days,
         maxUses: c.max_uses,
         currentUses: c.current_uses,
         isActive: c.is_active,
@@ -73,30 +74,30 @@ export default function PromoCodesScreen() {
 
   const handleSave = async () => {
     if (!code.trim()) { setErrorMsg('El código es requerido'); return; }
+    const months = parseInt(durationMonths);
+    if (!isPermanent && (!months || months < 1 || months > 12)) {
+      setErrorMsg('La duración debe ser entre 1 y 12 meses'); return;
+    }
     setSaving(true);
     setErrorMsg('');
     try {
       const { data: { user } } = await supabase.auth.getUser();
-
-      // Invocar Edge Function que crea el código en Stripe Y en Supabase
       const { data, error } = await supabase.functions.invoke('create-promo-code', {
         body: {
           code: code.trim().toUpperCase(),
           discountType: isFree ? 'full' : 'percent',
           discountValue: isFree ? 100 : parseInt(discountValue),
-          durationDays: isPermanent ? null : parseInt(durationDays),
+          durationMonths: isPermanent ? null : months,
           maxUses: parseInt(maxUses),
           notes: notes.trim(),
           createdBy: user?.id,
         },
       });
-
       if (error) throw error;
       if (data?.error) throw new Error(data.error);
-
-      // Éxito
       setShowForm(false);
-      setCode(''); setNotes(''); setIsFree(true); setIsPermanent(true); setMaxUses('1');
+      setCode(''); setNotes(''); setIsFree(true); setIsPermanent(false);
+      setDurationMonths('1'); setMaxUses('1');
       loadCodes();
     } catch (err: any) {
       setErrorMsg(err?.message || 'Error al crear el código');
@@ -108,6 +109,12 @@ export default function PromoCodesScreen() {
   const toggleActive = async (id: string, current: boolean) => {
     await supabase.from('promo_codes').update({ is_active: !current }).eq('id', id);
     loadCodes();
+  };
+
+  const getDurationLabel = (months: number | null) => {
+    if (!months) return '♾️ Permanente';
+    if (months === 1) return '1 mes';
+    return `${months} meses`;
   };
 
   return (
@@ -122,11 +129,10 @@ export default function PromoCodesScreen() {
         </TouchableOpacity>
       </View>
 
-      {/* Banner informativo */}
       {!showForm && (
         <View style={styles.infoBanner}>
           <Text style={styles.infoBannerText}>
-            ✅ Los códigos se crean automáticamente en <Text style={{ fontWeight: '700' }}>Stripe</Text> y en la base de datos.
+            ✅ Los códigos se crean automáticamente en <Text style={{ fontWeight: '700' }}>Stripe</Text>.
             Funcionarán directamente en la ventana de pago.
           </Text>
         </View>
@@ -156,20 +162,23 @@ export default function PromoCodesScreen() {
             <Text style={styles.fieldLabel}>Para quién es / motivo (interno)</Text>
             <TextInput
               style={styles.input}
-              placeholder="Ej: Beta tester, amigo del negocio..."
+              placeholder="Ej: Beta tester, cliente especial..."
               placeholderTextColor="#475569"
               value={notes}
               onChangeText={setNotes}
             />
 
             <View style={styles.switchRow}>
-              <Text style={styles.fieldLabel}>100% Gratis (primer mes)</Text>
+              <View>
+                <Text style={styles.fieldLabel}>100% Gratis</Text>
+                <Text style={styles.fieldHint}>El usuario no paga durante la duración</Text>
+              </View>
               <Switch value={isFree} onValueChange={setIsFree} trackColor={{ true: '#10B981' }} />
             </View>
 
             {!isFree && (
               <>
-                <Text style={styles.fieldLabel}>% de descuento</Text>
+                <Text style={styles.fieldLabel}>% de descuento (ej: 50 = 50% off)</Text>
                 <TextInput
                   style={styles.input}
                   placeholder="50"
@@ -182,25 +191,35 @@ export default function PromoCodesScreen() {
             )}
 
             <View style={styles.switchRow}>
-              <Text style={styles.fieldLabel}>Descuento permanente</Text>
-              <Switch value={isPermanent} onValueChange={setIsPermanent} trackColor={{ true: '#10B981' }} />
+              <View>
+                <Text style={styles.fieldLabel}>Descuento permanente</Text>
+                <Text style={styles.fieldHint}>Aplica en todos los meses sin límite</Text>
+              </View>
+              <Switch value={isPermanent} onValueChange={setIsPermanent} trackColor={{ true: '#F59E0B' }} />
             </View>
 
             {!isPermanent && (
               <>
-                <Text style={styles.fieldLabel}>Días de duración</Text>
-                <TextInput
-                  style={styles.input}
-                  placeholder="30"
-                  placeholderTextColor="#475569"
-                  value={durationDays}
-                  onChangeText={setDurationDays}
-                  keyboardType="numeric"
-                />
+                <Text style={styles.fieldLabel}>Duración en meses (1–12)</Text>
+                <Text style={styles.fieldHint}>Ej: 1 = primer mes gratis, 3 = tres meses con descuento</Text>
+                <View style={styles.monthsRow}>
+                  {['1','2','3','6','12'].map(m => (
+                    <TouchableOpacity
+                      key={m}
+                      style={[styles.monthBtn, durationMonths === m && styles.monthBtnActive]}
+                      onPress={() => setDurationMonths(m)}
+                    >
+                      <Text style={[styles.monthBtnText, durationMonths === m && styles.monthBtnTextActive]}>
+                        {m === '1' ? '1 mes' : m === '12' ? '1 año' : `${m} meses`}
+                      </Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
               </>
             )}
 
             <Text style={styles.fieldLabel}>Número máximo de usos</Text>
+            <Text style={styles.fieldHint}>Cuántos usuarios pueden usar este código</Text>
             <TextInput
               style={styles.input}
               placeholder="1"
@@ -209,6 +228,18 @@ export default function PromoCodesScreen() {
               onChangeText={setMaxUses}
               keyboardType="numeric"
             />
+
+            {/* Resumen */}
+            <View style={styles.summaryBox}>
+              <Text style={styles.summaryTitle}>Resumen del código</Text>
+              <Text style={styles.summaryText}>
+                {isFree ? '100% gratis' : `${discountValue}% de descuento`}
+                {' · '}
+                {isPermanent ? 'permanente' : `${durationMonths === '1' ? '1 mes' : durationMonths === '12' ? '1 año' : `${durationMonths} meses`}`}
+                {' · '}
+                máx {maxUses} {parseInt(maxUses) === 1 ? 'uso' : 'usos'}
+              </Text>
+            </View>
 
             {errorMsg ? (
               <View style={styles.errorBox}>
@@ -240,10 +271,9 @@ export default function PromoCodesScreen() {
                     <View style={{ flex: 1 }}>
                       <Text style={styles.codeText}>{c.code}</Text>
                       <Text style={styles.notesText}>{c.notes || 'Sin descripción'}</Text>
-                      {/* Indicador de si está en Stripe */}
                       <View style={[styles.stripeBadge, { backgroundColor: c.stripePromoCodeId ? '#0D9488' : '#EF4444' }]}>
                         <Text style={styles.stripeBadgeText}>
-                          {c.stripePromoCodeId ? '✅ En Stripe' : '⚠️ Solo en BD (no funciona en pago)'}
+                          {c.stripePromoCodeId ? '✅ En Stripe' : '⚠️ Solo en BD'}
                         </Text>
                       </View>
                     </View>
@@ -251,8 +281,8 @@ export default function PromoCodesScreen() {
                       <View style={[styles.badge, { backgroundColor: c.discountValue >= 100 ? '#10B981' : '#F59E0B' }]}>
                         <Text style={styles.badgeText}>{c.discountValue >= 100 ? '🆓 Gratis' : `${c.discountValue}% off`}</Text>
                       </View>
-                      <View style={[styles.badge, { backgroundColor: c.durationDays ? '#6366F1' : '#0F172A' }]}>
-                        <Text style={styles.badgeText}>{c.durationDays ? `${c.durationDays} días` : '♾️ Permanente'}</Text>
+                      <View style={[styles.badge, { backgroundColor: c.durationMonths ? '#6366F1' : '#0F172A' }]}>
+                        <Text style={styles.badgeText}>{getDurationLabel(c.durationMonths)}</Text>
                       </View>
                     </View>
                   </View>
@@ -285,18 +315,29 @@ const styles = StyleSheet.create({
   infoBanner: { backgroundColor: '#0D2B2B', margin: 16, borderRadius: 12, padding: 12, borderWidth: 1, borderColor: '#0D9488' },
   infoBannerText: { color: '#5EEAD4', fontSize: 13, lineHeight: 20 },
   formScroll: { flex: 1 },
-  form: { backgroundColor: '#1E293B', margin: 16, borderRadius: 16, padding: 16, gap: 10 },
+  form: { backgroundColor: '#1E293B', margin: 16, borderRadius: 16, padding: 16, gap: 12 },
   formTitle: { fontSize: 16, fontWeight: '700', color: '#F8FAFC', marginBottom: 2 },
-  formSubtitle: { fontSize: 12, color: '#64748B', marginBottom: 8 },
+  formSubtitle: { fontSize: 12, color: '#64748B', marginBottom: 4 },
   fieldLabel: { fontSize: 13, fontWeight: '600', color: '#94A3B8' },
+  fieldHint: { fontSize: 11, color: '#475569', marginTop: 2 },
   input: { backgroundColor: '#0F172A', borderRadius: 10, padding: 12, color: '#F8FAFC', fontSize: 14 },
   codeRow: { flexDirection: 'row', gap: 8 },
   generateBtn: { backgroundColor: '#3B82F6', borderRadius: 10, padding: 12, justifyContent: 'center' },
   generateBtnText: { color: '#fff', fontWeight: '700', fontSize: 13 },
   switchRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+  // Selector de meses
+  monthsRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 4 },
+  monthBtn: { paddingHorizontal: 14, paddingVertical: 8, borderRadius: 10, backgroundColor: '#0F172A', borderWidth: 1, borderColor: '#334155' },
+  monthBtnActive: { backgroundColor: '#6366F1', borderColor: '#6366F1' },
+  monthBtnText: { color: '#94A3B8', fontSize: 13, fontWeight: '600' },
+  monthBtnTextActive: { color: '#fff' },
+  // Resumen
+  summaryBox: { backgroundColor: '#0F172A', borderRadius: 10, padding: 12, borderWidth: 1, borderColor: '#10B981' },
+  summaryTitle: { fontSize: 11, fontWeight: '700', color: '#10B981', marginBottom: 4, textTransform: 'uppercase', letterSpacing: 0.5 },
+  summaryText: { fontSize: 13, color: '#F8FAFC', fontWeight: '500' },
   errorBox: { backgroundColor: '#2D1515', borderRadius: 10, padding: 10, borderWidth: 1, borderColor: '#EF4444' },
   errorText: { color: '#F87171', fontSize: 13 },
-  saveBtn: { backgroundColor: '#10B981', borderRadius: 12, padding: 14, alignItems: 'center', marginTop: 8 },
+  saveBtn: { backgroundColor: '#10B981', borderRadius: 12, padding: 14, alignItems: 'center', marginTop: 4 },
   saveBtnText: { color: '#fff', fontWeight: '700', fontSize: 15 },
   scroll: { padding: 16, paddingBottom: 100 },
   empty: { textAlign: 'center', color: '#475569', marginTop: 40, fontSize: 15 },

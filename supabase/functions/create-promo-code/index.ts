@@ -21,7 +21,8 @@ serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders })
 
   try {
-    const { code, discountType, discountValue, durationDays, maxUses, notes, createdBy } = await req.json()
+    // durationMonths viene directo del panel — ya no se convierte desde días
+    const { code, discountType, discountValue, durationMonths, maxUses, notes, createdBy } = await req.json()
 
     if (!code) throw new Error('Código requerido')
     if (!STRIPE_SECRET_KEY) throw new Error('STRIPE_SECRET_KEY no configurada')
@@ -29,35 +30,22 @@ serve(async (req) => {
     // ─── 1. Crear el Coupon en Stripe ────────────────────────────────────────
     const couponBody = new URLSearchParams()
 
-    if (discountType === 'full' || discountValue >= 100) {
-      couponBody.append('percent_off', '100')
-    } else {
-      couponBody.append('percent_off', String(discountValue))
-    }
+    couponBody.append('percent_off', (discountType === 'full' || discountValue >= 100) ? '100' : String(discountValue))
 
-    // IMPORTANTE: Para suscripciones Stripe solo acepta 'forever' o 'repeating'
-    // 'once' no es compatible con Payment Links de tipo suscripción
-    if (durationDays && durationDays > 0) {
+    // Para suscripciones: 'forever' o 'repeating' — NUNCA 'once'
+    if (durationMonths && durationMonths > 0) {
       couponBody.append('duration', 'repeating')
-      const months = Math.max(1, Math.round(durationDays / 30))
-      couponBody.append('duration_in_months', String(months))
+      couponBody.append('duration_in_months', String(durationMonths))
     } else {
-      // Sin duración especificada = forever (aplica en todos los pagos de la suscripción)
       couponBody.append('duration', 'forever')
     }
 
-    if (maxUses && maxUses < 999) {
-      couponBody.append('max_redemptions', String(maxUses))
-    }
-
+    if (maxUses && maxUses < 999) couponBody.append('max_redemptions', String(maxUses))
     couponBody.append('name', notes || code)
 
     const couponRes = await fetch('https://api.stripe.com/v1/coupons', {
-      method: 'POST',
-      headers: stripeHeaders,
-      body: couponBody.toString(),
+      method: 'POST', headers: stripeHeaders, body: couponBody.toString(),
     })
-
     const coupon = await couponRes.json()
     console.log('[create-promo-code] Coupon:', JSON.stringify(coupon))
     if (coupon.error) throw new Error(`Stripe coupon error: ${coupon.error.message}`)
@@ -66,16 +54,11 @@ serve(async (req) => {
     const promoBody = new URLSearchParams()
     promoBody.append('coupon', coupon.id)
     promoBody.append('code', code.trim().toUpperCase())
-    if (maxUses && maxUses < 999) {
-      promoBody.append('max_redemptions', String(maxUses))
-    }
+    if (maxUses && maxUses < 999) promoBody.append('max_redemptions', String(maxUses))
 
     const promoRes = await fetch('https://api.stripe.com/v1/promotion_codes', {
-      method: 'POST',
-      headers: stripeHeaders,
-      body: promoBody.toString(),
+      method: 'POST', headers: stripeHeaders, body: promoBody.toString(),
     })
-
     const promoCode = await promoRes.json()
     console.log('[create-promo-code] PromoCode:', JSON.stringify(promoCode))
     if (promoCode.error) throw new Error(`Stripe promo error: ${promoCode.error.message}`)
@@ -86,7 +69,7 @@ serve(async (req) => {
       code: code.trim().toUpperCase(),
       discount_type: discountType || 'percent',
       discount_value: discountValue || 100,
-      duration_days: durationDays || null,
+      duration_days: durationMonths || null, // columna se reutiliza para meses
       max_uses: maxUses || 1,
       notes: notes || '',
       created_by: createdBy,
@@ -94,7 +77,6 @@ serve(async (req) => {
       stripe_promo_code_id: promoCode.id,
       is_active: true,
     })
-
     if (dbError) throw new Error(`DB error: ${dbError.message}`)
 
     return new Response(
