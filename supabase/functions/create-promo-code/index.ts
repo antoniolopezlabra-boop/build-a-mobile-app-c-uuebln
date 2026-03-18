@@ -4,8 +4,6 @@ import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
 const STRIPE_SECRET_KEY = Deno.env.get('STRIPE_SECRET_KEY') ?? ''
 const SUPABASE_URL      = Deno.env.get('SUPABASE_URL') ?? ''
 const SUPABASE_KEY      = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
-
-// Fijar versión de Stripe API para garantizar compatibilidad de parámetros
 const STRIPE_API_VERSION = '2023-10-16'
 
 const stripeHeaders = {
@@ -37,12 +35,15 @@ serve(async (req) => {
       couponBody.append('percent_off', String(discountValue))
     }
 
+    // IMPORTANTE: Para suscripciones Stripe solo acepta 'forever' o 'repeating'
+    // 'once' no es compatible con Payment Links de tipo suscripción
     if (durationDays && durationDays > 0) {
       couponBody.append('duration', 'repeating')
       const months = Math.max(1, Math.round(durationDays / 30))
       couponBody.append('duration_in_months', String(months))
     } else {
-      couponBody.append('duration', 'once') // 'once' = aplica solo al primer pago
+      // Sin duración especificada = forever (aplica en todos los pagos de la suscripción)
+      couponBody.append('duration', 'forever')
     }
 
     if (maxUses && maxUses < 999) {
@@ -58,15 +59,13 @@ serve(async (req) => {
     })
 
     const coupon = await couponRes.json()
-    console.log('[create-promo-code] Coupon response:', JSON.stringify(coupon))
+    console.log('[create-promo-code] Coupon:', JSON.stringify(coupon))
     if (coupon.error) throw new Error(`Stripe coupon error: ${coupon.error.message}`)
 
-    // ─── 2. Crear el PromotionCode en Stripe ──────────────────────────────────
-    // IMPORTANTE: el parámetro se llama 'coupon' en la API v2023-10-16
+    // ─── 2. Crear el PromotionCode en Stripe ─────────────────────────────────
     const promoBody = new URLSearchParams()
-    promoBody.append('coupon', coupon.id)  // ID del coupon recién creado
+    promoBody.append('coupon', coupon.id)
     promoBody.append('code', code.trim().toUpperCase())
-
     if (maxUses && maxUses < 999) {
       promoBody.append('max_redemptions', String(maxUses))
     }
@@ -78,7 +77,7 @@ serve(async (req) => {
     })
 
     const promoCode = await promoRes.json()
-    console.log('[create-promo-code] PromoCode response:', JSON.stringify(promoCode))
+    console.log('[create-promo-code] PromoCode:', JSON.stringify(promoCode))
     if (promoCode.error) throw new Error(`Stripe promo error: ${promoCode.error.message}`)
 
     // ─── 3. Guardar en Supabase ───────────────────────────────────────────────
