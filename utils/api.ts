@@ -1,5 +1,6 @@
 import { getTodayString } from '@/utils/dateUtils';
 import { supabase } from '@/lib/supabase';
+import { logger } from '@/utils/logger';
 
 export async function getCurrentUserId(): Promise<string> {
   const { data: { user } } = await supabase.auth.getUser();
@@ -17,7 +18,9 @@ export async function apiGet<T>(path: string): Promise<T> {
   }
 
   if (path === '/api/clients') {
-    const { data, error } = await supabase.from('clients').select('*').eq('user_id', userId).eq('is_active', true).order('name');
+    // FIX: remover filtro is_active — se filtra localmente en la UI
+    // Con el filtro, los clientes inactivos nunca aparecen y inactiveCount siempre es 0
+    const { data, error } = await supabase.from('clients').select('*').eq('user_id', userId).order('name');
     if (error) throw error;
     return (data?.map(c => ({ id: c.id, name: c.name, phone: c.phone, email: c.email, birthday: c.birthday, notes: c.notes, isActive: c.is_active, lastVisit: c.last_visit, totalVisits: c.total_visits })) || []) as T;
   }
@@ -47,6 +50,20 @@ export async function apiGet<T>(path: string): Promise<T> {
     const { data, error } = await supabase.from('appointments').select('*, client:clients(name, phone)').eq('user_id', userId).gte('date', tomorrow.toISOString().split('T')[0]).lte('date', weekEnd.toISOString().split('T')[0]).order('date').order('start_time');
     if (error) throw error;
     return (data?.map(a => ({ id: a.id, clientId: a.client_id, service: a.service_name, date: a.date, time: a.start_time, status: a.status, isRescheduled: a.is_rescheduled || false, notes: a.notes, client: a.client })) || []) as T;
+  }
+
+  // FIX: nuevo endpoint para obtener citas de un día específico — evita descargar todas las citas
+  if (path.startsWith('/api/appointments/date/')) {
+    const dateStr = path.split('/api/appointments/date/')[1];
+    const { data, error } = await supabase
+      .from('appointments')
+      .select('*, client:clients(name, phone)')
+      .eq('user_id', userId)
+      .eq('date', dateStr)
+      .not('status', 'in', '("Cancelada","No asistió")')
+      .order('start_time');
+    if (error) throw error;
+    return (data?.map(a => ({ id: a.id, clientId: a.client_id, service: a.service_name, date: a.date, time: a.start_time, startTime: a.start_time, endTime: a.end_time, status: a.status, isRescheduled: a.is_rescheduled || false, notes: a.notes, client: a.client })) || []) as T;
   }
 
   if (path === '/api/stats/dashboard') {
@@ -242,7 +259,8 @@ export async function apiPut<T>(path: string, body: any): Promise<T> {
     const t = body.time ? body.time.split(':').map(Number) : [9, 0];
     const endMin = t[0] * 60 + t[1] + 30;
     const endTime = `${Math.floor(endMin/60).toString().padStart(2,'0')}:${(endMin%60).toString().padStart(2,'0')}`;
-    const { data, error } = await supabase.from('appointments').update({ date: body.date, start_time: body.time, end_time: endTime, status: 'Pendiente', updated_at: new Date().toISOString() }).eq('id', id).eq('user_id', userId).select().single();
+    // FIX: status correcto al reagendar — usar 'Reagendada' no 'Pendiente'
+    const { data, error } = await supabase.from('appointments').update({ date: body.date, start_time: body.time, end_time: endTime, status: 'Reagendada', updated_at: new Date().toISOString() }).eq('id', id).eq('user_id', userId).select().single();
     if (error) throw error;
     return data as T;
   }
@@ -260,7 +278,6 @@ export async function apiPut<T>(path: string, body: any): Promise<T> {
     return data as T;
   }
 
-  // ─── WhatsApp config — upsert (crea si no existe, actualiza si ya existe) ───
   if (path === '/api/whatsapp-config') {
     const { data, error } = await supabase
       .from('whatsapp_config')

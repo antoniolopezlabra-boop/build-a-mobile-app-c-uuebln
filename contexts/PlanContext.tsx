@@ -1,5 +1,6 @@
 import React, { createContext, useContext, useEffect, useRef, useState } from 'react';
 import { useAuth } from './AuthContext';
+import { logger } from '@/utils/logger';
 
 export type PlanType = 'Gratuito' | 'Básico' | 'Basico' | 'Premium';
 export type PlanStatus = 'active' | 'trial' | 'expired' | 'cancelled';
@@ -44,9 +45,8 @@ function normalizePlanType(raw: string): string {
   return 'Gratuito';
 }
 
-// Lista de user_ids que son admins VYLTA — no necesitan plan de suscripción
 const ADMIN_USER_IDS = [
-  '406d3777-edab-410c-8807-5d21228bb27b', // antonio.lopez.labra@hotmail.com
+  '406d3777-edab-410c-8807-5d21228bb27b',
 ];
 
 const PlanContext = createContext<PlanContextType>({} as PlanContextType);
@@ -58,15 +58,15 @@ export function PlanProvider({ children }: { children: React.ReactNode }) {
   const lastLoadedUserId = useRef<string | null>(null);
 
   const loadPlan = async (userId: string) => {
-    // Los admins VYLTA se saltan el chequeo de plan
     if (ADMIN_USER_IDS.includes(userId)) {
-      console.log('[PlanContext] Admin user detected, skipping plan check');
+      // FIX: reemplazar console.log por logger — silencia en producción
+      logger.log('[PlanContext] Admin user — skipping plan check');
       setPlan({ planType: 'Premium', status: 'active', trialEndsAt: null, price: '0' });
       setLoading(false);
       return;
     }
 
-    console.log('[PlanContext] Loading plan for user:', userId);
+    logger.log('[PlanContext] Loading plan for user:', userId);
     setLoading(true);
     try {
       const { supabase } = await import('@/lib/supabase');
@@ -78,16 +78,13 @@ export function PlanProvider({ children }: { children: React.ReactNode }) {
 
       if (error) {
         if (error.code === 'PGRST116') {
-          console.log('[PlanContext] No plan found, creating Gratuito');
+          logger.log('[PlanContext] No plan found, creating Gratuito');
           await supabase.from('subscription_plans').insert({
-            user_id: userId,
-            plan_type: 'Gratuito',
-            price: '0',
-            status: 'active',
+            user_id: userId, plan_type: 'Gratuito', price: '0', status: 'active',
           });
           setPlan(defaultPlan);
         } else {
-          console.warn('[PlanContext] Error fetching plan:', error.message);
+          logger.warn('[PlanContext] Error fetching plan:', error.message);
           setPlan(defaultPlan);
         }
         return;
@@ -96,7 +93,7 @@ export function PlanProvider({ children }: { children: React.ReactNode }) {
       if (!data) { setPlan(defaultPlan); return; }
 
       const normalized = normalizePlanType(data.plan_type);
-      console.log('[PlanContext] Plan loaded (raw):', data.plan_type, '→ normalized:', normalized, '| status:', data.status);
+      logger.log('[PlanContext] Plan loaded:', normalized, '| status:', data.status);
 
       setPlan({
         planType: normalized,
@@ -105,7 +102,7 @@ export function PlanProvider({ children }: { children: React.ReactNode }) {
         price: data.price,
       });
     } catch (e) {
-      console.error('[PlanContext] Error loading plan:', e);
+      logger.error('[PlanContext] Error loading plan:', e);
       setPlan(defaultPlan);
     } finally {
       setLoading(false);

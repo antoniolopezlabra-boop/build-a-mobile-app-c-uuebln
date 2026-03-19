@@ -7,7 +7,7 @@ import { View, Text, ScrollView, ActivityIndicator, StyleSheet, TouchableOpacity
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { supabase } from '@/lib/supabase';
 import { getCurrentUserId } from '@/utils/api';
-import { getCached, setCached, invalidateCache } from '@/utils/cache';
+import { getCached, setCached, CACHE_TTL } from '@/utils/cache';
 
 interface Stats {
   todayAppointments: number;
@@ -44,10 +44,12 @@ const STATUS_CONFIG: Record<string, { color: string; bg: string; label: string }
   'Completada':  { color: '#6366F1', bg: '#EEF2FF', label: 'Completada' },
   'Cancelada':   { color: '#EF4444', bg: '#FEF2F2', label: 'Cancelada' },
   'No-show':     { color: '#9CA3AF', bg: '#F9FAFB', label: 'No-show' },
+  'Reagendada':  { color: '#3B82F6', bg: '#EFF6FF', label: 'Reagendada' },
+  'Pagado':      { color: '#10B981', bg: '#ECFDF5', label: 'Pagado' },
 };
 
 export default function ReportsScreen() {
-  const { canViewReports, isGratuito, loading: planLoading } = usePlan();
+  const { canViewReports, loading: planLoading } = usePlan();
   const router = useRouter();
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -55,31 +57,48 @@ export default function ReportsScreen() {
   const [recent, setRecent] = useState<RecentAppointment[]>([]);
   const [activeTab, setActiveTab] = useState<'hoy' | 'semana' | 'mes'>('hoy');
 
+  // FIX: NO invalidar cache en cada focus — usar cache igual que Home y Appointments
+  // Antes: invalidateCache() destruía el cache en cada visita, causando spinner siempre
   useFocusEffect(
     useCallback(() => {
-      invalidateCache('reports_stats');
-      invalidateCache('reports_recent');
-      loadData(true);
+      const cachedStats = getCached<any>('reports_stats');
+      const cachedRecent = getCached<any[]>('reports_recent');
+      if (cachedStats && cachedRecent) {
+        setStats(cachedStats);
+        setRecent(cachedRecent);
+        setLoading(false);
+        // Refresco silencioso en background
+        loadData(true, false, true);
+      } else {
+        loadData();
+      }
     }, [])
   );
 
-  const loadData = async (forceRefresh = false, isPullRefresh = false) => {
-    const cachedStats = getCached<any>('reports_stats');
-    const cachedRecent = getCached<any[]>('reports_recent');
-    if (!forceRefresh && cachedStats && cachedRecent) {
-      setStats(cachedStats);
-      setRecent(cachedRecent);
-      setLoading(false);
-      return;
+  const loadData = async (forceRefresh = false, isPullRefresh = false, silent = false) => {
+    if (!forceRefresh && !isPullRefresh) {
+      const cachedStats = getCached<any>('reports_stats');
+      const cachedRecent = getCached<any[]>('reports_recent');
+      if (cachedStats && cachedRecent) {
+        setStats(cachedStats);
+        setRecent(cachedRecent);
+        setLoading(false);
+        return;
+      }
     }
     if (isPullRefresh) setRefreshing(true);
-    else setLoading(true);
+    else if (!silent) setLoading(true);
+
     try {
       const userId = await getCurrentUserId();
       const today = getTodayString();
+
+      // FIX: semana desde lunes (no domingo) — correcto para México
       const weekStart = new Date();
-      weekStart.setDate(weekStart.getDate() - weekStart.getDay());
+      const dayOfWeek = weekStart.getDay();
+      weekStart.setDate(weekStart.getDate() - (dayOfWeek === 0 ? 6 : dayOfWeek - 1));
       const weekStartStr = weekStart.toISOString().split('T')[0];
+
       const monthStart = new Date();
       monthStart.setDate(1);
       const monthStartStr = monthStart.toISOString().split('T')[0];
@@ -104,23 +123,19 @@ export default function ReportsScreen() {
 
       setRecent((recentApts || []) as any);
 
+      // Ingresos cobrados: status Pagado
       const { data: revenueData } = await supabase
-        .from('appointments')
-        .select('service_cost')
-        .eq('user_id', userId)
-        .eq('status', 'Pagado')
-        .gte('date', monthStartStr);
+        .from('appointments').select('service_cost')
+        .eq('user_id', userId).eq('status', 'Pagado').gte('date', monthStartStr);
       const monthRevenue = revenueData?.reduce((sum: number, a: any) => sum + (a.service_cost || 0), 0) || 0;
 
+      // Por cobrar: status Completada (servicio dado pero no marcado como pagado)
       const { data: pendingData } = await supabase
-        .from('appointments')
-        .select('service_cost')
-        .eq('user_id', userId)
-        .eq('status', 'Completada')
-        .gte('date', monthStartStr);
+        .from('appointments').select('service_cost')
+        .eq('user_id', userId).eq('status', 'Completada').gte('date', monthStartStr);
       const pendingRevenue = pendingData?.reduce((sum: number, a: any) => sum + (a.service_cost || 0), 0) || 0;
 
-      const finalStats = {
+      const finalStats: Stats = {
         todayAppointments: todayApts?.length || 0,
         confirmedToday: todayApts?.filter((a:any) => a.status === 'Confirmada').length || 0,
         pendingToday: todayApts?.filter((a:any) => a.status === 'Pendiente').length || 0,
@@ -141,12 +156,12 @@ export default function ReportsScreen() {
       };
 
       setStats(finalStats);
-      setCached('reports_stats', finalStats);
-      setCached('reports_recent', recentApts || []);
+      setCached('reports_stats', finalStats, CACHE_TTL.REPORTS);
+      setCached('reports_recent', recentApts || [], CACHE_TTL.REPORTS);
     } catch (error) {
       console.error('[Reports] Failed to load:', error);
     } finally {
-      setLoading(false);
+      if (!silent) setLoading(false);
       setRefreshing(false);
     }
   };
@@ -193,12 +208,8 @@ export default function ReportsScreen() {
         showsVerticalScrollIndicator={false}
         contentContainerStyle={styles.scroll}
         refreshControl={
-          <RefreshControl
-            refreshing={refreshing}
-            onRefresh={() => loadData(true, true)}
-            tintColor="#10B981"
-            colors={['#10B981']}
-          />
+          <RefreshControl refreshing={refreshing} onRefresh={() => loadData(true, true)}
+            tintColor="#10B981" colors={['#10B981']} />
         }
       >
         <View style={styles.header}>
@@ -299,7 +310,7 @@ export default function ReportsScreen() {
                   <View style={styles.badgesCol}>
                     {(apt as any).is_rescheduled && (
                       <View style={styles.rescheduledBadge}>
-                        <Text style={styles.rescheduledText}>🔄 Reagend.</Text>
+                        <Text style={styles.rescheduledText}>Reagend.</Text>
                       </View>
                     )}
                     <View style={[styles.statusBadge, { backgroundColor: cfg.bg }]}>
