@@ -101,14 +101,11 @@ export default function NewAppointmentScreen() {
     if (_event.type === 'set' && selected) setDate(selected);
   };
 
-  // Al seleccionar del catálogo: rellena nombre, precio y duración
   const handleSelectCatalogService = (svc: CatalogService) => {
     setSelectedCatalogService(svc);
     setService(svc.name);
     setServiceCost(svc.price.toString());
-    // Calcular cuántos bloques de 30 min ocupa la duración
     const blocks = Math.ceil(svc.durationMinutes / 30);
-    // Si ya hay un bloque de inicio seleccionado, extender; si no, lo dejamos para que el usuario elija hora
     if (selectedBlocks.length > 0 && timeSlots.length > 0) {
       const firstIdx = timeSlots.findIndex(s => s.time === selectedBlocks[0]);
       if (firstIdx !== -1) {
@@ -138,9 +135,7 @@ export default function NewAppointmentScreen() {
     try {
       const data = await apiGet<CatalogService[]>('/api/services');
       setCatalogServices(data);
-    } catch (e) {
-      // Si falla, funciona como texto libre
-    }
+    } catch (e) {}
   };
 
   const loadOverlapConfig = async () => {
@@ -177,8 +172,11 @@ export default function NewAppointmentScreen() {
   const checkAvailability = async () => {
     try {
       const dateString = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+      // FIX CRÍTICO: usar endpoint por fecha — evita descargar todas las citas del historial
+      // Antes: apiGet('/api/appointments') descargaba TODAS sin filtro, con 500 citas era muy lento
+      // Ahora: solo trae las citas del día seleccionado, sin canceladas ni no-shows
       const [appointments, businessHours] = await Promise.all([
-        apiGet<any[]>('/api/appointments'),
+        apiGet<any[]>(`/api/appointments/date/${dateString}`),
         apiGet<any[]>('/api/business-hours'),
       ]);
       const dayOfWeek = date.getDay();
@@ -200,9 +198,8 @@ export default function NewAppointmentScreen() {
       const startMin  = parseInt(dayConfig.startTime.split(':')[1]);
       const endHour   = parseInt(dayConfig.endTime.split(':')[0]);
       const endMin    = parseInt(dayConfig.endTime.split(':')[1]);
-      const dateAppointments = (appointments as any[]).filter((appt: any) =>
-        appt.date === dateString && !['Cancelada', 'No-show'].includes(appt.status)
-      );
+      // appointments ya viene filtrado por fecha — no necesita filtro adicional
+      const dateAppointments = appointments as any[];
       const slots: TimeSlot[] = [];
       const today = new Date();
       const todayString = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
@@ -234,6 +231,7 @@ export default function NewAppointmentScreen() {
     }
     if (!selectedClient) { setErrorModal({ visible: true, message: 'Por favor selecciona un cliente' }); return; }
     if (!service.trim())  { setErrorModal({ visible: true, message: 'Por favor ingresa el servicio' }); return; }
+    // FIX: calcular endTime basado en los bloques seleccionados (duración real del servicio)
     const lastBlock = selectedBlocks.length > 0 ? selectedBlocks[selectedBlocks.length - 1] : time;
     const [lh, lm] = lastBlock.split(':').map(Number);
     const endMinutes = lh * 60 + lm + 30;
@@ -304,7 +302,6 @@ export default function NewAppointmentScreen() {
           keyboardDismissMode="on-drag"
           scrollEnabled={!showDatePanel}
         >
-          {/* Cliente */}
           <View style={styles.section}>
             <Text style={styles.label}>Cliente *</Text>
             <TouchableOpacity style={styles.input} onPress={() => { dismissKeyboard(); setShowClientPicker(true); }}>
@@ -315,22 +312,16 @@ export default function NewAppointmentScreen() {
             </TouchableOpacity>
           </View>
 
-          {/* Servicio — con catálogo si existe */}
           <View style={styles.section}>
             <View style={styles.labelRow}>
               <Text style={styles.label}>Servicio *</Text>
               {hasCatalog && (
-                <TouchableOpacity
-                  style={styles.catalogBtn}
-                  onPress={() => { dismissKeyboard(); setShowServicePicker(true); }}
-                >
+                <TouchableOpacity style={styles.catalogBtn} onPress={() => { dismissKeyboard(); setShowServicePicker(true); }}>
                   <MaterialIcons name="menu-book" size={14} color="#10B981" />
                   <Text style={styles.catalogBtnText}>Ver catálogo</Text>
                 </TouchableOpacity>
               )}
             </View>
-
-            {/* Si hay un servicio del catálogo seleccionado: mostrar chip */}
             {selectedCatalogService ? (
               <View style={styles.catalogSelected}>
                 <View style={styles.catalogSelectedIcon}>
@@ -360,19 +351,14 @@ export default function NewAppointmentScreen() {
             )}
           </View>
 
-          {/* Fecha */}
           <View style={styles.section}>
             <Text style={styles.label}>Fecha *</Text>
-            <TouchableOpacity
-              style={[styles.input, showDatePanel && styles.inputActive]}
-              onPress={openDatePicker}
-            >
+            <TouchableOpacity style={[styles.input, showDatePanel && styles.inputActive]} onPress={openDatePicker}>
               <Text style={styles.inputText}>{formattedDate}</Text>
               <IconSymbol android_material_icon_name="event" size={20} color={colors.primary} />
             </TouchableOpacity>
           </View>
 
-          {/* Hora */}
           <View style={styles.section}>
             <Text style={styles.label}>Hora *</Text>
             {dayIsClosed ? (
@@ -413,7 +399,6 @@ export default function NewAppointmentScreen() {
                           if (!slot.available) return;
                           Keyboard.dismiss();
                           if (selectedBlocks.length === 0) {
-                            // Si hay servicio del catálogo, pre-seleccionar bloques según duración
                             if (selectedCatalogService) {
                               const blocks = Math.ceil(selectedCatalogService.durationMinutes / 30);
                               const thisIdx = timeSlots.findIndex(s => s.time === slot.time);
@@ -455,7 +440,6 @@ export default function NewAppointmentScreen() {
             )}
           </View>
 
-          {/* Costo */}
           <View style={styles.inputGroup}>
             <Text style={styles.label}>Costo del servicio (MXN)</Text>
             <TextInput
@@ -471,7 +455,6 @@ export default function NewAppointmentScreen() {
             />
           </View>
 
-          {/* Notas */}
           <View style={styles.section}>
             <Text style={styles.label}>Notas (opcional)</Text>
             <TextInput
@@ -489,7 +472,6 @@ export default function NewAppointmentScreen() {
             />
           </View>
 
-          {/* WhatsApp toggle */}
           <View style={styles.section}>
             <View style={styles.switchRow}>
               <View style={styles.switchLabel}>
@@ -515,7 +497,6 @@ export default function NewAppointmentScreen() {
         </ScrollView>
       </KeyboardAvoidingView>
 
-      {/* ─── iOS: panel de fecha ──────────────────────────────────────────── */}
       {Platform.OS === 'ios' && showDatePanel && (
         <>
           <TouchableOpacity style={styles.dateOverlay} activeOpacity={1} onPress={cancelDateIOS} />
@@ -551,12 +532,10 @@ export default function NewAppointmentScreen() {
         </>
       )}
 
-      {/* ─── Android: picker nativo ───────────────────────────────────────── */}
       {Platform.OS === 'android' && showDatePickerAndroid && (
         <DateTimePicker value={date} mode="date" display="default" minimumDate={new Date()} onChange={onAndroidDateChange} />
       )}
 
-      {/* ─── Modal catálogo de servicios ─────────────────────────────────── */}
       <Modal visible={showServicePicker} animationType="slide" transparent onRequestClose={() => setShowServicePicker(false)}>
         <View style={styles.modalOverlay}>
           <View style={styles.modalContent}>
@@ -566,8 +545,6 @@ export default function NewAppointmentScreen() {
                 <MaterialIcons name="close" size={24} color={colors.text} />
               </TouchableOpacity>
             </View>
-
-            {/* Buscador */}
             <View style={styles.serviceSearch}>
               <MaterialIcons name="search" size={18} color="#94A3B8" />
               <TextInput
@@ -584,7 +561,6 @@ export default function NewAppointmentScreen() {
                 </TouchableOpacity>
               ) : null}
             </View>
-
             <ScrollView style={styles.serviceList}>
               {filteredCatalogServices.length === 0 ? (
                 <View style={styles.serviceEmpty}>
@@ -593,10 +569,7 @@ export default function NewAppointmentScreen() {
                     {serviceSearchQuery ? 'Sin resultados' : 'No tienes servicios en el catálogo'}
                   </Text>
                   {!serviceSearchQuery && (
-                    <TouchableOpacity
-                      style={styles.serviceEmptyBtn}
-                      onPress={() => { setShowServicePicker(false); router.push('/settings/services'); }}
-                    >
+                    <TouchableOpacity style={styles.serviceEmptyBtn} onPress={() => { setShowServicePicker(false); router.push('/settings/services'); }}>
                       <Text style={styles.serviceEmptyBtnText}>Ir al catálogo →</Text>
                     </TouchableOpacity>
                   )}
@@ -605,10 +578,7 @@ export default function NewAppointmentScreen() {
                 filteredCatalogServices.map((svc) => (
                   <TouchableOpacity
                     key={svc.id}
-                    style={[
-                      styles.serviceItem,
-                      selectedCatalogService?.id === svc.id && styles.serviceItemSelected,
-                    ]}
+                    style={[styles.serviceItem, selectedCatalogService?.id === svc.id && styles.serviceItemSelected]}
                     onPress={() => handleSelectCatalogService(svc)}
                     activeOpacity={0.7}
                   >
@@ -641,7 +611,6 @@ export default function NewAppointmentScreen() {
         </View>
       </Modal>
 
-      {/* ─── Modal clientes ───────────────────────────────────────────────── */}
       <Modal visible={showClientPicker} animationType="slide" transparent onRequestClose={() => setShowClientPicker(false)}>
         <View style={styles.modalOverlay}>
           <View style={styles.modalContent}>
@@ -709,11 +678,7 @@ export default function NewAppointmentScreen() {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.background },
-  header: {
-    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
-    paddingHorizontal: 20, paddingVertical: 16,
-    backgroundColor: '#ffffff', borderBottomWidth: 1, borderBottomColor: '#E5E7EB',
-  },
+  header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 20, paddingVertical: 16, backgroundColor: '#ffffff', borderBottomWidth: 1, borderBottomColor: '#E5E7EB' },
   backButton: { padding: 4 },
   title: { fontSize: 20, fontWeight: '600', color: colors.text },
   placeholder: { width: 32 },
@@ -722,71 +687,39 @@ const styles = StyleSheet.create({
   inputGroup: { marginBottom: 24 },
   labelRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 },
   label: { fontSize: 16, fontWeight: '600', color: colors.text },
-  catalogBtn: {
-    flexDirection: 'row', alignItems: 'center', gap: 4,
-    backgroundColor: '#ECFDF5', paddingHorizontal: 10, paddingVertical: 5, borderRadius: 20,
-  },
+  catalogBtn: { flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: '#ECFDF5', paddingHorizontal: 10, paddingVertical: 5, borderRadius: 20 },
   catalogBtnText: { fontSize: 12, fontWeight: '600', color: '#10B981' },
-  input: {
-    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
-    backgroundColor: '#ffffff', borderRadius: 12, padding: 16,
-    borderWidth: 1, borderColor: '#E5E7EB',
-  },
+  input: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', backgroundColor: '#ffffff', borderRadius: 12, padding: 16, borderWidth: 1, borderColor: '#E5E7EB' },
   inputActive: { borderColor: colors.primary, borderWidth: 2 },
   inputText: { fontSize: 16, color: colors.text },
   inputPlaceholder: { fontSize: 16, color: colors.textSecondary },
-  textInput: {
-    backgroundColor: '#ffffff', borderRadius: 12, padding: 16,
-    fontSize: 16, color: colors.text, borderWidth: 1, borderColor: '#E5E7EB',
-  },
+  textInput: { backgroundColor: '#ffffff', borderRadius: 12, padding: 16, fontSize: 16, color: colors.text, borderWidth: 1, borderColor: '#E5E7EB' },
   textArea: { minHeight: 100 },
-
-  // Chip servicio del catálogo seleccionado
-  catalogSelected: {
-    flexDirection: 'row', alignItems: 'center', gap: 12,
-    backgroundColor: '#F0FDF4', borderRadius: 12, padding: 14,
-    borderWidth: 1, borderColor: '#BBF7D0',
-  },
+  catalogSelected: { flexDirection: 'row', alignItems: 'center', gap: 12, backgroundColor: '#F0FDF4', borderRadius: 12, padding: 14, borderWidth: 1, borderColor: '#BBF7D0' },
   catalogSelectedIcon: { width: 36, height: 36, borderRadius: 10, backgroundColor: '#DCFCE7', justifyContent: 'center', alignItems: 'center' },
   catalogSelectedInfo: { flex: 1 },
   catalogSelectedName: { fontSize: 15, fontWeight: '700', color: '#065F46' },
   catalogSelectedMeta: { fontSize: 12, color: '#10B981', marginTop: 2, fontWeight: '500' },
-
   dayClosedContainer: { backgroundColor: '#FEF2F2', borderRadius: 12, padding: 16, marginTop: 8 },
   dayClosedText: { fontSize: 15, fontWeight: '600', color: '#EF4444', textAlign: 'center' },
   dayClosedSubtext: { fontSize: 13, color: '#9CA3AF', textAlign: 'center', marginTop: 4 },
-  durationBadge: {
-    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
-    backgroundColor: '#ECFDF5', borderRadius: 10, paddingHorizontal: 12, paddingVertical: 8,
-    marginBottom: 8, borderWidth: 1, borderColor: '#10B981',
-  },
+  durationBadge: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', backgroundColor: '#ECFDF5', borderRadius: 10, paddingHorizontal: 12, paddingVertical: 8, marginBottom: 8, borderWidth: 1, borderColor: '#10B981' },
   durationText: { fontSize: 13, fontWeight: '700', color: '#10B981' },
   durationClear: { fontSize: 12, color: '#EF4444', fontWeight: '600' },
   timeSlotOverlap: { borderWidth: 1, borderColor: '#F59E0B', backgroundColor: '#FFFBEB' },
   timeSlotsContainer: { flexDirection: 'row' },
-  timeSlot: {
-    paddingHorizontal: 16, paddingVertical: 10, borderRadius: 8,
-    backgroundColor: '#ffffff', borderWidth: 1, borderColor: '#E5E7EB', marginRight: 8,
-  },
+  timeSlot: { paddingHorizontal: 16, paddingVertical: 10, borderRadius: 8, backgroundColor: '#ffffff', borderWidth: 1, borderColor: '#E5E7EB', marginRight: 8 },
   timeSlotSelected: { backgroundColor: colors.primary, borderColor: colors.primary },
   timeSlotDisabled: { backgroundColor: '#F3F4F6', borderColor: '#E5E7EB' },
   timeSlotText: { fontSize: 14, fontWeight: '500', color: colors.text },
   timeSlotTextSelected: { color: '#ffffff' },
   timeSlotTextDisabled: { color: '#9CA3AF' },
-  switchRow: {
-    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
-    backgroundColor: '#ffffff', borderRadius: 12, padding: 16,
-  },
+  switchRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', backgroundColor: '#ffffff', borderRadius: 12, padding: 16 },
   switchLabel: { flexDirection: 'row', alignItems: 'center', gap: 8, flex: 1 },
   switchText: { fontSize: 16, fontWeight: '600', color: colors.text },
-  saveButton: {
-    backgroundColor: colors.primary, borderRadius: 12, padding: 16,
-    alignItems: 'center', marginTop: 8, marginBottom: 32,
-  },
+  saveButton: { backgroundColor: colors.primary, borderRadius: 12, padding: 16, alignItems: 'center', marginTop: 8, marginBottom: 32 },
   saveButtonDisabled: { opacity: 0.6 },
   saveButtonText: { fontSize: 16, fontWeight: '600', color: '#ffffff' },
-
-  // Panel fecha iOS
   dateOverlay: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.40)' },
   datePanelContainer: { position: 'absolute', bottom: 0, left: 0, right: 0, backgroundColor: '#ffffff', borderTopLeftRadius: 24, borderTopRightRadius: 24, paddingBottom: 40 },
   datePanelHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 20, paddingTop: 18, paddingBottom: 14, borderBottomWidth: 0.5, borderBottomColor: '#E2E8F0' },
@@ -797,28 +730,18 @@ const styles = StyleSheet.create({
   datePanelPreviewText: { fontSize: 15, fontWeight: '600', color: '#10B981', textTransform: 'capitalize' },
   datePanelConfirmBtn: { backgroundColor: '#10B981', marginHorizontal: 20, marginTop: 12, paddingVertical: 16, borderRadius: 14, alignItems: 'center' },
   datePanelConfirmBtnText: { fontSize: 16, fontWeight: '700', color: '#ffffff' },
-
-  // Modal servicios
   modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-end' },
   modalContent: { backgroundColor: '#ffffff', borderTopLeftRadius: 24, borderTopRightRadius: 24, maxHeight: '85%' },
   modalHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', padding: 20, borderBottomWidth: 0.5, borderBottomColor: '#E2E8F0' },
   modalTitle: { fontSize: 18, fontWeight: '700', color: colors.text },
-  serviceSearch: {
-    flexDirection: 'row', alignItems: 'center', gap: 8,
-    backgroundColor: '#F8FAFC', borderRadius: 12, marginHorizontal: 16, marginTop: 14,
-    paddingHorizontal: 12, paddingVertical: 10, borderWidth: 0.5, borderColor: '#E2E8F0',
-  },
+  serviceSearch: { flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: '#F8FAFC', borderRadius: 12, marginHorizontal: 16, marginTop: 14, paddingHorizontal: 12, paddingVertical: 10, borderWidth: 0.5, borderColor: '#E2E8F0' },
   serviceSearchInput: { flex: 1, fontSize: 14, color: '#0F172A' },
   serviceList: { padding: 16 },
   serviceEmpty: { alignItems: 'center', paddingVertical: 40, gap: 10 },
   serviceEmptyText: { fontSize: 15, color: '#94A3B8', textAlign: 'center' },
   serviceEmptyBtn: { backgroundColor: '#ECFDF5', borderRadius: 10, paddingVertical: 10, paddingHorizontal: 20 },
   serviceEmptyBtnText: { color: '#10B981', fontWeight: '700', fontSize: 14 },
-  serviceItem: {
-    flexDirection: 'row', alignItems: 'center', gap: 12,
-    backgroundColor: '#fff', borderRadius: 14, padding: 14, marginBottom: 8,
-    borderWidth: 0.5, borderColor: '#E2E8F0',
-  },
+  serviceItem: { flexDirection: 'row', alignItems: 'center', gap: 12, backgroundColor: '#fff', borderRadius: 14, padding: 14, marginBottom: 8, borderWidth: 0.5, borderColor: '#E2E8F0' },
   serviceItemSelected: { borderColor: '#10B981', borderWidth: 1.5, backgroundColor: '#F0FDF4' },
   serviceItemIcon: { width: 38, height: 38, borderRadius: 10, backgroundColor: '#ECFDF5', justifyContent: 'center', alignItems: 'center' },
   serviceItemInfo: { flex: 1 },
@@ -830,8 +753,6 @@ const styles = StyleSheet.create({
   serviceItemPrice: { alignItems: 'flex-end' },
   serviceItemPriceText: { fontSize: 16, fontWeight: '800', color: '#10B981' },
   serviceItemPriceSub: { fontSize: 10, color: '#94A3B8' },
-
-  // Modal clientes
   searchInput: { backgroundColor: colors.background, borderRadius: 12, padding: 12, margin: 20, marginBottom: 0, fontSize: 16, color: colors.text },
   clientsList: { padding: 20 },
   emptyClientState: { alignItems: 'center', paddingVertical: 40 },
