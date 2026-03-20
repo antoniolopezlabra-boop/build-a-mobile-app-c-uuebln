@@ -1,14 +1,25 @@
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useState, useCallback } from 'react';
 import {
-  View, Text, StyleSheet, ScrollView, TouchableOpacity,
-  TextInput, Switch, ActivityIndicator, Share, Linking, Alert, Platform, Clipboard,
+  View,
+  Text,
+  StyleSheet,
+  ScrollView,
+  TouchableOpacity,
+  TextInput,
+  Switch,
+  ActivityIndicator,
+  Share,
+  Linking,
+  Alert,
 } from 'react-native';
+import * as Clipboard from 'expo-clipboard';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useFocusEffect } from '@react-navigation/native';
 import { usePlan } from '@/contexts/PlanContext';
 import { useAuth } from '@/contexts/AuthContext';
 import { supabase } from '@/lib/supabase';
+import MaterialIcons from '@expo/vector-icons/MaterialIcons';
 
 const BASE_URL = 'https://antoniolopezlabra-boop.github.io/vylta-planes/book.html';
 
@@ -33,21 +44,18 @@ interface BookingRequest {
 export default function BookingLinkScreen() {
   const router = useRouter();
   const { user } = useAuth();
-  const { canUseBookingLink, isGratuito } = usePlan();
+  const { isGratuito } = usePlan();
 
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [copied, setCopied] = useState(false);
-
   const [linkData, setLinkData] = useState<BookingLink | null>(null);
   const [slug, setSlug] = useState('');
   const [isActive, setIsActive] = useState(true);
   const [requireApproval, setRequireApproval] = useState(false);
   const [whatsappConfirm, setWhatsappConfirm] = useState(true);
   const [slugError, setSlugError] = useState('');
-
   const [requests, setRequests] = useState<BookingRequest[]>([]);
-  const [loadingRequests, setLoadingRequests] = useState(false);
 
   useFocusEffect(useCallback(() => { loadData(); }, []));
 
@@ -82,17 +90,15 @@ export default function BookingLinkScreen() {
           setSlug(suggested);
         }
       }
-
       await loadRequests();
     } catch (e) {
-      console.error('[BookingLink] loadData:', e);
+      console.error('[BookingLink]', e);
     } finally {
       setLoading(false);
     }
   };
 
   const loadRequests = async () => {
-    setLoadingRequests(true);
     try {
       const { data } = await supabase
         .from('appointments')
@@ -103,15 +109,13 @@ export default function BookingLinkScreen() {
         .order('date', { ascending: true })
         .limit(20);
       setRequests(data || []);
-    } catch (e) {
+    } catch {
       setRequests([]);
-    } finally {
-      setLoadingRequests(false);
     }
   };
 
   const validateSlug = (val: string) => {
-    if (!val.trim()) { setSlugError('El slug no puede estar vacío'); return false; }
+    if (!val.trim()) { setSlugError('El nombre no puede estar vacío'); return false; }
     if (!/^[a-z0-9-]+$/.test(val)) { setSlugError('Solo letras minúsculas, números y guiones'); return false; }
     if (val.length < 3) { setSlugError('Mínimo 3 caracteres'); return false; }
     setSlugError('');
@@ -142,10 +146,10 @@ export default function BookingLinkScreen() {
         if (error) throw error;
         setLinkData(data);
       }
-      Alert.alert('\u00a1Guardado!', 'La configuraci\u00f3n de tu link fue actualizada.');
+      Alert.alert('Guardado', 'Tu link de citas fue actualizado.');
     } catch (e: any) {
       const msg = e?.message?.includes('duplicate') || e?.code === '23505'
-        ? 'Ese slug ya est\u00e1 en uso. Elige otro nombre \u00fanico.'
+        ? 'Ese nombre ya está en uso. Elige otro.'
         : e?.message || 'Error al guardar';
       Alert.alert('Error', msg);
     } finally {
@@ -153,55 +157,43 @@ export default function BookingLinkScreen() {
     }
   };
 
-  // FIX: Copiar pone SOLO la URL en portapapeles — sin duplicado
   const handleCopy = async () => {
     const url = `${BASE_URL}?n=${slug}`;
     try {
-      // Intentar copiar al portapapeles directamente
-      if (Clipboard && Clipboard.setString) {
-        Clipboard.setString(url);
-        setCopied(true);
-        setTimeout(() => setCopied(false), 2500);
-      } else {
-        // Fallback: share sheet con solo la URL como mensaje
-        await Share.share({ message: url });
-        setCopied(true);
-        setTimeout(() => setCopied(false), 2500);
-      }
-    } catch (e) {}
-  };
-
-  // Compartir con texto descriptivo + URL (no duplica porque message no incluye la URL)
-  const handleShare = async () => {
-    const url = `${BASE_URL}?n=${slug}`;
-    try {
-      await Share.share({
-        message: `Agenda tu cita en l\u00ednea con nosotros:\n${url}`,
-      });
-    } catch (e) {}
-  };
-
-  // Ver página — abre directamente en el navegador
-  const handleOpenLink = async () => {
-    const url = `${BASE_URL}?n=${slug}`;
-    const canOpen = await Linking.canOpenURL(url);
-    if (canOpen) {
-      Linking.openURL(url);
+      await Clipboard.setStringAsync(url);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2500);
+    } catch {
+      await Share.share({ message: url });
     }
   };
 
-  const handleApproveRequest = async (id: string) => {
-    await supabase.from('appointments').update({ status: 'Confirmada', updated_at: new Date().toISOString() }).eq('id', id);
+  const handleShare = async () => {
+    const url = `${BASE_URL}?n=${slug}`;
+    await Share.share({ message: `Agenda tu cita en línea:\n${url}` });
+  };
+
+  const handleOpenLink = async () => {
+    const url = `${BASE_URL}?n=${slug}`;
+    if (await Linking.canOpenURL(url)) Linking.openURL(url);
+  };
+
+  const handleApprove = async (id: string) => {
+    await supabase.from('appointments')
+      .update({ status: 'Confirmada', updated_at: new Date().toISOString() })
+      .eq('id', id);
     setRequests(prev => prev.filter(r => r.id !== id));
   };
 
-  const handleRejectRequest = async (id: string) => {
-    Alert.alert('Rechazar solicitud', '\u00bfEst\u00e1s seguro?', [
+  const handleReject = async (id: string) => {
+    Alert.alert('Rechazar solicitud', '¿Estás seguro? Esta acción no se puede deshacer.', [
       { text: 'Cancelar', style: 'cancel' },
       {
         text: 'Rechazar', style: 'destructive',
         onPress: async () => {
-          await supabase.from('appointments').update({ status: 'Cancelada', updated_at: new Date().toISOString() }).eq('id', id);
+          await supabase.from('appointments')
+            .update({ status: 'Cancelada', updated_at: new Date().toISOString() })
+            .eq('id', id);
           setRequests(prev => prev.filter(r => r.id !== id));
         },
       },
@@ -213,184 +205,295 @@ export default function BookingLinkScreen() {
     return date.toLocaleDateString('es-MX', { weekday: 'short', day: 'numeric', month: 'short' });
   };
 
+  // ─── Loading ───────────────────────────────────────────────────────────────
   if (loading) {
     return (
       <SafeAreaView style={st.container}>
         <View style={st.header}>
-          <TouchableOpacity onPress={() => router.back()}><Text style={st.back}>\u2190 Volver</Text></TouchableOpacity>
-          <Text style={st.title}>Link de cita</Text>
-          <View style={{ width: 60 }} />
+          <TouchableOpacity onPress={() => router.back()} style={st.backBtn}>
+            <MaterialIcons name="arrow-back-ios" size={18} color="#64748B" />
+            <Text style={st.backText}>Ajustes</Text>
+          </TouchableOpacity>
+          <Text style={st.title}>Link de citas</Text>
+          <View style={{ width: 80 }} />
         </View>
-        <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
+        <View style={st.centered}>
           <ActivityIndicator size="large" color="#10B981" />
         </View>
       </SafeAreaView>
     );
   }
 
+  // ─── Paywall ───────────────────────────────────────────────────────────────
   if (isGratuito) {
     return (
       <SafeAreaView style={st.container}>
         <View style={st.header}>
-          <TouchableOpacity onPress={() => router.back()}><Text style={st.back}>\u2190 Volver</Text></TouchableOpacity>
-          <Text style={st.title}>Link de cita</Text>
-          <View style={{ width: 60 }} />
+          <TouchableOpacity onPress={() => router.back()} style={st.backBtn}>
+            <MaterialIcons name="arrow-back-ios" size={18} color="#64748B" />
+            <Text style={st.backText}>Ajustes</Text>
+          </TouchableOpacity>
+          <Text style={st.title}>Link de citas</Text>
+          <View style={{ width: 80 }} />
         </View>
         <View style={st.paywall}>
-          <Text style={st.paywallIcon}>\ud83d\udd17</Text>
-          <Text style={st.paywallTitle}>Link de cita p\u00fablica</Text>
+          <View style={st.paywallIconWrap}>
+            <MaterialIcons name="link" size={36} color="#10B981" />
+          </View>
+          <Text style={st.paywallTitle}>Link de cita pública</Text>
           <Text style={st.paywallDesc}>
-            Genera un link \u00fanico que tus clientes pueden abrir desde Instagram, WhatsApp o Facebook
-            para agendar citas 24/7 sin llamarte.
+            Comparte un link con tus clientes para que agenden citas 24/7 desde
+            Instagram, WhatsApp o Facebook — sin llamarte.
           </Text>
           <TouchableOpacity style={st.paywallBtn} onPress={() => router.push('/settings/subscription')}>
-            <Text style={st.paywallBtnText}>Ver Plan B\u00e1sico \u2192</Text>
+            <Text style={st.paywallBtnText}>Ver Plan Básico</Text>
+            <MaterialIcons name="arrow-forward" size={18} color="#fff" />
           </TouchableOpacity>
         </View>
       </SafeAreaView>
     );
   }
 
+  // ─── Main ──────────────────────────────────────────────────────────────────
   const publicUrl = `${BASE_URL}?n=${slug}`;
   const hasLink = !!linkData;
 
   return (
     <SafeAreaView style={st.container}>
+      {/* Header */}
       <View style={st.header}>
-        <TouchableOpacity onPress={() => router.back()}><Text style={st.back}>\u2190 Volver</Text></TouchableOpacity>
-        <Text style={st.title}>Link de cita</Text>
-        <TouchableOpacity onPress={handleSave} disabled={saving}>
-          <Text style={[st.saveBtn, saving && { opacity: 0.5 }]}>{saving ? 'Guardando...' : 'Guardar'}</Text>
+        <TouchableOpacity onPress={() => router.back()} style={st.backBtn}>
+          <MaterialIcons name="arrow-back-ios" size={18} color="#64748B" />
+          <Text style={st.backText}>Ajustes</Text>
+        </TouchableOpacity>
+        <Text style={st.title}>Link de citas</Text>
+        <TouchableOpacity onPress={handleSave} disabled={saving} style={st.saveHeaderBtn}>
+          {saving
+            ? <ActivityIndicator size="small" color="#10B981" />
+            : <Text style={st.saveHeaderText}>Guardar</Text>
+          }
         </TouchableOpacity>
       </View>
 
       <ScrollView contentContainerStyle={st.scroll} showsVerticalScrollIndicator={false}>
 
-        {/* Hero */}
+        {/* ── Tarjeta hero con el link ── */}
         <View style={st.heroCard}>
-          <View style={st.heroTop}>
-            <Text style={st.heroLabel}>Tu link de citas</Text>
-            <View style={[st.statusPill, { backgroundColor: isActive ? '#ECFDF5' : '#1E293B' }]}>
-              <View style={[st.statusDot, { backgroundColor: isActive ? '#10B981' : '#475569' }]} />
-              <Text style={[st.statusText, { color: isActive ? '#10B981' : '#94A3B8' }]}>
+          <View style={st.heroRow}>
+            <View style={st.heroIconWrap}>
+              <MaterialIcons name="link" size={20} color="#10B981" />
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text style={st.heroLabel}>Tu link de citas</Text>
+              <Text style={st.heroUrl} numberOfLines={1}>{publicUrl}</Text>
+            </View>
+            <View style={[st.activePill, { backgroundColor: isActive ? '#ECFDF5' : '#1E293B' }]}>
+              <View style={[st.activeDot, { backgroundColor: isActive ? '#10B981' : '#475569' }]} />
+              <Text style={[st.activeText, { color: isActive ? '#10B981' : '#64748B' }]}>
                 {isActive ? 'Activo' : 'Inactivo'}
               </Text>
             </View>
           </View>
-          <Text style={st.heroUrl} numberOfLines={2}>{publicUrl}</Text>
-          <View style={st.heroActions}>
-            <TouchableOpacity style={[st.heroBtn, { backgroundColor: copied ? '#065F46' : '#1E293B' }]} onPress={handleCopy}>
-              <Text style={[st.heroBtnText, { color: copied ? '#10B981' : '#fff' }]}>{copied ? '\u2713 Copiado' : '\ud83d\udccb Copiar'}</Text>
+
+          {/* Botones de acción */}
+          <View style={st.actionRow}>
+            <TouchableOpacity
+              style={[st.actionBtn, copied && st.actionBtnSuccess]}
+              onPress={handleCopy}
+            >
+              <MaterialIcons name={copied ? 'check' : 'content-copy'} size={16} color={copied ? '#10B981' : '#F8FAFC'} />
+              <Text style={[st.actionBtnText, copied && { color: '#10B981' }]}>
+                {copied ? 'Copiado' : 'Copiar'}
+              </Text>
             </TouchableOpacity>
-            <TouchableOpacity style={[st.heroBtn, { backgroundColor: '#1E293B' }]} onPress={handleShare}>
-              <Text style={st.heroBtnText}>\u2197 Compartir</Text>
+
+            <TouchableOpacity style={st.actionBtn} onPress={handleShare}>
+              <MaterialIcons name="share" size={16} color="#F8FAFC" />
+              <Text style={st.actionBtnText}>Compartir</Text>
             </TouchableOpacity>
-            <TouchableOpacity style={[st.heroBtn, { backgroundColor: '#1E293B' }]} onPress={handleOpenLink}>
-              <Text style={st.heroBtnText}>\ud83d\udc41 Ver</Text>
+
+            <TouchableOpacity style={st.actionBtn} onPress={handleOpenLink}>
+              <MaterialIcons name="open-in-browser" size={16} color="#F8FAFC" />
+              <Text style={st.actionBtnText}>Ver página</Text>
             </TouchableOpacity>
           </View>
         </View>
 
-        {/* Solicitudes pendientes */}
+        {/* ── Solicitudes pendientes ── */}
         {requests.length > 0 && (
-          <>
-            <View style={st.sectionHeader}>
+          <View style={st.section}>
+            <View style={st.sectionTitleRow}>
               <Text style={st.sectionTitle}>Solicitudes pendientes</Text>
-              <View style={st.badge}><Text style={st.badgeText}>{requests.length}</Text></View>
+              <View style={st.countBadge}>
+                <Text style={st.countBadgeText}>{requests.length}</Text>
+              </View>
             </View>
+
             {requests.map(req => (
               <View key={req.id} style={st.requestCard}>
-                <View style={st.requestTop}>
-                  <View style={{ flex: 1 }}>
-                    <Text style={st.requestName}>{req.client_name_temp || 'Cliente'}</Text>
-                    <Text style={st.requestService}>{req.service_name}</Text>
-                    <Text style={st.requestDate}>{formatDate(req.date)} \u00b7 {req.start_time}</Text>
-                    {req.notes ? <Text style={st.requestNotes}>{req.notes}</Text> : null}
-                  </View>
+                <View style={st.requestInfo}>
+                  <Text style={st.requestName}>{req.client_name_temp || 'Cliente'}</Text>
+                  <Text style={st.requestService}>{req.service_name}</Text>
+                  <Text style={st.requestDate}>
+                    {formatDate(req.date)}  {req.start_time}
+                  </Text>
+                  {req.notes ? <Text style={st.requestNotes}>{req.notes}</Text> : null}
                 </View>
-                <View style={st.requestActions}>
-                  <TouchableOpacity style={st.acceptBtn} onPress={() => handleApproveRequest(req.id)}>
-                    <Text style={st.acceptBtnText}>\u2713 Aceptar</Text>
+                <View style={st.requestBtns}>
+                  <TouchableOpacity style={st.approveBtn} onPress={() => handleApprove(req.id)}>
+                    <MaterialIcons name="check" size={16} color="#fff" />
+                    <Text style={st.approveBtnText}>Aceptar</Text>
                   </TouchableOpacity>
-                  <TouchableOpacity style={st.rejectBtn} onPress={() => handleRejectRequest(req.id)}>
-                    <Text style={st.rejectBtnText}>\u2715 Rechazar</Text>
+                  <TouchableOpacity style={st.rejectBtn} onPress={() => handleReject(req.id)}>
+                    <MaterialIcons name="close" size={16} color="#EF4444" />
+                    <Text style={st.rejectBtnText}>Rechazar</Text>
                   </TouchableOpacity>
                 </View>
               </View>
             ))}
-          </>
+          </View>
         )}
 
-        {/* Configuraci\u00f3n */}
-        <Text style={st.sectionTitle}>Configuraci\u00f3n</Text>
-        <View style={st.configCard}>
-          <View style={st.configRow}>
-            <Text style={st.configLabel}>Nombre \u00fanico del link (slug)</Text>
-            <Text style={st.configSub}>Aparece en tu URL \u00b7 solo letras, n\u00fameros y guiones</Text>
-          </View>
-          <TextInput
-            style={[st.slugInput, slugError ? { borderColor: '#EF4444' } : null]}
-            value={slug}
-            onChangeText={v => {
-              const clean = v.toLowerCase().replace(/[^a-z0-9-]/g, '');
-              setSlug(clean); validateSlug(clean);
-            }}
-            placeholder="mi-estetica"
-            placeholderTextColor="#475569"
-            autoCapitalize="none"
-            autoCorrect={false}
-          />
-          {slugError ? <Text style={st.slugError}>{slugError}</Text> : null}
-          <Text style={st.slugPreview}>{publicUrl}</Text>
+        {/* ── Configuración del link ── */}
+        <View style={st.section}>
+          <Text style={st.sectionTitle}>Configuración</Text>
 
-          <View style={st.divider} />
-
-          <View style={st.toggleRow}>
-            <View style={{ flex: 1 }}>
-              <Text style={st.configLabel}>Link activo</Text>
-              <Text style={st.configSub}>Clientes pueden ver tu p\u00e1gina y agendar</Text>
+          {/* Nombre del link */}
+          <View style={st.configCard}>
+            <View style={st.configCardHeader}>
+              <MaterialIcons name="edit" size={18} color="#10B981" />
+              <View style={{ flex: 1 }}>
+                <Text style={st.configLabel}>Nombre de tu link</Text>
+                <Text style={st.configSub}>Personaliza la dirección que verán tus clientes</Text>
+              </View>
             </View>
-            <Switch value={isActive} onValueChange={setIsActive} trackColor={{ false: '#334155', true: '#10B981' }} thumbColor="#fff" />
+            <TextInput
+              style={[st.slugInput, slugError ? { borderColor: '#EF4444' } : null]}
+              value={slug}
+              onChangeText={v => {
+                const clean = v.toLowerCase().replace(/[^a-z0-9-]/g, '');
+                setSlug(clean);
+                validateSlug(clean);
+              }}
+              placeholder="mi-estetica"
+              placeholderTextColor="#334155"
+              autoCapitalize="none"
+              autoCorrect={false}
+            />
+            {slugError ? (
+              <View style={st.errorRow}>
+                <MaterialIcons name="error-outline" size={14} color="#EF4444" />
+                <Text style={st.slugError}>{slugError}</Text>
+              </View>
+            ) : null}
+            <View style={st.urlPreviewRow}>
+              <MaterialIcons name="link" size={12} color="#334155" />
+              <Text style={st.urlPreview} numberOfLines={1}>{publicUrl}</Text>
+            </View>
           </View>
 
-          <View style={st.divider} />
+          {/* Toggles */}
+          <View style={st.togglesCard}>
+            {/* Link activo */}
+            <View style={st.toggleRow}>
+              <View style={st.toggleIcon}>
+                <MaterialIcons name="public" size={20} color={isActive ? '#10B981' : '#475569'} />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={st.toggleLabel}>Link activo</Text>
+                <Text style={st.toggleSub}>
+                  {isActive ? 'Tus clientes pueden agendar ahora' : 'El link está desactivado'}
+                </Text>
+              </View>
+              <Switch
+                value={isActive}
+                onValueChange={setIsActive}
+                trackColor={{ false: '#1E293B', true: '#10B981' }}
+                thumbColor="#fff"
+              />
+            </View>
 
-          <View style={st.toggleRow}>
-            <View style={{ flex: 1 }}>
-              <Text style={st.configLabel}>Aprobaci\u00f3n manual</Text>
-              <Text style={st.configSub}>
-                {requireApproval
-                  ? '\u26a0\ufe0f Debes aprobar cada cita \u2014 el cliente queda en espera'
-                  : '\u2705 Las citas se confirman solas \u2014 sin fricci\u00f3n para el cliente'}
+            <View style={st.divider} />
+
+            {/* Aprobación manual */}
+            <View style={st.toggleRow}>
+              <View style={st.toggleIcon}>
+                <MaterialIcons name="how-to-reg" size={20} color={requireApproval ? '#F59E0B' : '#475569'} />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={st.toggleLabel}>Aprobar citas manualmente</Text>
+                <Text style={st.toggleSub}>
+                  {requireApproval
+                    ? 'Debes aprobar cada cita antes de confirmarla'
+                    : 'Las citas se confirman de forma automática'}
+                </Text>
+              </View>
+              <Switch
+                value={requireApproval}
+                onValueChange={setRequireApproval}
+                trackColor={{ false: '#1E293B', true: '#F59E0B' }}
+                thumbColor="#fff"
+              />
+            </View>
+
+            <View style={st.divider} />
+
+            {/* WhatsApp */}
+            <View style={st.toggleRow}>
+              <View style={st.toggleIcon}>
+                <MaterialIcons name="chat" size={20} color={whatsappConfirm ? '#10B981' : '#475569'} />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={st.toggleLabel}>Confirmar por WhatsApp</Text>
+                <Text style={st.toggleSub}>
+                  Enviar mensaje de confirmación al cliente
+                </Text>
+              </View>
+              <Switch
+                value={whatsappConfirm}
+                onValueChange={setWhatsappConfirm}
+                trackColor={{ false: '#1E293B', true: '#10B981' }}
+                thumbColor="#fff"
+              />
+            </View>
+          </View>
+        </View>
+
+        {/* ── Dónde compartir ── */}
+        <View style={st.tipsCard}>
+          <View style={st.tipsHeader}>
+            <MaterialIcons name="lightbulb-outline" size={16} color="#F59E0B" />
+            <Text style={st.tipsTitle}>¿Dónde compartir tu link?</Text>
+          </View>
+          {[
+            { icon: 'photo-camera' as const, text: 'Bio de Instagram o Facebook' },
+            { icon: 'chat' as const, text: 'Estado de WhatsApp Business' },
+            { icon: 'badge' as const, text: 'Tarjeta de presentación digital' },
+            { icon: 'place' as const, text: 'Perfil de Google Maps' },
+          ].map(({ icon, text }) => (
+            <View key={text} style={st.tipRow}>
+              <MaterialIcons name={icon} size={14} color="#475569" />
+              <Text style={st.tipText}>{text}</Text>
+            </View>
+          ))}
+        </View>
+
+        {/* ── Botón guardar ── */}
+        <TouchableOpacity
+          style={[st.saveBtn, saving && { opacity: 0.6 }]}
+          onPress={handleSave}
+          disabled={saving}
+        >
+          {saving ? (
+            <ActivityIndicator color="#fff" />
+          ) : (
+            <>
+              <MaterialIcons name="save" size={20} color="#fff" />
+              <Text style={st.saveBtnText}>
+                {hasLink ? 'Guardar cambios' : 'Activar mi link de citas'}
               </Text>
-            </View>
-            <Switch value={requireApproval} onValueChange={setRequireApproval} trackColor={{ false: '#334155', true: '#F59E0B' }} thumbColor="#fff" />
-          </View>
-
-          <View style={st.divider} />
-
-          <View style={st.toggleRow}>
-            <View style={{ flex: 1 }}>
-              <Text style={st.configLabel}>WhatsApp al confirmar</Text>
-              <Text style={st.configSub}>Avisar al cliente por WhatsApp cuando se confirme</Text>
-            </View>
-            <Switch value={whatsappConfirm} onValueChange={setWhatsappConfirm} trackColor={{ false: '#334155', true: '#10B981' }} thumbColor="#fff" />
-          </View>
-        </View>
-
-        {/* Tip */}
-        <View style={st.tipCard}>
-          <Text style={st.tipTitle}>D\u00f3nde compartir tu link</Text>
-          <Text style={st.tipText}>
-            {'\u2022 Bio de Instagram o Facebook\n\u2022 Estado de WhatsApp Business\n\u2022 Tarjeta de presentaci\u00f3n digital\n\u2022 Perfil de Google Maps de tu negocio'}
-          </Text>
-        </View>
-
-        <TouchableOpacity style={[st.saveFullBtn, saving && { opacity: 0.6 }]} onPress={handleSave} disabled={saving}>
-          {saving
-            ? <ActivityIndicator color="#fff" />
-            : <Text style={st.saveFullBtnText}>{hasLink ? 'Guardar cambios' : 'Activar mi link de citas'}</Text>
-          }
+            </>
+          )}
         </TouchableOpacity>
 
       </ScrollView>
@@ -399,55 +502,79 @@ export default function BookingLinkScreen() {
 }
 
 const st = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#0F172A' },
-  header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 20, paddingVertical: 16, borderBottomWidth: 1, borderBottomColor: '#1E293B', backgroundColor: '#0F172A' },
-  back: { color: '#64748B', fontSize: 15 },
-  title: { fontSize: 17, fontWeight: '700', color: '#F8FAFC' },
-  saveBtn: { color: '#10B981', fontSize: 15, fontWeight: '700' },
-  scroll: { padding: 20, paddingBottom: 60 },
-  heroCard: { backgroundColor: '#1E293B', borderRadius: 20, padding: 20, marginBottom: 20, borderWidth: 1, borderColor: '#334155' },
-  heroTop: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 },
-  heroLabel: { fontSize: 11, color: '#475569', fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.8 },
-  statusPill: { flexDirection: 'row', alignItems: 'center', gap: 5, paddingHorizontal: 10, paddingVertical: 4, borderRadius: 20 },
-  statusDot: { width: 6, height: 6, borderRadius: 3 },
-  statusText: { fontSize: 12, fontWeight: '700' },
-  heroUrl: { fontSize: 12, color: '#10B981', fontFamily: 'monospace', marginBottom: 16, lineHeight: 18 },
-  heroActions: { flexDirection: 'row', gap: 8 },
-  heroBtn: { flex: 1, paddingVertical: 10, borderRadius: 10, alignItems: 'center', borderWidth: 1, borderColor: '#334155' },
-  heroBtnText: { fontSize: 12, fontWeight: '700', color: '#F8FAFC' },
-  sectionHeader: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 10 },
-  sectionTitle: { fontSize: 14, fontWeight: '700', color: '#94A3B8', marginBottom: 10, textTransform: 'uppercase', letterSpacing: 0.5 },
-  badge: { backgroundColor: '#EF4444', borderRadius: 20, paddingHorizontal: 8, paddingVertical: 2 },
-  badgeText: { fontSize: 12, fontWeight: '800', color: '#fff' },
-  requestCard: { backgroundColor: '#1E293B', borderRadius: 16, padding: 16, marginBottom: 10, borderWidth: 1, borderColor: '#7F1D1D' },
-  requestTop: { flexDirection: 'row', marginBottom: 12 },
-  requestName: { fontSize: 15, fontWeight: '700', color: '#F8FAFC' },
-  requestService: { fontSize: 13, color: '#94A3B8', marginTop: 2 },
-  requestDate: { fontSize: 12, color: '#64748B', marginTop: 3 },
-  requestNotes: { fontSize: 12, color: '#94A3B8', marginTop: 4, fontStyle: 'italic' },
-  requestActions: { flexDirection: 'row', gap: 10 },
-  acceptBtn: { flex: 1, backgroundColor: '#10B981', borderRadius: 10, paddingVertical: 10, alignItems: 'center' },
-  acceptBtnText: { color: '#fff', fontWeight: '700', fontSize: 13 },
-  rejectBtn: { flex: 1, backgroundColor: 'transparent', borderRadius: 10, paddingVertical: 10, alignItems: 'center', borderWidth: 1, borderColor: '#7F1D1D' },
-  rejectBtnText: { color: '#EF4444', fontWeight: '700', fontSize: 13 },
-  configCard: { backgroundColor: '#1E293B', borderRadius: 16, overflow: 'hidden', marginBottom: 16, borderWidth: 1, borderColor: '#334155' },
-  configRow: { padding: 16, paddingBottom: 10 },
-  configLabel: { fontSize: 14, fontWeight: '600', color: '#F8FAFC' },
-  configSub: { fontSize: 12, color: '#475569', marginTop: 3, lineHeight: 18 },
-  slugInput: { marginHorizontal: 16, borderRadius: 10, borderWidth: 1.5, borderColor: '#334155', padding: 12, fontSize: 13, color: '#10B981', backgroundColor: '#0F172A', fontFamily: 'monospace' },
-  slugError: { marginHorizontal: 16, marginTop: 4, fontSize: 12, color: '#EF4444' },
-  slugPreview: { marginHorizontal: 16, marginTop: 6, marginBottom: 12, fontSize: 10, color: '#475569', fontFamily: 'monospace' },
-  divider: { height: 1, backgroundColor: '#334155' },
-  toggleRow: { flexDirection: 'row', alignItems: 'center', padding: 16, gap: 12 },
-  tipCard: { backgroundColor: '#1E293B', borderRadius: 14, padding: 16, marginBottom: 20, borderWidth: 1, borderColor: '#334155' },
-  tipTitle: { fontSize: 12, fontWeight: '700', color: '#64748B', marginBottom: 8, textTransform: 'uppercase', letterSpacing: 0.5 },
-  tipText: { fontSize: 13, color: '#94A3B8', lineHeight: 24 },
-  saveFullBtn: { backgroundColor: '#10B981', borderRadius: 16, padding: 18, alignItems: 'center' },
-  saveFullBtnText: { color: '#fff', fontWeight: '800', fontSize: 16 },
-  paywall: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 32 },
-  paywallIcon: { fontSize: 56, marginBottom: 16 },
-  paywallTitle: { fontSize: 22, fontWeight: '800', color: '#F8FAFC', marginBottom: 12, textAlign: 'center' },
-  paywallDesc: { fontSize: 15, color: '#64748B', textAlign: 'center', lineHeight: 24, marginBottom: 28 },
-  paywallBtn: { backgroundColor: '#10B981', paddingHorizontal: 28, paddingVertical: 14, borderRadius: 14 },
-  paywallBtnText: { color: '#fff', fontWeight: '700', fontSize: 15 },
+  container:       { flex: 1, backgroundColor: '#0F172A' },
+  centered:        { flex: 1, justifyContent: 'center', alignItems: 'center' },
+  // Header
+  header:          { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, paddingVertical: 14, borderBottomWidth: 1, borderBottomColor: '#1E293B' },
+  backBtn:         { flexDirection: 'row', alignItems: 'center', gap: 2, minWidth: 80 },
+  backText:        { fontSize: 15, color: '#64748B' },
+  title:           { fontSize: 17, fontWeight: '700', color: '#F8FAFC' },
+  saveHeaderBtn:   { minWidth: 80, alignItems: 'flex-end' },
+  saveHeaderText:  { fontSize: 15, fontWeight: '700', color: '#10B981' },
+  // Scroll
+  scroll:          { padding: 16, paddingBottom: 60, gap: 16 },
+  // Hero card
+  heroCard:        { backgroundColor: '#1E293B', borderRadius: 18, padding: 16, borderWidth: 1, borderColor: '#334155' },
+  heroRow:         { flexDirection: 'row', alignItems: 'center', gap: 12, marginBottom: 14 },
+  heroIconWrap:    { width: 40, height: 40, borderRadius: 12, backgroundColor: '#0F3D2E', justifyContent: 'center', alignItems: 'center' },
+  heroLabel:       { fontSize: 11, fontWeight: '700', color: '#475569', textTransform: 'uppercase', letterSpacing: 0.8, marginBottom: 2 },
+  heroUrl:         { fontSize: 12, color: '#10B981', fontFamily: 'monospace' },
+  activePill:      { flexDirection: 'row', alignItems: 'center', gap: 5, paddingHorizontal: 10, paddingVertical: 5, borderRadius: 20 },
+  activeDot:       { width: 6, height: 6, borderRadius: 3 },
+  activeText:      { fontSize: 11, fontWeight: '700' },
+  actionRow:       { flexDirection: 'row', gap: 8 },
+  actionBtn:       { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 5, backgroundColor: '#0F172A', paddingVertical: 10, borderRadius: 10, borderWidth: 1, borderColor: '#334155' },
+  actionBtnSuccess:{ borderColor: '#065F46', backgroundColor: '#022C22' },
+  actionBtnText:   { fontSize: 12, fontWeight: '600', color: '#F8FAFC' },
+  // Sections
+  section:         { gap: 10 },
+  sectionTitleRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  sectionTitle:    { fontSize: 13, fontWeight: '700', color: '#64748B', textTransform: 'uppercase', letterSpacing: 0.6 },
+  countBadge:      { backgroundColor: '#EF4444', borderRadius: 20, paddingHorizontal: 8, paddingVertical: 2 },
+  countBadgeText:  { fontSize: 12, fontWeight: '800', color: '#fff' },
+  // Request card
+  requestCard:     { backgroundColor: '#1E293B', borderRadius: 14, padding: 14, borderWidth: 1, borderColor: '#450A0A' },
+  requestInfo:     { marginBottom: 12 },
+  requestName:     { fontSize: 15, fontWeight: '700', color: '#F8FAFC', marginBottom: 2 },
+  requestService:  { fontSize: 13, color: '#94A3B8' },
+  requestDate:     { fontSize: 12, color: '#64748B', marginTop: 4 },
+  requestNotes:    { fontSize: 12, color: '#94A3B8', marginTop: 4, fontStyle: 'italic' },
+  requestBtns:     { flexDirection: 'row', gap: 10 },
+  approveBtn:      { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, backgroundColor: '#10B981', borderRadius: 10, paddingVertical: 10 },
+  approveBtnText:  { color: '#fff', fontWeight: '700', fontSize: 13 },
+  rejectBtn:       { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, backgroundColor: 'transparent', borderRadius: 10, paddingVertical: 10, borderWidth: 1, borderColor: '#450A0A' },
+  rejectBtnText:   { color: '#EF4444', fontWeight: '700', fontSize: 13 },
+  // Config card
+  configCard:      { backgroundColor: '#1E293B', borderRadius: 14, padding: 14, borderWidth: 1, borderColor: '#334155' },
+  configCardHeader:{ flexDirection: 'row', alignItems: 'flex-start', gap: 10, marginBottom: 12 },
+  configLabel:     { fontSize: 14, fontWeight: '600', color: '#F8FAFC' },
+  configSub:       { fontSize: 12, color: '#475569', marginTop: 2 },
+  slugInput:       { backgroundColor: '#0F172A', borderWidth: 1.5, borderColor: '#334155', borderRadius: 10, padding: 12, fontSize: 14, color: '#10B981', fontFamily: 'monospace', marginBottom: 8 },
+  errorRow:        { flexDirection: 'row', alignItems: 'center', gap: 5, marginBottom: 6 },
+  slugError:       { fontSize: 12, color: '#EF4444' },
+  urlPreviewRow:   { flexDirection: 'row', alignItems: 'center', gap: 5 },
+  urlPreview:      { fontSize: 11, color: '#334155', fontFamily: 'monospace', flex: 1 },
+  // Toggles card
+  togglesCard:     { backgroundColor: '#1E293B', borderRadius: 14, overflow: 'hidden', borderWidth: 1, borderColor: '#334155' },
+  toggleRow:       { flexDirection: 'row', alignItems: 'center', padding: 14, gap: 12 },
+  toggleIcon:      { width: 36, height: 36, borderRadius: 10, backgroundColor: '#0F172A', justifyContent: 'center', alignItems: 'center' },
+  toggleLabel:     { fontSize: 14, fontWeight: '600', color: '#F8FAFC', marginBottom: 2 },
+  toggleSub:       { fontSize: 12, color: '#475569', lineHeight: 16 },
+  divider:         { height: 1, backgroundColor: '#0F172A', marginHorizontal: 14 },
+  // Tips
+  tipsCard:        { backgroundColor: '#1E293B', borderRadius: 14, padding: 14, borderWidth: 1, borderColor: '#334155' },
+  tipsHeader:      { flexDirection: 'row', alignItems: 'center', gap: 7, marginBottom: 12 },
+  tipsTitle:       { fontSize: 13, fontWeight: '700', color: '#94A3B8' },
+  tipRow:          { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 8 },
+  tipText:         { fontSize: 13, color: '#64748B' },
+  // Save button
+  saveBtn:         { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, backgroundColor: '#10B981', borderRadius: 14, padding: 16 },
+  saveBtnText:     { color: '#fff', fontWeight: '800', fontSize: 16 },
+  // Paywall
+  paywall:         { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 36, gap: 16 },
+  paywallIconWrap: { width: 72, height: 72, borderRadius: 22, backgroundColor: '#0F3D2E', justifyContent: 'center', alignItems: 'center' },
+  paywallTitle:    { fontSize: 22, fontWeight: '800', color: '#F8FAFC', textAlign: 'center' },
+  paywallDesc:     { fontSize: 15, color: '#64748B', textAlign: 'center', lineHeight: 24 },
+  paywallBtn:      { flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: '#10B981', paddingHorizontal: 28, paddingVertical: 14, borderRadius: 14 },
+  paywallBtnText:  { color: '#fff', fontWeight: '700', fontSize: 15 },
 });
