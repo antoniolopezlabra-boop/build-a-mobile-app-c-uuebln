@@ -12,7 +12,6 @@ import {
   Linking,
   Alert,
 } from 'react-native';
-import * as Clipboard from 'expo-clipboard';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useFocusEffect } from '@react-navigation/native';
@@ -157,15 +156,14 @@ export default function BookingLinkScreen() {
     }
   };
 
+  // Copiar: abre el share sheet con solo la URL — el usuario puede copiarla o compartirla
   const handleCopy = async () => {
     const url = `${BASE_URL}?n=${slug}`;
     try {
-      await Clipboard.setStringAsync(url);
+      await Share.share({ message: url });
       setCopied(true);
       setTimeout(() => setCopied(false), 2500);
-    } catch {
-      await Share.share({ message: url });
-    }
+    } catch {}
   };
 
   const handleShare = async () => {
@@ -303,7 +301,7 @@ export default function BookingLinkScreen() {
             >
               <MaterialIcons name={copied ? 'check' : 'content-copy'} size={16} color={copied ? '#10B981' : '#F8FAFC'} />
               <Text style={[st.actionBtnText, copied && { color: '#10B981' }]}>
-                {copied ? 'Copiado' : 'Copiar'}
+                {copied ? 'Listo' : 'Copiar'}
               </Text>
             </TouchableOpacity>
 
