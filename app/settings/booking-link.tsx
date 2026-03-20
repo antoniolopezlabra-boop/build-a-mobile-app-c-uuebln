@@ -9,7 +9,6 @@ import { useFocusEffect } from '@react-navigation/native';
 import { usePlan } from '@/contexts/PlanContext';
 import { useAuth } from '@/contexts/AuthContext';
 import { supabase } from '@/lib/supabase';
-import * as Clipboard from 'expo-clipboard';
 
 const BASE_URL = 'https://antoniolopezlabra-boop.github.io/vylta-planes/book.html';
 
@@ -68,7 +67,6 @@ export default function BookingLinkScreen() {
         setRequireApproval(data.require_approval);
         setWhatsappConfirm(data.whatsapp_confirmation);
       } else {
-        // Sugerir slug basado en nombre del negocio
         const { data: bp } = await supabase
           .from('business_profiles')
           .select('business_name')
@@ -156,11 +154,16 @@ export default function BookingLinkScreen() {
     }
   };
 
+  // FIX: reemplazado expo-clipboard con Share nativo — sin dependencia extra
   const handleCopy = async () => {
     const url = `${BASE_URL}?n=${slug}`;
-    await Clipboard.setStringAsync(url);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2500);
+    try {
+      await Share.share({ message: url, url });
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2500);
+    } catch (e) {
+      // usuario canceló el share sheet — no es error
+    }
   };
 
   const handleShare = async () => {
@@ -213,7 +216,6 @@ export default function BookingLinkScreen() {
     );
   }
 
-  // Paywall para Gratuito
   if (isGratuito) {
     return (
       <SafeAreaView style={st.container}>
@@ -252,34 +254,32 @@ export default function BookingLinkScreen() {
 
       <ScrollView contentContainerStyle={st.scroll} showsVerticalScrollIndicator={false}>
 
-        {/* Hero — URL del link */}
         <View style={st.heroCard}>
           <View style={st.heroTop}>
             <Text style={st.heroLabel}>Tu link de citas</Text>
-            <View style={[st.statusPill, { backgroundColor: isActive ? '#ECFDF5' : '#F1F5F9' }]}>
-              <View style={[st.statusDot, { backgroundColor: isActive ? '#10B981' : '#94A3B8' }]} />
-              <Text style={[st.statusText, { color: isActive ? '#10B981' : '#64748B' }]}>
+            <View style={[st.statusPill, { backgroundColor: isActive ? '#ECFDF5' : '#1E293B' }]}>
+              <View style={[st.statusDot, { backgroundColor: isActive ? '#10B981' : '#475569' }]} />
+              <Text style={[st.statusText, { color: isActive ? '#10B981' : '#94A3B8' }]}>
                 {isActive ? 'Activo' : 'Inactivo'}
               </Text>
             </View>
           </View>
-          <Text style={st.heroUrl} numberOfLines={1}>{publicUrl}</Text>
+          <Text style={st.heroUrl} numberOfLines={2}>{publicUrl}</Text>
           <View style={st.heroActions}>
-            <TouchableOpacity style={[st.heroBtn, { backgroundColor: copied ? '#ECFDF5' : '#1E293B' }]} onPress={handleCopy}>
+            <TouchableOpacity style={[st.heroBtn, { backgroundColor: copied ? '#065F46' : '#1E293B' }]} onPress={handleCopy}>
               <Text style={[st.heroBtnText, { color: copied ? '#10B981' : '#fff' }]}>
-                {copied ? '✓ Copiado' : '📋 Copiar'}
+                {copied ? '✓ Listo' : '↗ Copiar'}
               </Text>
             </TouchableOpacity>
             <TouchableOpacity style={[st.heroBtn, { backgroundColor: '#1E293B' }]} onPress={handleShare}>
-              <Text style={st.heroBtnText}>↗ Compartir</Text>
+              <Text style={st.heroBtnText}>Compartir</Text>
             </TouchableOpacity>
             <TouchableOpacity style={[st.heroBtn, { backgroundColor: '#1E293B' }]} onPress={handleOpenLink}>
-              <Text style={st.heroBtnText}>👁 Ver</Text>
+              <Text style={st.heroBtnText}>Ver página</Text>
             </TouchableOpacity>
           </View>
         </View>
 
-        {/* Solicitudes pendientes */}
         {requests.length > 0 && (
           <>
             <View style={st.sectionHeader}>
@@ -293,7 +293,7 @@ export default function BookingLinkScreen() {
                     <Text style={st.requestName}>{req.client_name_temp || 'Cliente'}</Text>
                     <Text style={st.requestService}>{req.service_name}</Text>
                     <Text style={st.requestDate}>{formatDate(req.date)} · {req.start_time}</Text>
-                    {req.notes ? <Text style={st.requestNotes}>📝 {req.notes}</Text> : null}
+                    {req.notes ? <Text style={st.requestNotes}>{req.notes}</Text> : null}
                   </View>
                 </View>
                 <View style={st.requestActions}>
@@ -315,20 +315,16 @@ export default function BookingLinkScreen() {
 
         {!loadingRequests && requests.length === 0 && hasLink && (
           <View style={st.emptyRequests}>
-            <Text style={st.emptyRequestsText}>No hay solicitudes pendientes</Text>
+            <Text style={st.emptyRequestsText}>Sin solicitudes pendientes</Text>
           </View>
         )}
 
-        {/* Configuración */}
         <Text style={st.sectionTitle}>Configuración</Text>
 
         <View style={st.configCard}>
-          {/* Slug */}
           <View style={st.configRow}>
-            <View style={{ flex: 1 }}>
-              <Text style={st.configLabel}>Nombre único (slug)</Text>
-              <Text style={st.configSub}>Aparece en tu URL pública</Text>
-            </View>
+            <Text style={st.configLabel}>Nombre único del link (slug)</Text>
+            <Text style={st.configSub}>Aparece en tu URL pública · solo letras, números y guiones</Text>
           </View>
           <TextInput
             style={[st.slugInput, slugError ? { borderColor: '#EF4444' } : null]}
@@ -339,69 +335,51 @@ export default function BookingLinkScreen() {
               validateSlug(clean);
             }}
             placeholder="mi-estetica"
-            placeholderTextColor="#94A3B8"
+            placeholderTextColor="#475569"
             autoCapitalize="none"
             autoCorrect={false}
           />
           {slugError ? <Text style={st.slugError}>{slugError}</Text> : null}
-          <Text style={st.slugPreview}>🔗 {publicUrl}</Text>
+          <Text style={st.slugPreview}>{publicUrl}</Text>
 
           <View style={st.divider} />
 
-          {/* Toggle activo */}
           <View style={st.toggleRow}>
             <View style={{ flex: 1 }}>
               <Text style={st.configLabel}>Link activo</Text>
               <Text style={st.configSub}>Clientes pueden ver tu página y agendar</Text>
             </View>
-            <Switch
-              value={isActive}
-              onValueChange={setIsActive}
-              trackColor={{ false: '#E2E8F0', true: '#10B981' }}
-              thumbColor="#fff"
-            />
+            <Switch value={isActive} onValueChange={setIsActive} trackColor={{ false: '#334155', true: '#10B981' }} thumbColor="#fff" />
           </View>
 
           <View style={st.divider} />
 
-          {/* Toggle aprobación */}
           <View style={st.toggleRow}>
             <View style={{ flex: 1 }}>
               <Text style={st.configLabel}>Aprobación manual</Text>
               <Text style={st.configSub}>Tú aceptas o rechazas cada solicitud</Text>
             </View>
-            <Switch
-              value={requireApproval}
-              onValueChange={setRequireApproval}
-              trackColor={{ false: '#E2E8F0', true: '#10B981' }}
-              thumbColor="#fff"
-            />
+            <Switch value={requireApproval} onValueChange={setRequireApproval} trackColor={{ false: '#334155', true: '#10B981' }} thumbColor="#fff" />
           </View>
 
           <View style={st.divider} />
 
-          {/* Toggle WhatsApp */}
           <View style={st.toggleRow}>
             <View style={{ flex: 1 }}>
-              <Text style={st.configLabel}>WhatsApp al cliente</Text>
-              <Text style={st.configSub}>Confirmar o rechazar por WhatsApp</Text>
+              <Text style={st.configLabel}>Notificar al cliente por WhatsApp</Text>
+              <Text style={st.configSub}>Enviar confirmación o rechazo automático</Text>
             </View>
-            <Switch
-              value={whatsappConfirm}
-              onValueChange={setWhatsappConfirm}
-              trackColor={{ false: '#E2E8F0', true: '#10B981' }}
-              thumbColor="#fff"
-            />
+            <Switch value={whatsappConfirm} onValueChange={setWhatsappConfirm} trackColor={{ false: '#334155', true: '#10B981' }} thumbColor="#fff" />
           </View>
         </View>
 
-        {/* Tip de uso */}
         <View style={st.tipCard}>
-          <Text style={st.tipTitle}>💡 Dónde compartir tu link</Text>
-          <Text style={st.tipText}>• Bio de Instagram o Facebook{`\n`}• Estado de WhatsApp Business{`\n`}• Tarjeta de presentación digital{`\n`}• Perfil de Google Maps de tu negocio</Text>
+          <Text style={st.tipTitle}>Dónde compartir tu link</Text>
+          <Text style={st.tipText}>
+            {'• Bio de Instagram o Facebook\n• Estado de WhatsApp Business\n• Tarjeta de presentación digital\n• Perfil de Google Maps de tu negocio'}
+          </Text>
         </View>
 
-        {/* Botón guardar grande */}
         <TouchableOpacity style={[st.saveFullBtn, saving && { opacity: 0.6 }]} onPress={handleSave} disabled={saving}>
           {saving
             ? <ActivityIndicator color="#fff" />
@@ -415,68 +393,62 @@ export default function BookingLinkScreen() {
 }
 
 const st = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#F8FAFC' },
-  header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 20, paddingVertical: 16, borderBottomWidth: 1, borderBottomColor: '#F1F5F9', backgroundColor: '#fff' },
-  back: { color: '#94A3B8', fontSize: 15 },
-  title: { fontSize: 17, fontWeight: '700', color: '#0F172A' },
+  container: { flex: 1, backgroundColor: '#0F172A' },
+  header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 20, paddingVertical: 16, borderBottomWidth: 1, borderBottomColor: '#1E293B', backgroundColor: '#0F172A' },
+  back: { color: '#64748B', fontSize: 15 },
+  title: { fontSize: 17, fontWeight: '700', color: '#F8FAFC' },
   saveBtn: { color: '#10B981', fontSize: 15, fontWeight: '700' },
   scroll: { padding: 20, paddingBottom: 60 },
 
-  // Hero
-  heroCard: { backgroundColor: '#0F172A', borderRadius: 20, padding: 20, marginBottom: 20 },
+  heroCard: { backgroundColor: '#1E293B', borderRadius: 20, padding: 20, marginBottom: 20, borderWidth: 1, borderColor: '#334155' },
   heroTop: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 },
-  heroLabel: { fontSize: 12, color: '#64748B', fontWeight: '600', textTransform: 'uppercase', letterSpacing: 0.5 },
+  heroLabel: { fontSize: 11, color: '#475569', fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.8 },
   statusPill: { flexDirection: 'row', alignItems: 'center', gap: 5, paddingHorizontal: 10, paddingVertical: 4, borderRadius: 20 },
   statusDot: { width: 6, height: 6, borderRadius: 3 },
   statusText: { fontSize: 12, fontWeight: '700' },
-  heroUrl: { fontSize: 13, color: '#10B981', fontFamily: 'monospace', marginBottom: 14, lineHeight: 18 },
+  heroUrl: { fontSize: 12, color: '#10B981', fontFamily: 'monospace', marginBottom: 16, lineHeight: 18 },
   heroActions: { flexDirection: 'row', gap: 8 },
-  heroBtn: { flex: 1, paddingVertical: 10, borderRadius: 10, alignItems: 'center' },
-  heroBtnText: { fontSize: 12, fontWeight: '700', color: '#fff' },
+  heroBtn: { flex: 1, paddingVertical: 10, borderRadius: 10, alignItems: 'center', borderWidth: 1, borderColor: '#334155' },
+  heroBtnText: { fontSize: 12, fontWeight: '700', color: '#F8FAFC' },
 
-  // Solicitudes
   sectionHeader: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 10 },
-  sectionTitle: { fontSize: 15, fontWeight: '700', color: '#0F172A', marginBottom: 10 },
+  sectionTitle: { fontSize: 14, fontWeight: '700', color: '#94A3B8', marginBottom: 10, textTransform: 'uppercase', letterSpacing: 0.5 },
   badge: { backgroundColor: '#EF4444', borderRadius: 20, paddingHorizontal: 8, paddingVertical: 2 },
   badgeText: { fontSize: 12, fontWeight: '800', color: '#fff' },
-  requestCard: { backgroundColor: '#fff', borderRadius: 16, padding: 16, marginBottom: 10, borderWidth: 1, borderColor: '#FEE2E2' },
+  requestCard: { backgroundColor: '#1E293B', borderRadius: 16, padding: 16, marginBottom: 10, borderWidth: 1, borderColor: '#7F1D1D' },
   requestTop: { flexDirection: 'row', marginBottom: 12 },
-  requestName: { fontSize: 15, fontWeight: '700', color: '#0F172A' },
-  requestService: { fontSize: 13, color: '#64748B', marginTop: 2 },
-  requestDate: { fontSize: 12, color: '#94A3B8', marginTop: 3 },
-  requestNotes: { fontSize: 12, color: '#64748B', marginTop: 4, fontStyle: 'italic' },
+  requestName: { fontSize: 15, fontWeight: '700', color: '#F8FAFC' },
+  requestService: { fontSize: 13, color: '#94A3B8', marginTop: 2 },
+  requestDate: { fontSize: 12, color: '#64748B', marginTop: 3 },
+  requestNotes: { fontSize: 12, color: '#94A3B8', marginTop: 4, fontStyle: 'italic' },
   requestActions: { flexDirection: 'row', gap: 10 },
   acceptBtn: { flex: 1, backgroundColor: '#10B981', borderRadius: 10, paddingVertical: 10, alignItems: 'center' },
   acceptBtnText: { color: '#fff', fontWeight: '700', fontSize: 13 },
-  rejectBtn: { flex: 1, backgroundColor: '#FEF2F2', borderRadius: 10, paddingVertical: 10, alignItems: 'center', borderWidth: 1, borderColor: '#FCA5A5' },
+  rejectBtn: { flex: 1, backgroundColor: 'transparent', borderRadius: 10, paddingVertical: 10, alignItems: 'center', borderWidth: 1, borderColor: '#7F1D1D' },
   rejectBtnText: { color: '#EF4444', fontWeight: '700', fontSize: 13 },
-  emptyRequests: { backgroundColor: '#fff', borderRadius: 12, padding: 20, alignItems: 'center', marginBottom: 16 },
-  emptyRequestsText: { fontSize: 13, color: '#94A3B8' },
+  emptyRequests: { backgroundColor: '#1E293B', borderRadius: 12, padding: 20, alignItems: 'center', marginBottom: 16, borderWidth: 1, borderColor: '#334155' },
+  emptyRequestsText: { fontSize: 13, color: '#475569' },
 
-  // Config
-  configCard: { backgroundColor: '#fff', borderRadius: 16, overflow: 'hidden', marginBottom: 16, borderWidth: 1, borderColor: '#F1F5F9' },
-  configRow: { padding: 16, paddingBottom: 8 },
-  configLabel: { fontSize: 14, fontWeight: '600', color: '#0F172A' },
-  configSub: { fontSize: 12, color: '#94A3B8', marginTop: 2 },
-  slugInput: { marginHorizontal: 16, borderRadius: 10, borderWidth: 1.5, borderColor: '#E2E8F0', padding: 12, fontSize: 14, color: '#0F172A', backgroundColor: '#F8FAFC', fontFamily: 'monospace' },
+  configCard: { backgroundColor: '#1E293B', borderRadius: 16, overflow: 'hidden', marginBottom: 16, borderWidth: 1, borderColor: '#334155' },
+  configRow: { padding: 16, paddingBottom: 10 },
+  configLabel: { fontSize: 14, fontWeight: '600', color: '#F8FAFC' },
+  configSub: { fontSize: 12, color: '#475569', marginTop: 3, lineHeight: 18 },
+  slugInput: { marginHorizontal: 16, borderRadius: 10, borderWidth: 1.5, borderColor: '#334155', padding: 12, fontSize: 13, color: '#10B981', backgroundColor: '#0F172A', fontFamily: 'monospace' },
   slugError: { marginHorizontal: 16, marginTop: 4, fontSize: 12, color: '#EF4444' },
-  slugPreview: { marginHorizontal: 16, marginTop: 6, marginBottom: 12, fontSize: 11, color: '#10B981', fontFamily: 'monospace' },
-  divider: { height: 1, backgroundColor: '#F1F5F9', marginHorizontal: 16 },
+  slugPreview: { marginHorizontal: 16, marginTop: 6, marginBottom: 12, fontSize: 10, color: '#475569', fontFamily: 'monospace' },
+  divider: { height: 1, backgroundColor: '#334155' },
   toggleRow: { flexDirection: 'row', alignItems: 'center', padding: 16, gap: 12 },
 
-  // Tip
-  tipCard: { backgroundColor: '#FFFBEB', borderRadius: 14, padding: 16, marginBottom: 20, borderWidth: 1, borderColor: '#FDE68A' },
-  tipTitle: { fontSize: 13, fontWeight: '700', color: '#92400E', marginBottom: 8 },
-  tipText: { fontSize: 13, color: '#78350F', lineHeight: 22 },
+  tipCard: { backgroundColor: '#1E293B', borderRadius: 14, padding: 16, marginBottom: 20, borderWidth: 1, borderColor: '#334155' },
+  tipTitle: { fontSize: 12, fontWeight: '700', color: '#64748B', marginBottom: 8, textTransform: 'uppercase', letterSpacing: 0.5 },
+  tipText: { fontSize: 13, color: '#94A3B8', lineHeight: 24 },
 
-  // Save
   saveFullBtn: { backgroundColor: '#10B981', borderRadius: 16, padding: 18, alignItems: 'center' },
   saveFullBtnText: { color: '#fff', fontWeight: '800', fontSize: 16 },
 
-  // Paywall
   paywall: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 32 },
   paywallIcon: { fontSize: 56, marginBottom: 16 },
-  paywallTitle: { fontSize: 22, fontWeight: '800', color: '#0F172A', marginBottom: 12, textAlign: 'center' },
+  paywallTitle: { fontSize: 22, fontWeight: '800', color: '#F8FAFC', marginBottom: 12, textAlign: 'center' },
   paywallDesc: { fontSize: 15, color: '#64748B', textAlign: 'center', lineHeight: 24, marginBottom: 28 },
   paywallBtn: { backgroundColor: '#10B981', paddingHorizontal: 28, paddingVertical: 14, borderRadius: 14 },
   paywallBtnText: { color: '#fff', fontWeight: '700', fontSize: 15 },
