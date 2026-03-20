@@ -21,29 +21,22 @@ serve(async (req) => {
       })
     }
 
-    // Service role — bypasa RLS completamente
     const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY)
 
-    // 1. Verificar que el booking_link existe y está activo
     const { data: link, error: linkError } = await supabase
       .from('booking_links')
       .select('id, user_id, require_approval, is_active')
       .eq('slug', slug)
       .single()
 
-    if (linkError || !link) {
+    if (linkError || !link || !link.is_active) {
       return new Response(JSON.stringify({ error: 'Link no encontrado o inactivo' }), {
         status: 404, headers: { ...corsHeaders, 'Content-Type': 'application/json' }
       })
     }
 
-    if (!link.is_active) {
-      return new Response(JSON.stringify({ error: 'Este link no está activo' }), {
-        status: 403, headers: { ...corsHeaders, 'Content-Type': 'application/json' }
-      })
-    }
-
-    // 2. Insertar la cita usando service_role (sin restricciones RLS)
+    // AUTO-CONFIRM: require_approval=false por default → cita queda Confirmada directamente
+    // Solo usa 'Solicitud' si el negocio activó aprobación manual en Settings
     const status = link.require_approval ? 'Solicitud' : 'Confirmada'
 
     const { data: appointment, error: aptError } = await supabase
@@ -51,6 +44,7 @@ serve(async (req) => {
       .insert({
         user_id: link.user_id,
         client_name_temp: clientName.trim(),
+        client_phone_temp: clientPhone.trim(),
         service_name: serviceName,
         date,
         start_time: startTime,

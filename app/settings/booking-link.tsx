@@ -42,7 +42,7 @@ export default function BookingLinkScreen() {
   const [linkData, setLinkData] = useState<BookingLink | null>(null);
   const [slug, setSlug] = useState('');
   const [isActive, setIsActive] = useState(true);
-  const [requireApproval, setRequireApproval] = useState(true);
+  const [requireApproval, setRequireApproval] = useState(false); // DEFAULT: auto-confirmar
   const [whatsappConfirm, setWhatsappConfirm] = useState(true);
   const [slugError, setSlugError] = useState('');
 
@@ -101,7 +101,6 @@ export default function BookingLinkScreen() {
         .eq('source', 'public_link')
         .eq('status', 'Solicitud')
         .order('date', { ascending: true })
-        .order('start_time', { ascending: true })
         .limit(20);
       setRequests(data || []);
     } catch (e) {
@@ -154,29 +153,21 @@ export default function BookingLinkScreen() {
     }
   };
 
-  // FIX: reemplazado expo-clipboard con Share nativo — sin dependencia extra
   const handleCopy = async () => {
     const url = `${BASE_URL}?n=${slug}`;
     try {
       await Share.share({ message: url, url });
       setCopied(true);
       setTimeout(() => setCopied(false), 2500);
-    } catch (e) {
-      // usuario canceló el share sheet — no es error
-    }
+    } catch (e) {}
   };
 
   const handleShare = async () => {
     const url = `${BASE_URL}?n=${slug}`;
-    await Share.share({
-      message: `Agenda tu cita en línea: ${url}`,
-      url,
-    });
+    await Share.share({ message: `Agenda tu cita en línea: ${url}`, url });
   };
 
-  const handleOpenLink = () => {
-    Linking.openURL(`${BASE_URL}?n=${slug}`);
-  };
+  const handleOpenLink = () => { Linking.openURL(`${BASE_URL}?n=${slug}`); };
 
   const handleApproveRequest = async (id: string) => {
     await supabase.from('appointments').update({ status: 'Confirmada', updated_at: new Date().toISOString() }).eq('id', id);
@@ -184,7 +175,7 @@ export default function BookingLinkScreen() {
   };
 
   const handleRejectRequest = async (id: string) => {
-    Alert.alert('Rechazar solicitud', '¿Estás seguro de que quieres rechazar esta cita?', [
+    Alert.alert('Rechazar solicitud', '¿Estás seguro?', [
       { text: 'Cancelar', style: 'cancel' },
       {
         text: 'Rechazar', style: 'destructive',
@@ -254,6 +245,7 @@ export default function BookingLinkScreen() {
 
       <ScrollView contentContainerStyle={st.scroll} showsVerticalScrollIndicator={false}>
 
+        {/* Hero */}
         <View style={st.heroCard}>
           <View style={st.heroTop}>
             <Text style={st.heroLabel}>Tu link de citas</Text>
@@ -267,9 +259,7 @@ export default function BookingLinkScreen() {
           <Text style={st.heroUrl} numberOfLines={2}>{publicUrl}</Text>
           <View style={st.heroActions}>
             <TouchableOpacity style={[st.heroBtn, { backgroundColor: copied ? '#065F46' : '#1E293B' }]} onPress={handleCopy}>
-              <Text style={[st.heroBtnText, { color: copied ? '#10B981' : '#fff' }]}>
-                {copied ? '✓ Listo' : '↗ Copiar'}
-              </Text>
+              <Text style={[st.heroBtnText, { color: copied ? '#10B981' : '#fff' }]}>{copied ? '✓ Listo' : '↗ Copiar'}</Text>
             </TouchableOpacity>
             <TouchableOpacity style={[st.heroBtn, { backgroundColor: '#1E293B' }]} onPress={handleShare}>
               <Text style={st.heroBtnText}>Compartir</Text>
@@ -280,6 +270,7 @@ export default function BookingLinkScreen() {
           </View>
         </View>
 
+        {/* Solicitudes pendientes (solo si require_approval está ON) */}
         {requests.length > 0 && (
           <>
             <View style={st.sectionHeader}>
@@ -309,30 +300,19 @@ export default function BookingLinkScreen() {
           </>
         )}
 
-        {loadingRequests && requests.length === 0 && (
-          <ActivityIndicator size="small" color="#10B981" style={{ marginBottom: 16 }} />
-        )}
-
-        {!loadingRequests && requests.length === 0 && hasLink && (
-          <View style={st.emptyRequests}>
-            <Text style={st.emptyRequestsText}>Sin solicitudes pendientes</Text>
-          </View>
-        )}
-
+        {/* Configuración */}
         <Text style={st.sectionTitle}>Configuración</Text>
-
         <View style={st.configCard}>
           <View style={st.configRow}>
             <Text style={st.configLabel}>Nombre único del link (slug)</Text>
-            <Text style={st.configSub}>Aparece en tu URL pública · solo letras, números y guiones</Text>
+            <Text style={st.configSub}>Aparece en tu URL · solo letras, números y guiones</Text>
           </View>
           <TextInput
             style={[st.slugInput, slugError ? { borderColor: '#EF4444' } : null]}
             value={slug}
             onChangeText={v => {
               const clean = v.toLowerCase().replace(/[^a-z0-9-]/g, '');
-              setSlug(clean);
-              validateSlug(clean);
+              setSlug(clean); validateSlug(clean);
             }}
             placeholder="mi-estetica"
             placeholderTextColor="#475569"
@@ -354,25 +334,31 @@ export default function BookingLinkScreen() {
 
           <View style={st.divider} />
 
+          {/* TOGGLE APROBACIÓN — con copy mejorado que explica el impacto */}
           <View style={st.toggleRow}>
             <View style={{ flex: 1 }}>
               <Text style={st.configLabel}>Aprobación manual</Text>
-              <Text style={st.configSub}>Tú aceptas o rechazas cada solicitud</Text>
+              <Text style={st.configSub}>
+                {requireApproval
+                  ? '⚠️ Debes aprobar cada cita — el cliente queda en espera'
+                  : '✅ Las citas se confirman solas — sin fricción para el cliente'}
+              </Text>
             </View>
-            <Switch value={requireApproval} onValueChange={setRequireApproval} trackColor={{ false: '#334155', true: '#10B981' }} thumbColor="#fff" />
+            <Switch value={requireApproval} onValueChange={setRequireApproval} trackColor={{ false: '#334155', true: '#F59E0B' }} thumbColor="#fff" />
           </View>
 
           <View style={st.divider} />
 
           <View style={st.toggleRow}>
             <View style={{ flex: 1 }}>
-              <Text style={st.configLabel}>Notificar al cliente por WhatsApp</Text>
-              <Text style={st.configSub}>Enviar confirmación o rechazo automático</Text>
+              <Text style={st.configLabel}>WhatsApp al confirmar</Text>
+              <Text style={st.configSub}>Avisar al cliente por WhatsApp cuando se confirme</Text>
             </View>
             <Switch value={whatsappConfirm} onValueChange={setWhatsappConfirm} trackColor={{ false: '#334155', true: '#10B981' }} thumbColor="#fff" />
           </View>
         </View>
 
+        {/* Tip */}
         <View style={st.tipCard}>
           <Text style={st.tipTitle}>Dónde compartir tu link</Text>
           <Text style={st.tipText}>
@@ -399,7 +385,6 @@ const st = StyleSheet.create({
   title: { fontSize: 17, fontWeight: '700', color: '#F8FAFC' },
   saveBtn: { color: '#10B981', fontSize: 15, fontWeight: '700' },
   scroll: { padding: 20, paddingBottom: 60 },
-
   heroCard: { backgroundColor: '#1E293B', borderRadius: 20, padding: 20, marginBottom: 20, borderWidth: 1, borderColor: '#334155' },
   heroTop: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 },
   heroLabel: { fontSize: 11, color: '#475569', fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.8 },
@@ -410,7 +395,6 @@ const st = StyleSheet.create({
   heroActions: { flexDirection: 'row', gap: 8 },
   heroBtn: { flex: 1, paddingVertical: 10, borderRadius: 10, alignItems: 'center', borderWidth: 1, borderColor: '#334155' },
   heroBtnText: { fontSize: 12, fontWeight: '700', color: '#F8FAFC' },
-
   sectionHeader: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 10 },
   sectionTitle: { fontSize: 14, fontWeight: '700', color: '#94A3B8', marginBottom: 10, textTransform: 'uppercase', letterSpacing: 0.5 },
   badge: { backgroundColor: '#EF4444', borderRadius: 20, paddingHorizontal: 8, paddingVertical: 2 },
@@ -426,9 +410,6 @@ const st = StyleSheet.create({
   acceptBtnText: { color: '#fff', fontWeight: '700', fontSize: 13 },
   rejectBtn: { flex: 1, backgroundColor: 'transparent', borderRadius: 10, paddingVertical: 10, alignItems: 'center', borderWidth: 1, borderColor: '#7F1D1D' },
   rejectBtnText: { color: '#EF4444', fontWeight: '700', fontSize: 13 },
-  emptyRequests: { backgroundColor: '#1E293B', borderRadius: 12, padding: 20, alignItems: 'center', marginBottom: 16, borderWidth: 1, borderColor: '#334155' },
-  emptyRequestsText: { fontSize: 13, color: '#475569' },
-
   configCard: { backgroundColor: '#1E293B', borderRadius: 16, overflow: 'hidden', marginBottom: 16, borderWidth: 1, borderColor: '#334155' },
   configRow: { padding: 16, paddingBottom: 10 },
   configLabel: { fontSize: 14, fontWeight: '600', color: '#F8FAFC' },
@@ -438,14 +419,11 @@ const st = StyleSheet.create({
   slugPreview: { marginHorizontal: 16, marginTop: 6, marginBottom: 12, fontSize: 10, color: '#475569', fontFamily: 'monospace' },
   divider: { height: 1, backgroundColor: '#334155' },
   toggleRow: { flexDirection: 'row', alignItems: 'center', padding: 16, gap: 12 },
-
   tipCard: { backgroundColor: '#1E293B', borderRadius: 14, padding: 16, marginBottom: 20, borderWidth: 1, borderColor: '#334155' },
   tipTitle: { fontSize: 12, fontWeight: '700', color: '#64748B', marginBottom: 8, textTransform: 'uppercase', letterSpacing: 0.5 },
   tipText: { fontSize: 13, color: '#94A3B8', lineHeight: 24 },
-
   saveFullBtn: { backgroundColor: '#10B981', borderRadius: 16, padding: 18, alignItems: 'center' },
   saveFullBtnText: { color: '#fff', fontWeight: '800', fontSize: 16 },
-
   paywall: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 32 },
   paywallIcon: { fontSize: 56, marginBottom: 16 },
   paywallTitle: { fontSize: 22, fontWeight: '800', color: '#F8FAFC', marginBottom: 12, textAlign: 'center' },
