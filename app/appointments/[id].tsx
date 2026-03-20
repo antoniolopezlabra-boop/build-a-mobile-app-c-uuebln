@@ -27,10 +27,13 @@ interface Appointment {
   date: string;
   time: string;
   service: string;
-  status: 'Confirmada' | 'Pendiente' | 'Cancelada' | 'Completada' | 'No asistió' | 'Reagendada' | 'Pagado' | 'En espera';
+  status: 'Confirmada' | 'Pendiente' | 'Cancelada' | 'Completada' | 'No asistió' | 'Reagendada' | 'Pagado' | 'En espera' | 'Solicitud';
   notes?: string | null;
-  client: Client;
-  clientId: string;
+  client: Client | null;
+  clientId: string | null;
+  clientNameTemp?: string | null;
+  clientPhone?: string | null;
+  source?: string;
   userId: string;
   createdAt: string;
 }
@@ -49,7 +52,6 @@ export default function AppointmentDetailScreen() {
   const loadAppointment = async () => {
     setLoading(true);
     try {
-      // FIX: usar el endpoint por ID directo en lugar de cargar todas las citas
       const data = await apiGet<Appointment>(`/api/appointments/${id}`);
       if (data) {
         setAppointment(data);
@@ -138,8 +140,14 @@ export default function AppointmentDetailScreen() {
   }
 
   const statusColor = getStatusColor(appointment.status);
-  // FIX: usar formatDisplayDate de dateUtils para evitar desfase de timezone
   const formattedDate = formatDisplayDate(appointment.date);
+
+  // FIX: soporte para citas del link público (sin client, con client_name_temp)
+  const isPublicLink = appointment.source === 'public_link' || !appointment.client;
+  const clientName = appointment.client?.name || appointment.clientNameTemp || 'Cliente';
+  const clientPhone = appointment.client?.phone || appointment.clientPhone || '—';
+  const clientEmail = appointment.client?.email;
+  const clientInitial = clientName.charAt(0).toUpperCase();
 
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
@@ -161,6 +169,9 @@ export default function AppointmentDetailScreen() {
           <View style={[styles.statusBadge, { backgroundColor: statusColor }]}>
             <Text style={styles.statusText}>{appointment.status}</Text>
           </View>
+          {isPublicLink && (
+            <Text style={styles.publicLinkBadge}>🔗 Desde link de cita pública</Text>
+          )}
         </View>
 
         <View style={styles.section}>
@@ -201,18 +212,36 @@ export default function AppointmentDetailScreen() {
           <Text style={styles.sectionTitle}>Cliente</Text>
           <View style={styles.clientCard}>
             <View style={styles.clientAvatar}>
-              <Text style={styles.clientAvatarText}>{appointment.client.name.charAt(0).toUpperCase()}</Text>
+              <Text style={styles.clientAvatarText}>{clientInitial}</Text>
             </View>
             <View style={styles.clientInfo}>
-              <Text style={styles.clientName}>{appointment.client.name}</Text>
-              <Text style={styles.clientPhone}>{appointment.client.phone}</Text>
-              {appointment.client.email && <Text style={styles.clientEmail}>{appointment.client.email}</Text>}
+              <Text style={styles.clientName}>{clientName}</Text>
+              <Text style={styles.clientPhone}>{clientPhone}</Text>
+              {clientEmail && <Text style={styles.clientEmail}>{clientEmail}</Text>}
             </View>
           </View>
         </View>
 
         <View style={styles.actionsSection}>
           <Text style={styles.sectionTitle}>Acciones</Text>
+
+          {/* Acciones para solicitudes del link público */}
+          {appointment.status === 'Solicitud' && (
+            <View>
+              <View style={{ backgroundColor: '#EFF6FF', borderRadius: 12, padding: 12, marginBottom: 12, borderWidth: 1, borderColor: '#3B82F6' }}>
+                <Text style={{ color: '#3B82F6', fontWeight: '700', fontSize: 13, marginBottom: 4 }}>🔗 Solicitud desde link público</Text>
+                <Text style={{ color: '#6B7280', fontSize: 12 }}>Cliente: {clientName} · {clientPhone}</Text>
+              </View>
+              <TouchableOpacity style={[styles.actionButton, { backgroundColor: '#10B981', marginBottom: 10 }]} onPress={() => showConfirmation('approve', 'Aceptar solicitud', `¿Confirmas la cita de ${clientName}?`)}>
+                <IconSymbol android_material_icon_name="check-circle" size={24} color="#fff" />
+                <Text style={styles.actionButtonText}>Aceptar solicitud</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={[styles.actionButton, { backgroundColor: '#EF4444' }]} onPress={() => showConfirmation('reject', 'Rechazar solicitud', '¿Deseas rechazar esta solicitud?')}>
+                <IconSymbol android_material_icon_name="cancel" size={24} color="#fff" />
+                <Text style={styles.actionButtonText}>Rechazar solicitud</Text>
+              </TouchableOpacity>
+            </View>
+          )}
 
           {appointment.status === 'En espera' && (
             <View>
@@ -308,9 +337,10 @@ const styles = StyleSheet.create({
   title: { fontSize: 20, fontWeight: '600', color: colors.text },
   deleteButton: { padding: 4 },
   content: { flex: 1 },
-  statusCard: { alignItems: 'center', paddingVertical: 24, backgroundColor: '#ffffff', marginBottom: 16 },
+  statusCard: { alignItems: 'center', paddingVertical: 24, backgroundColor: '#ffffff', marginBottom: 16, gap: 8 },
   statusBadge: { paddingHorizontal: 20, paddingVertical: 10, borderRadius: 20 },
   statusText: { fontSize: 16, fontWeight: '600', color: '#ffffff' },
+  publicLinkBadge: { fontSize: 12, color: '#3B82F6', fontWeight: '500' },
   section: { backgroundColor: '#ffffff', padding: 20, marginBottom: 16 },
   sectionTitle: { fontSize: 18, fontWeight: '600', color: colors.text, marginBottom: 16 },
   infoRow: { flexDirection: 'row', alignItems: 'flex-start', marginBottom: 16, gap: 12 },
