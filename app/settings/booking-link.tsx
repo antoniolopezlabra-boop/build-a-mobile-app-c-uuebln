@@ -1,7 +1,7 @@
 import React, { useEffect, useState, useCallback } from 'react';
 import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity,
-  TextInput, Switch, ActivityIndicator, Share, Linking, Alert,
+  TextInput, Switch, ActivityIndicator, Share, Linking, Alert, Platform, Clipboard,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
@@ -42,7 +42,7 @@ export default function BookingLinkScreen() {
   const [linkData, setLinkData] = useState<BookingLink | null>(null);
   const [slug, setSlug] = useState('');
   const [isActive, setIsActive] = useState(true);
-  const [requireApproval, setRequireApproval] = useState(false); // DEFAULT: auto-confirmar
+  const [requireApproval, setRequireApproval] = useState(false);
   const [whatsappConfirm, setWhatsappConfirm] = useState(true);
   const [slugError, setSlugError] = useState('');
 
@@ -142,10 +142,10 @@ export default function BookingLinkScreen() {
         if (error) throw error;
         setLinkData(data);
       }
-      Alert.alert('¡Guardado!', 'La configuración de tu link fue actualizada.');
+      Alert.alert('\u00a1Guardado!', 'La configuraci\u00f3n de tu link fue actualizada.');
     } catch (e: any) {
       const msg = e?.message?.includes('duplicate') || e?.code === '23505'
-        ? 'Ese slug ya está en uso. Elige otro nombre único.'
+        ? 'Ese slug ya est\u00e1 en uso. Elige otro nombre \u00fanico.'
         : e?.message || 'Error al guardar';
       Alert.alert('Error', msg);
     } finally {
@@ -153,21 +153,42 @@ export default function BookingLinkScreen() {
     }
   };
 
+  // FIX: Copiar pone SOLO la URL en portapapeles — sin duplicado
   const handleCopy = async () => {
     const url = `${BASE_URL}?n=${slug}`;
     try {
-      await Share.share({ message: url, url });
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2500);
+      // Intentar copiar al portapapeles directamente
+      if (Clipboard && Clipboard.setString) {
+        Clipboard.setString(url);
+        setCopied(true);
+        setTimeout(() => setCopied(false), 2500);
+      } else {
+        // Fallback: share sheet con solo la URL como mensaje
+        await Share.share({ message: url });
+        setCopied(true);
+        setTimeout(() => setCopied(false), 2500);
+      }
     } catch (e) {}
   };
 
+  // Compartir con texto descriptivo + URL (no duplica porque message no incluye la URL)
   const handleShare = async () => {
     const url = `${BASE_URL}?n=${slug}`;
-    await Share.share({ message: `Agenda tu cita en línea: ${url}`, url });
+    try {
+      await Share.share({
+        message: `Agenda tu cita en l\u00ednea con nosotros:\n${url}`,
+      });
+    } catch (e) {}
   };
 
-  const handleOpenLink = () => { Linking.openURL(`${BASE_URL}?n=${slug}`); };
+  // Ver página — abre directamente en el navegador
+  const handleOpenLink = async () => {
+    const url = `${BASE_URL}?n=${slug}`;
+    const canOpen = await Linking.canOpenURL(url);
+    if (canOpen) {
+      Linking.openURL(url);
+    }
+  };
 
   const handleApproveRequest = async (id: string) => {
     await supabase.from('appointments').update({ status: 'Confirmada', updated_at: new Date().toISOString() }).eq('id', id);
@@ -175,7 +196,7 @@ export default function BookingLinkScreen() {
   };
 
   const handleRejectRequest = async (id: string) => {
-    Alert.alert('Rechazar solicitud', '¿Estás seguro?', [
+    Alert.alert('Rechazar solicitud', '\u00bfEst\u00e1s seguro?', [
       { text: 'Cancelar', style: 'cancel' },
       {
         text: 'Rechazar', style: 'destructive',
@@ -196,7 +217,7 @@ export default function BookingLinkScreen() {
     return (
       <SafeAreaView style={st.container}>
         <View style={st.header}>
-          <TouchableOpacity onPress={() => router.back()}><Text style={st.back}>← Volver</Text></TouchableOpacity>
+          <TouchableOpacity onPress={() => router.back()}><Text style={st.back}>\u2190 Volver</Text></TouchableOpacity>
           <Text style={st.title}>Link de cita</Text>
           <View style={{ width: 60 }} />
         </View>
@@ -211,19 +232,19 @@ export default function BookingLinkScreen() {
     return (
       <SafeAreaView style={st.container}>
         <View style={st.header}>
-          <TouchableOpacity onPress={() => router.back()}><Text style={st.back}>← Volver</Text></TouchableOpacity>
+          <TouchableOpacity onPress={() => router.back()}><Text style={st.back}>\u2190 Volver</Text></TouchableOpacity>
           <Text style={st.title}>Link de cita</Text>
           <View style={{ width: 60 }} />
         </View>
         <View style={st.paywall}>
-          <Text style={st.paywallIcon}>🔗</Text>
-          <Text style={st.paywallTitle}>Link de cita pública</Text>
+          <Text style={st.paywallIcon}>\ud83d\udd17</Text>
+          <Text style={st.paywallTitle}>Link de cita p\u00fablica</Text>
           <Text style={st.paywallDesc}>
-            Genera un link único que tus clientes pueden abrir desde Instagram, WhatsApp o Facebook
+            Genera un link \u00fanico que tus clientes pueden abrir desde Instagram, WhatsApp o Facebook
             para agendar citas 24/7 sin llamarte.
           </Text>
           <TouchableOpacity style={st.paywallBtn} onPress={() => router.push('/settings/subscription')}>
-            <Text style={st.paywallBtnText}>Ver Plan Básico →</Text>
+            <Text style={st.paywallBtnText}>Ver Plan B\u00e1sico \u2192</Text>
           </TouchableOpacity>
         </View>
       </SafeAreaView>
@@ -236,7 +257,7 @@ export default function BookingLinkScreen() {
   return (
     <SafeAreaView style={st.container}>
       <View style={st.header}>
-        <TouchableOpacity onPress={() => router.back()}><Text style={st.back}>← Volver</Text></TouchableOpacity>
+        <TouchableOpacity onPress={() => router.back()}><Text style={st.back}>\u2190 Volver</Text></TouchableOpacity>
         <Text style={st.title}>Link de cita</Text>
         <TouchableOpacity onPress={handleSave} disabled={saving}>
           <Text style={[st.saveBtn, saving && { opacity: 0.5 }]}>{saving ? 'Guardando...' : 'Guardar'}</Text>
@@ -259,18 +280,18 @@ export default function BookingLinkScreen() {
           <Text style={st.heroUrl} numberOfLines={2}>{publicUrl}</Text>
           <View style={st.heroActions}>
             <TouchableOpacity style={[st.heroBtn, { backgroundColor: copied ? '#065F46' : '#1E293B' }]} onPress={handleCopy}>
-              <Text style={[st.heroBtnText, { color: copied ? '#10B981' : '#fff' }]}>{copied ? '✓ Listo' : '↗ Copiar'}</Text>
+              <Text style={[st.heroBtnText, { color: copied ? '#10B981' : '#fff' }]}>{copied ? '\u2713 Copiado' : '\ud83d\udccb Copiar'}</Text>
             </TouchableOpacity>
             <TouchableOpacity style={[st.heroBtn, { backgroundColor: '#1E293B' }]} onPress={handleShare}>
-              <Text style={st.heroBtnText}>Compartir</Text>
+              <Text style={st.heroBtnText}>\u2197 Compartir</Text>
             </TouchableOpacity>
             <TouchableOpacity style={[st.heroBtn, { backgroundColor: '#1E293B' }]} onPress={handleOpenLink}>
-              <Text style={st.heroBtnText}>Ver página</Text>
+              <Text style={st.heroBtnText}>\ud83d\udc41 Ver</Text>
             </TouchableOpacity>
           </View>
         </View>
 
-        {/* Solicitudes pendientes (solo si require_approval está ON) */}
+        {/* Solicitudes pendientes */}
         {requests.length > 0 && (
           <>
             <View style={st.sectionHeader}>
@@ -283,16 +304,16 @@ export default function BookingLinkScreen() {
                   <View style={{ flex: 1 }}>
                     <Text style={st.requestName}>{req.client_name_temp || 'Cliente'}</Text>
                     <Text style={st.requestService}>{req.service_name}</Text>
-                    <Text style={st.requestDate}>{formatDate(req.date)} · {req.start_time}</Text>
+                    <Text style={st.requestDate}>{formatDate(req.date)} \u00b7 {req.start_time}</Text>
                     {req.notes ? <Text style={st.requestNotes}>{req.notes}</Text> : null}
                   </View>
                 </View>
                 <View style={st.requestActions}>
                   <TouchableOpacity style={st.acceptBtn} onPress={() => handleApproveRequest(req.id)}>
-                    <Text style={st.acceptBtnText}>✓ Aceptar</Text>
+                    <Text style={st.acceptBtnText}>\u2713 Aceptar</Text>
                   </TouchableOpacity>
                   <TouchableOpacity style={st.rejectBtn} onPress={() => handleRejectRequest(req.id)}>
-                    <Text style={st.rejectBtnText}>✕ Rechazar</Text>
+                    <Text style={st.rejectBtnText}>\u2715 Rechazar</Text>
                   </TouchableOpacity>
                 </View>
               </View>
@@ -300,12 +321,12 @@ export default function BookingLinkScreen() {
           </>
         )}
 
-        {/* Configuración */}
-        <Text style={st.sectionTitle}>Configuración</Text>
+        {/* Configuraci\u00f3n */}
+        <Text style={st.sectionTitle}>Configuraci\u00f3n</Text>
         <View style={st.configCard}>
           <View style={st.configRow}>
-            <Text style={st.configLabel}>Nombre único del link (slug)</Text>
-            <Text style={st.configSub}>Aparece en tu URL · solo letras, números y guiones</Text>
+            <Text style={st.configLabel}>Nombre \u00fanico del link (slug)</Text>
+            <Text style={st.configSub}>Aparece en tu URL \u00b7 solo letras, n\u00fameros y guiones</Text>
           </View>
           <TextInput
             style={[st.slugInput, slugError ? { borderColor: '#EF4444' } : null]}
@@ -327,21 +348,20 @@ export default function BookingLinkScreen() {
           <View style={st.toggleRow}>
             <View style={{ flex: 1 }}>
               <Text style={st.configLabel}>Link activo</Text>
-              <Text style={st.configSub}>Clientes pueden ver tu página y agendar</Text>
+              <Text style={st.configSub}>Clientes pueden ver tu p\u00e1gina y agendar</Text>
             </View>
             <Switch value={isActive} onValueChange={setIsActive} trackColor={{ false: '#334155', true: '#10B981' }} thumbColor="#fff" />
           </View>
 
           <View style={st.divider} />
 
-          {/* TOGGLE APROBACIÓN — con copy mejorado que explica el impacto */}
           <View style={st.toggleRow}>
             <View style={{ flex: 1 }}>
-              <Text style={st.configLabel}>Aprobación manual</Text>
+              <Text style={st.configLabel}>Aprobaci\u00f3n manual</Text>
               <Text style={st.configSub}>
                 {requireApproval
-                  ? '⚠️ Debes aprobar cada cita — el cliente queda en espera'
-                  : '✅ Las citas se confirman solas — sin fricción para el cliente'}
+                  ? '\u26a0\ufe0f Debes aprobar cada cita \u2014 el cliente queda en espera'
+                  : '\u2705 Las citas se confirman solas \u2014 sin fricci\u00f3n para el cliente'}
               </Text>
             </View>
             <Switch value={requireApproval} onValueChange={setRequireApproval} trackColor={{ false: '#334155', true: '#F59E0B' }} thumbColor="#fff" />
@@ -360,9 +380,9 @@ export default function BookingLinkScreen() {
 
         {/* Tip */}
         <View style={st.tipCard}>
-          <Text style={st.tipTitle}>Dónde compartir tu link</Text>
+          <Text style={st.tipTitle}>D\u00f3nde compartir tu link</Text>
           <Text style={st.tipText}>
-            {'• Bio de Instagram o Facebook\n• Estado de WhatsApp Business\n• Tarjeta de presentación digital\n• Perfil de Google Maps de tu negocio'}
+            {'\u2022 Bio de Instagram o Facebook\n\u2022 Estado de WhatsApp Business\n\u2022 Tarjeta de presentaci\u00f3n digital\n\u2022 Perfil de Google Maps de tu negocio'}
           </Text>
         </View>
 
