@@ -23,6 +23,7 @@ interface PlanContextType {
   canUseCollaborators: boolean;
   canRunCampaigns: boolean;
   canExportCSV: boolean;
+  canUseBookingLink: boolean;
   isGratuito: boolean;
   isBasico: boolean;
   isPremium: boolean;
@@ -59,13 +60,11 @@ export function PlanProvider({ children }: { children: React.ReactNode }) {
 
   const loadPlan = async (userId: string) => {
     if (ADMIN_USER_IDS.includes(userId)) {
-      // FIX: reemplazar console.log por logger — silencia en producción
       logger.log('[PlanContext] Admin user — skipping plan check');
       setPlan({ planType: 'Premium', status: 'active', trialEndsAt: null, price: '0' });
       setLoading(false);
       return;
     }
-
     logger.log('[PlanContext] Loading plan for user:', userId);
     setLoading(true);
     try {
@@ -75,7 +74,6 @@ export function PlanProvider({ children }: { children: React.ReactNode }) {
         .select('plan_type, status, trial_ends_at, price')
         .eq('user_id', userId)
         .single();
-
       if (error) {
         if (error.code === 'PGRST116') {
           logger.log('[PlanContext] No plan found, creating Gratuito');
@@ -89,12 +87,9 @@ export function PlanProvider({ children }: { children: React.ReactNode }) {
         }
         return;
       }
-
       if (!data) { setPlan(defaultPlan); return; }
-
       const normalized = normalizePlanType(data.plan_type);
       logger.log('[PlanContext] Plan loaded:', normalized, '| status:', data.status);
-
       setPlan({
         planType: normalized,
         status: data.status as PlanStatus,
@@ -131,21 +126,23 @@ export function PlanProvider({ children }: { children: React.ReactNode }) {
     : 0;
   const isTrialActive = plan.status === 'trial' && daysLeftInTrial > 0;
 
-  const canSchedule = isBasico || isPremium || isTrialActive;
-  const canViewReports = isBasico || isPremium || isTrialActive;
-  const canUseWhatsApp = isBasico || isPremium || isTrialActive;
-  const canUseOwnNumber = isPremium;
-  const canOverlap = isPremium;
+  const canSchedule        = isBasico || isPremium || isTrialActive;
+  const canViewReports     = isBasico || isPremium || isTrialActive;
+  const canUseWhatsApp     = isBasico || isPremium || isTrialActive;
+  const canUseOwnNumber    = isPremium;
+  const canOverlap         = isPremium;
   const canUseCollaborators = isPremium;
-  const canRunCampaigns = isPremium;
-  const canExportCSV = isPremium;
+  const canRunCampaigns    = isPremium;
+  const canExportCSV       = isPremium;
+  // Link de cita pública — disponible en Básico y Premium
+  const canUseBookingLink  = isBasico || isPremium || isTrialActive;
 
   return (
     <PlanContext.Provider value={{
       plan, loading,
       canSchedule, canViewReports, canUseWhatsApp,
       canUseOwnNumber, canOverlap, canUseCollaborators,
-      canRunCampaigns, canExportCSV,
+      canRunCampaigns, canExportCSV, canUseBookingLink,
       isGratuito, isBasico, isPremium,
       isTrialActive, daysLeftInTrial,
       refreshPlan: () => user?.id ? loadPlan(user.id) : Promise.resolve(),

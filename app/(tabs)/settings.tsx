@@ -78,7 +78,7 @@ const grp = StyleSheet.create({
 export default function SettingsScreen() {
   const router = useRouter();
   const { user, businessProfile, signOut } = useAuth();
-  const { canOverlap, isPremium, isBasico, isGratuito } = usePlan();
+  const { canOverlap, isPremium, isBasico, isGratuito, canUseBookingLink } = usePlan();
   const [logoutModal, setLogoutModal] = useState(false);
   const [deleteModal, setDeleteModal] = useState(false);
   const [deleting, setDeleting] = useState(false);
@@ -86,6 +86,7 @@ export default function SettingsScreen() {
   const [allowOverlapping, setAllowOverlapping] = useState(false);
   const [savingOverlap, setSavingOverlap] = useState(false);
   const [birthdayEnabled, setBirthdayEnabled] = useState(false);
+  const [bookingLinkActive, setBookingLinkActive] = useState(false);
   const [subscription, setSubscription] = useState<Subscription | null>(null);
   const [loading, setLoading] = useState(true);
 
@@ -113,6 +114,14 @@ export default function SettingsScreen() {
         setAllowOverlapping(bpData.allow_overlapping || false);
         setBirthdayEnabled(bpData.birthday_reminders_enabled || false);
       }
+      // Cargar estado del booking link
+      const { data: blData } = await supabase
+        .from('booking_links')
+        .select('is_active')
+        .eq('user_id', user?.id)
+        .single();
+      if (blData) setBookingLinkActive(blData.is_active || false);
+
       if (subscriptionData) setCached('settings_subscription', subscriptionData);
       setWhatsappConfig(whatsappData); setSubscription(subscriptionData);
     } catch (error) {
@@ -175,7 +184,6 @@ export default function SettingsScreen() {
 
       <ScrollView contentContainerStyle={s.scroll} showsVerticalScrollIndicator={false}>
 
-        {/* Hero perfil */}
         <TouchableOpacity style={s.heroCard} onPress={() => router.push('/settings/profile')} activeOpacity={0.85}>
           <View style={s.heroAvatarWrap}>
             {businessProfile?.logoUrl
@@ -192,7 +200,6 @@ export default function SettingsScreen() {
           <IconSymbol android_material_icon_name="arrow-forward-ios" size={16} color="#CBD5E1" />
         </TouchableOpacity>
 
-        {/* Card plan */}
         <TouchableOpacity style={[s.planCard, { borderColor: planColor }]} onPress={() => router.push('/settings/subscription')} activeOpacity={0.85}>
           <View style={[s.planIconBox, { backgroundColor: planBg }]}><Text style={s.planEmoji}>{planEmoji}</Text></View>
           <View style={s.planInfo}>
@@ -206,7 +213,6 @@ export default function SettingsScreen() {
           <IconSymbol android_material_icon_name="arrow-forward-ios" size={16} color={planColor} />
         </TouchableOpacity>
 
-        {/* MI NEGOCIO */}
         <SettingGroup title="MI NEGOCIO">
           <SettingRow iconName="store" iconColor="#10B981" iconBg="#ECFDF5" label="Información del negocio" sublabel={businessProfile?.businessName || 'Configura tu negocio'} onPress={() => router.push('/settings/business')} />
           <SettingRow iconName="schedule" iconColor="#3B82F6" iconBg="#EFF6FF" label="Horarios de atención" sublabel="Configura tu disponibilidad" onPress={() => router.push('/settings/schedule')} />
@@ -219,7 +225,29 @@ export default function SettingsScreen() {
           />
         </SettingGroup>
 
-        {/* AUTOMATIZACIONES */}
+        <SettingGroup title="CAPTACIÓN DE CLIENTES">
+          <SettingRow
+            iconName="link" iconColor="#10B981" iconBg="#ECFDF5"
+            label="Link de cita pública"
+            sublabel={canUseBookingLink
+              ? (bookingLinkActive ? 'Activo — clientes pueden agendar en línea' : 'Inactivo — toca para configurar')
+              : 'Disponible en Plan Básico'
+            }
+            badge={!canUseBookingLink ? <View style={s.basicoChip}><Text style={s.basicoChipText}>BÁSICO</Text></View> : undefined}
+            right={
+              canUseBookingLink ? (
+                <View style={[s.waBadge, { backgroundColor: bookingLinkActive ? '#ECFDF5' : '#F1F5F9' }]}>
+                  <View style={[s.waDot, { backgroundColor: bookingLinkActive ? '#10B981' : '#94A3B8' }]} />
+                  <Text style={[s.waText, { color: bookingLinkActive ? '#10B981' : '#64748B' }]}>
+                    {bookingLinkActive ? 'Activo' : 'Inactivo'}
+                  </Text>
+                </View>
+              ) : undefined
+            }
+            onPress={() => canUseBookingLink ? router.push('/settings/booking-link') : router.push('/settings/subscription')}
+          />
+        </SettingGroup>
+
         <SettingGroup title="AUTOMATIZACIONES">
           <SettingRow
             iconName="cake" iconColor="#EC4899" iconBg="#FDF2F8"
@@ -233,7 +261,6 @@ export default function SettingsScreen() {
             }
             onPress={() => router.push('/settings/birthday')}
           />
-          {/* Email Marketing */}
           <SettingRow
             iconName="email" iconColor="#6366F1" iconBg="#EEF2FF"
             label="Email Marketing"
@@ -243,7 +270,6 @@ export default function SettingsScreen() {
           />
         </SettingGroup>
 
-        {/* WHATSAPP */}
         <SettingGroup title="WHATSAPP BUSINESS">
           <SettingRow
             iconName="message" iconColor="#25D366" iconBg="#F0FDF4"
@@ -259,14 +285,12 @@ export default function SettingsScreen() {
           />
         </SettingGroup>
 
-        {/* CUENTA */}
         <SettingGroup title="CUENTA">
           <SettingRow iconName="person" iconColor="#6366F1" iconBg="#EEF2FF" label="Editar perfil" onPress={() => router.push('/settings/profile')} />
           <SettingRow iconName="lock" iconColor="#8B5CF6" iconBg="#F5F3FF" label="Cambiar contraseña" onPress={() => router.push('/settings/password')} />
           <SettingRow iconName="description" iconColor="#64748B" iconBg="#F8FAFC" label="Legal y Privacidad" onPress={() => router.push('/legal')} />
         </SettingGroup>
 
-        {/* SESIÓN */}
         <SettingGroup title="SESIÓN">
           <SettingRow iconName="logout" iconColor="#EF4444" iconBg="#FEF2F2" label="Cerrar sesión" danger onPress={() => setLogoutModal(true)} />
           <SettingRow iconName="delete-forever" iconColor="#EF4444" iconBg="#FEF2F2" label="Eliminar mi cuenta" sublabel="Esta acción es permanente e irreversible" danger onPress={() => setDeleteModal(true)} />
@@ -313,6 +337,8 @@ const s = StyleSheet.create({
   waText: { fontSize: 12, fontWeight: '700' },
   premiumChip: { backgroundColor: '#FFFBEB', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 5 },
   premiumChipText: { fontSize: 9, fontWeight: '800', color: '#92400E' },
+  basicoChip: { backgroundColor: '#ECFDF5', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 5 },
+  basicoChipText: { fontSize: 9, fontWeight: '800', color: '#065F46' },
   statusRight: { flexDirection: 'row', alignItems: 'center', gap: 6 },
   statusDot: { width: 8, height: 8, borderRadius: 4 },
   footer: { alignItems: 'center', paddingTop: 8, paddingBottom: 16, gap: 4 },
