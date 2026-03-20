@@ -1,10 +1,10 @@
 import { SafeAreaView } from 'react-native-safe-area-context';
 import {
   View, Text, StyleSheet, ScrollView,
-  TouchableOpacity, ActivityIndicator,
+  TouchableOpacity, ActivityIndicator, RefreshControl,
 } from 'react-native';
 import { colors } from '@/styles/commonStyles';
-import { getCached, setCached, CACHE_TTL } from '@/utils/cache';
+import { getCached, setCached, invalidateCache, CACHE_TTL } from '@/utils/cache';
 import { apiGet } from '@/utils/api';
 import React, { useEffect, useState, useCallback, useMemo } from 'react';
 import { IconSymbol } from '@/components/IconSymbol';
@@ -34,25 +34,24 @@ const STATUS_META: Record<string, { color: string; bg: string; label: string }> 
   'No-show':  { color: '#F97316', bg: '#FFF7ED', label: 'No-show' },
   Reagendada: { color: '#3B82F6', bg: '#EFF6FF', label: 'Reagendada' },
   Pagado:     { color: '#8B5CF6', bg: '#F5F3FF', label: 'Pagado' },
+  Solicitud:  { color: '#3B82F6', bg: '#EFF6FF', label: 'Solicitud' },
 };
 
 export default function AppointmentsScreen() {
   const router = useRouter();
   const { canSchedule } = usePlan();
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [appointments, setAppointments] = useState<ApiAppointment[]>([]);
   const [selectedDate, setSelectedDate] = useState(new Date().toISOString().split('T')[0]);
   const [loadError, setLoadError] = useState(false);
 
-  // FIX: useFocusEffect solo recarga si el cache expiró — no spinner en cada visita
   useFocusEffect(
     useCallback(() => {
       const cached = getCached<ApiAppointment[]>('appointments_list');
       if (cached) {
-        // Cache fresco: actualizar estado sin loading visible
         setAppointments(cached);
         setLoading(false);
-        // Refresco silencioso en background sin mostrar spinner
         loadAppointments(false, true);
       } else {
         loadAppointments();
@@ -74,7 +73,14 @@ export default function AppointmentsScreen() {
     }
   };
 
-  // FIX: calcular markedDates con useMemo — elimina el useEffect extra y el re-render doble
+  // Pull-to-refresh: invalida cache y fuerza recarga fresca
+  const onRefresh = useCallback(async () => {
+    setRefreshing(true);
+    invalidateCache('appointments_list');
+    await loadAppointments(false);
+    setRefreshing(false);
+  }, []);
+
   const markedDates = useMemo(() => {
     const marked: Record<string, any> = {};
     appointments.forEach((appt) => {
@@ -82,7 +88,6 @@ export default function AppointmentsScreen() {
         marked[appt.date] = { marked: true, dotColor: colors.primary };
       }
     });
-    // Merge con la fecha seleccionada
     marked[selectedDate] = {
       ...(marked[selectedDate] || {}),
       selected: true,
@@ -128,7 +133,18 @@ export default function AppointmentsScreen() {
         </View>
       </View>
 
-      <ScrollView style={s.content} showsVerticalScrollIndicator={false}>
+      <ScrollView
+        style={s.content}
+        showsVerticalScrollIndicator={false}
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={onRefresh}
+            tintColor={colors.primary}
+            colors={[colors.primary]}
+          />
+        }
+      >
         <View style={s.calendarWrap}>
           <Calendar
             current={selectedDate}
@@ -214,7 +230,7 @@ export default function AppointmentsScreen() {
                       <Text style={s.timeText}>{appt.time}</Text>
                     </View>
                     <View style={s.infoCol}>
-                      <Text style={s.clientName}>{appt.client?.name || 'Cliente'}</Text>
+                      <Text style={s.clientName}>{appt.client?.name || appt.client_name_temp || 'Cliente'}</Text>
                       <Text style={s.serviceName}>{appt.service || 'Servicio'}</Text>
                       {appt.isRescheduled && (
                         <View style={s.rescheduledPill}>
