@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useRef } from 'react';
+import React, { useState, useRef } from 'react';
 import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity,
   ActivityIndicator, Image, RefreshControl,
@@ -38,49 +38,70 @@ interface WhatsAppConfig {
   phoneNumber?: string;
 }
 
-function StatCard({ icon, value, label, iconColor, iconBg }: {
-  icon: string; value: number; label: string; iconColor: string; iconBg: string;
+// ─── Stat card compacta ────────────────────────────────────────────────────
+function StatCard({ value, label, accent }: {
+  value: number; label: string; accent: string;
 }) {
   return (
-    <View style={sc.card}>
-      <View style={[sc.iconBox, { backgroundColor: iconBg }]}>
-        <MaterialIcons name={icon as any} size={20} color={iconColor} />
-      </View>
-      <Text style={sc.value}>{value}</Text>
+    <View style={[sc.card, { borderTopColor: accent, borderTopWidth: 2 }]}>
+      <Text style={[sc.value, { color: accent }]}>{value}</Text>
       <Text style={sc.label}>{label}</Text>
     </View>
   );
 }
 
 const sc = StyleSheet.create({
-  card: { flex: 1, backgroundColor: '#fff', borderRadius: 16, padding: 14, alignItems: 'center', marginHorizontal: 4, shadowColor: '#000', shadowOpacity: 0.05, shadowRadius: 8, elevation: 2 },
-  iconBox: { width: 36, height: 36, borderRadius: 10, justifyContent: 'center', alignItems: 'center', marginBottom: 8 },
-  value: { fontSize: 26, fontWeight: '800', color: '#0F172A', lineHeight: 30 },
-  label: { fontSize: 11, color: '#94A3B8', marginTop: 4, textAlign: 'center', fontWeight: '500' },
+  card: {
+    flex: 1,
+    backgroundColor: '#1E293B',
+    borderRadius: 14,
+    padding: 14,
+    marginHorizontal: 4,
+    borderWidth: 1,
+    borderColor: '#334155',
+  },
+  value: { fontSize: 28, fontWeight: '800', letterSpacing: -0.5, lineHeight: 32 },
+  label: { fontSize: 11, color: '#64748B', marginTop: 4, fontWeight: '500' },
 });
 
-function ActionBtn({ icon, label, onPress, primary }: {
-  icon: string; label: string; onPress: () => void; primary?: boolean;
+// ─── Acción rápida ─────────────────────────────────────────────────────────
+function QuickAction({ icon, label, onPress, accent = '#10B981' }: {
+  icon: string; label: string; onPress: () => void; accent?: string;
 }) {
   return (
-    <TouchableOpacity style={[ab.btn, primary && ab.btnPrimary]} onPress={onPress} activeOpacity={0.75}>
-      <View style={[ab.iconBox, primary && ab.iconBoxPrimary]}>
-        <MaterialIcons name={icon as any} size={22} color={primary ? '#fff' : '#10B981'} />
+    <TouchableOpacity style={qa.btn} onPress={onPress} activeOpacity={0.7}>
+      <View style={[qa.iconWrap, { backgroundColor: accent + '18' }]}>
+        <MaterialIcons name={icon as any} size={24} color={accent} />
       </View>
-      <Text style={[ab.label, primary && ab.labelPrimary]}>{label}</Text>
+      <Text style={qa.label}>{label}</Text>
     </TouchableOpacity>
   );
 }
 
-const ab = StyleSheet.create({
-  btn: { width: '48%', backgroundColor: '#fff', borderRadius: 16, padding: 16, alignItems: 'center', marginBottom: 10, shadowColor: '#000', shadowOpacity: 0.05, shadowRadius: 8, elevation: 2 },
-  btnPrimary: { backgroundColor: '#10B981' },
-  iconBox: { width: 44, height: 44, borderRadius: 14, backgroundColor: '#ECFDF5', justifyContent: 'center', alignItems: 'center', marginBottom: 10 },
-  iconBoxPrimary: { backgroundColor: 'rgba(255,255,255,0.2)' },
-  label: { fontSize: 13, fontWeight: '600', color: '#0F172A', textAlign: 'center' },
-  labelPrimary: { color: '#fff' },
+const qa = StyleSheet.create({
+  btn: {
+    width: '48%',
+    backgroundColor: '#1E293B',
+    borderRadius: 16,
+    padding: 16,
+    marginBottom: 10,
+    borderWidth: 1,
+    borderColor: '#334155',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
+  iconWrap: {
+    width: 42,
+    height: 42,
+    borderRadius: 12,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  label: { fontSize: 13, fontWeight: '600', color: '#F8FAFC', flex: 1 },
 });
 
+// ─── Pantalla principal ────────────────────────────────────────────────────
 export default function HomeScreen() {
   const router = useRouter();
   const { user, businessProfile, loading: authLoading } = useAuth();
@@ -94,17 +115,12 @@ export default function HomeScreen() {
   });
   const [todayAppointments, setTodayAppointments] = useState<TodayAppointment[]>([]);
   const [weekAppointments, setWeekAppointments] = useState<TodayAppointment[]>([]);
-  // FIX: cargar estado de WhatsApp para no mostrar banner si ya está conectado
   const [waConnected, setWaConnected] = useState(false);
-
-  // FIX: usar ref para evitar doble llamada en useFocusEffect
   const loadingRef = useRef(false);
 
   useFocusEffect(
     React.useCallback(() => {
-      if (!loadingRef.current) {
-        loadDashboardData();
-      }
+      if (!loadingRef.current) loadDashboardData();
     }, [user?.id])
   );
 
@@ -155,8 +171,8 @@ export default function HomeScreen() {
         setWaConnected(wa?.isConnected || false);
         setCached('settings_whatsapp', wa, CACHE_TTL.SETTINGS);
       }
-    } catch (error) {
-      // silencioso — el usuario no necesita ver errores del dashboard
+    } catch {
+      // silencioso
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -172,137 +188,191 @@ export default function HomeScreen() {
   };
 
   const getTodayDate = () => {
-    const today = new Date();
-    const f = today.toLocaleDateString('es-MX', { weekday: 'long', month: 'long', day: 'numeric' });
+    const f = new Date().toLocaleDateString('es-MX', { weekday: 'long', day: 'numeric', month: 'long' });
     return f.charAt(0).toUpperCase() + f.slice(1);
   };
 
   const initials = user?.name?.split(' ').map((w: string) => w[0]).slice(0, 2).join('').toUpperCase() || 'U';
+  const firstName = authLoading ? '' : (user?.name?.split(' ')[0] || 'Usuario');
 
   if (loading) {
     return (
       <SafeAreaView style={s.container}>
-        <View style={s.loading}><ActivityIndicator size="large" color={colors.primary} /></View>
+        <View style={s.loadingWrap}>
+          <ActivityIndicator size="large" color={colors.primary} />
+        </View>
       </SafeAreaView>
     );
   }
 
   return (
-    <SafeAreaView style={s.container}>
+    <SafeAreaView style={s.container} edges={['top']}>
       <ScrollView
         contentContainerStyle={s.scroll}
+        showsVerticalScrollIndicator={false}
         refreshControl={
-          <RefreshControl refreshing={refreshing} onRefresh={() => loadDashboardData(true, true)}
-            tintColor={colors.primary} colors={[colors.primary]} />
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={() => loadDashboardData(true, true)}
+            tintColor={colors.primary}
+            colors={[colors.primary]}
+          />
         }
       >
-        {/* Header */}
+        {/* ── Header ── */}
         <View style={s.header}>
-          <View style={s.headerLeft}>
-            <Text style={s.greeting}>{getGreeting()},</Text>
-            <Text style={s.userName}>{authLoading ? '' : (user?.name?.split(' ')[0] || 'Usuario')}</Text>
-            <Text style={s.date}>{getTodayDate()}</Text>
+          <View style={{ flex: 1 }}>
+            <Text style={s.greeting}>{getGreeting()}</Text>
+            <Text style={s.userName}>{firstName} 👋</Text>
+            <View style={s.datePill}>
+              <MaterialIcons name="today" size={12} color="#475569" />
+              <Text style={s.dateText}>{getTodayDate()}</Text>
+            </View>
           </View>
           <TouchableOpacity onPress={() => router.push('/settings/profile')} activeOpacity={0.8}>
             {businessProfile?.logoUrl ? (
               <Image source={{ uri: businessProfile.logoUrl }} style={s.avatar} />
             ) : (
-              <View style={s.avatarFallback}><Text style={s.avatarText}>{initials}</Text></View>
+              <View style={s.avatarFallback}>
+                <Text style={s.avatarText}>{initials}</Text>
+              </View>
             )}
           </TouchableOpacity>
         </View>
 
-        {isGratuito ? (
-          <View style={s.upgradeCard}>
-            <Text style={s.upgradeEmoji}>🚀</Text>
-            <Text style={s.upgradeTitle}>¡Bienvenido a VYLTA!</Text>
-            <Text style={s.upgradeDesc}>Activa el Plan Básico para agendar citas y automatizar recordatorios por WhatsApp.</Text>
-            <TouchableOpacity style={s.upgradeBtn} onPress={() => router.push('/settings/subscription')}>
-              <Text style={s.upgradeBtnText}>Ver planes →</Text>
-            </TouchableOpacity>
-          </View>
-        ) : (
-          <>
-            <Text style={s.sectionLabel}>HOY</Text>
-            <View style={s.statsRow}>
-              <StatCard icon="calendar-today" value={stats.todayAppointments} label="Citas" iconColor="#10B981" iconBg="#ECFDF5" />
-              <StatCard icon="check-circle" value={stats.confirmedToday} label="Confirmadas" iconColor="#3B82F6" iconBg="#EFF6FF" />
-              <StatCard icon="schedule" value={stats.unconfirmedToday} label="Sin confirmar" iconColor="#F59E0B" iconBg="#FFFBEB" />
+        {/* ── Upgrade banner (plan gratuito) ── */}
+        {isGratuito && (
+          <TouchableOpacity style={s.upgradeCard} onPress={() => router.push('/settings/subscription')} activeOpacity={0.85}>
+            <View style={s.upgradeLeft}>
+              <Text style={s.upgradeTitle}>Activa tu plan</Text>
+              <Text style={s.upgradeDesc}>Agenda citas y automatiza recordatorios por WhatsApp</Text>
             </View>
-            <Text style={s.sectionLabel}>PRÓXIMOS 7 DÍAS</Text>
+            <View style={s.upgradeArrow}>
+              <MaterialIcons name="arrow-forward" size={18} color="#fff" />
+            </View>
+          </TouchableOpacity>
+        )}
+
+        {/* ── Stats de hoy ── */}
+        {!isGratuito && (
+          <>
+            <View style={s.sectionRow}>
+              <Text style={s.sectionTitle}>Hoy</Text>
+              <Text style={s.sectionDate}>{new Date().toLocaleDateString('es-MX', { day: 'numeric', month: 'short' })}</Text>
+            </View>
             <View style={s.statsRow}>
-              <StatCard icon="date-range" value={stats.weekAppointments} label="Citas" iconColor="#6366F1" iconBg="#EEF2FF" />
-              <StatCard icon="check-circle" value={stats.confirmedWeek} label="Confirmadas" iconColor="#3B82F6" iconBg="#EFF6FF" />
-              <StatCard icon="schedule" value={stats.unconfirmedWeek} label="Sin confirmar" iconColor="#F59E0B" iconBg="#FFFBEB" />
+              <StatCard value={stats.todayAppointments} label="Total" accent="#10B981" />
+              <StatCard value={stats.confirmedToday} label="Confirmadas" accent="#3B82F6" />
+              <StatCard value={stats.unconfirmedToday} label="Pendientes" accent="#F59E0B" />
+            </View>
+
+            {/* ── Stats de la semana ── */}
+            <View style={[s.sectionRow, { marginTop: 8 }]}>
+              <Text style={s.sectionTitle}>Esta semana</Text>
+            </View>
+            <View style={s.statsRow}>
+              <StatCard value={stats.weekAppointments} label="Total" accent="#8B5CF6" />
+              <StatCard value={stats.confirmedWeek} label="Confirmadas" accent="#3B82F6" />
+              <StatCard value={stats.unconfirmedWeek} label="Pendientes" accent="#F59E0B" />
             </View>
           </>
         )}
 
-        {/* Citas de hoy */}
-        <View style={s.section}>
-          <View style={s.sectionHeader}>
-            <Text style={s.sectionTitle}>Citas de hoy</Text>
-            {todayAppointments.length > 0 && (
-              <TouchableOpacity onPress={() => router.push('/(tabs)/appointments')}>
-                <Text style={s.seeAll}>Ver todas</Text>
-              </TouchableOpacity>
-            )}
-          </View>
-          {todayAppointments.length === 0 ? (
-            <View style={s.empty}>
-              <MaterialIcons name="event-available" size={48} color="#CBD5E1" />
-              <Text style={s.emptyTitle}>Sin citas hoy</Text>
-              <Text style={s.emptyDesc}>Tu agenda está libre</Text>
-              {canSchedule && (
-                <TouchableOpacity style={s.emptyBtn} onPress={() => router.push('/appointments/new')}>
-                  <Text style={s.emptyBtnText}>+ Crear cita</Text>
-                </TouchableOpacity>
-              )}
-            </View>
-          ) : (
-            todayAppointments.map((appt) => {
-              const statusColor = getStatusColor(appt.status);
-              return (
-                <TouchableOpacity key={appt.id} style={s.apptCard} onPress={() => router.push(`/appointments/${appt.id}`)} activeOpacity={0.75}>
-                  <View style={[s.apptStripe, { backgroundColor: statusColor }]} />
-                  <View style={s.apptTime}><Text style={s.apptTimeText}>{appt.time}</Text></View>
-                  <View style={s.apptInfo}>
-                    <Text style={s.apptClient}>{appt.client?.name}</Text>
-                    <Text style={s.apptService}>{appt.service}</Text>
-                  </View>
-                  <View style={[s.apptBadge, { backgroundColor: statusColor + '20' }]}>
-                    <Text style={[s.apptBadgeText, { color: statusColor }]}>{appt.status}</Text>
-                  </View>
-                </TouchableOpacity>
-              );
-            })
+        {/* ── Citas de hoy ── */}
+        <View style={s.sectionRow}>
+          <Text style={s.sectionTitle}>Citas de hoy</Text>
+          {todayAppointments.length > 0 && (
+            <TouchableOpacity onPress={() => router.push('/(tabs)/appointments')}>
+              <Text style={s.seeAll}>Ver todas</Text>
+            </TouchableOpacity>
           )}
         </View>
 
-        {/* Acciones rápidas */}
-        <View style={s.section}>
-          <Text style={s.sectionTitle}>Acciones rápidas</Text>
-          <View style={s.actionsGrid}>
-            <ActionBtn icon="add-circle" label="Nueva Cita" onPress={() => router.push('/appointments/new')} primary />
-            <ActionBtn icon="person-add" label="Nuevo Cliente" onPress={() => router.push('/clients/new')} />
-            <ActionBtn icon="calendar-month" label="Ver Calendario" onPress={() => router.push('/(tabs)/appointments')} />
-            <ActionBtn icon="refresh" label="Reactivar Clientes" onPress={() => router.push('/clients/inactive')} />
+        {todayAppointments.length === 0 ? (
+          <View style={s.emptyCard}>
+            <View style={s.emptyIconWrap}>
+              <MaterialIcons name="event-available" size={28} color="#334155" />
+            </View>
+            <Text style={s.emptyTitle}>Agenda libre hoy</Text>
+            <Text style={s.emptyDesc}>No tienes citas programadas para hoy</Text>
+            {canSchedule && (
+              <TouchableOpacity style={s.emptyBtn} onPress={() => router.push('/appointments/new')}>
+                <MaterialIcons name="add" size={16} color="#fff" />
+                <Text style={s.emptyBtnText}>Crear cita</Text>
+              </TouchableOpacity>
+            )}
           </View>
+        ) : (
+          <View style={s.apptList}>
+            {todayAppointments.map((appt) => {
+              const statusColor = getStatusColor(appt.status);
+              return (
+                <TouchableOpacity
+                  key={appt.id}
+                  style={s.apptCard}
+                  onPress={() => router.push(`/appointments/${appt.id}`)}
+                  activeOpacity={0.75}
+                >
+                  <View style={[s.apptAccent, { backgroundColor: statusColor }]} />
+                  <View style={s.apptTimeWrap}>
+                    <Text style={s.apptTime}>{appt.time}</Text>
+                  </View>
+                  <View style={s.apptBody}>
+                    <Text style={s.apptClient} numberOfLines={1}>{appt.client?.name}</Text>
+                    <Text style={s.apptService} numberOfLines={1}>{appt.service}</Text>
+                  </View>
+                  <View style={[s.apptBadge, { backgroundColor: statusColor + '22' }]}>
+                    <Text style={[s.apptBadgeText, { color: statusColor }]}>{appt.status}</Text>
+                  </View>
+                  <MaterialIcons name="chevron-right" size={18} color="#334155" />
+                </TouchableOpacity>
+              );
+            })}
+          </View>
+        )}
+
+        {/* ── Acciones rápidas ── */}
+        <View style={s.sectionRow}>
+          <Text style={s.sectionTitle}>Acciones rápidas</Text>
+        </View>
+        <View style={s.actionsGrid}>
+          <QuickAction
+            icon="add-circle-outline"
+            label="Nueva cita"
+            accent="#10B981"
+            onPress={() => router.push('/appointments/new')}
+          />
+          <QuickAction
+            icon="person-add-alt"
+            label="Nuevo cliente"
+            accent="#3B82F6"
+            onPress={() => router.push('/clients/new')}
+          />
+          <QuickAction
+            icon="calendar-month"
+            label="Ver agenda"
+            accent="#8B5CF6"
+            onPress={() => router.push('/(tabs)/appointments')}
+          />
+          <QuickAction
+            icon="person-search"
+            label="Clientes inactivos"
+            accent="#F59E0B"
+            onPress={() => router.push('/clients/inactive')}
+          />
         </View>
 
-        {/* FIX: Banner WhatsApp solo si NO está conectado */}
+        {/* ── Banner WhatsApp ── */}
         {(isBasico || isPremium) && !waConnected && (
           <TouchableOpacity style={s.waBanner} onPress={() => router.push('/settings/whatsapp')} activeOpacity={0.8}>
             <View style={s.waIconBox}>
-              <MaterialIcons name="chat" size={22} color="#25D366" />
+              <MaterialIcons name="chat" size={20} color="#25D366" />
             </View>
-            <View style={s.waInfo}>
-              <Text style={s.waTitle}>WhatsApp no configurado</Text>
-              <Text style={s.waDesc}>Actívalo para enviar recordatorios automáticos</Text>
+            <View style={{ flex: 1 }}>
+              <Text style={s.waTitle}>Conecta WhatsApp</Text>
+              <Text style={s.waDesc}>Activa recordatorios automáticos para tus clientes</Text>
             </View>
-            <View style={s.waArrow}>
-              <MaterialIcons name="arrow-forward-ios" size={14} color="#25D366" />
-            </View>
+            <MaterialIcons name="arrow-forward-ios" size={14} color="#25D366" />
           </TouchableOpacity>
         )}
 
@@ -312,48 +382,62 @@ export default function HomeScreen() {
 }
 
 const s = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#F8FAFC' },
-  loading: { flex: 1, justifyContent: 'center', alignItems: 'center' },
-  scroll: { padding: 20, paddingBottom: 100 },
-  header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 24 },
-  headerLeft: { flex: 1 },
-  greeting: { fontSize: 15, color: '#94A3B8', fontWeight: '500' },
-  userName: { fontSize: 30, fontWeight: '800', color: '#0F172A', letterSpacing: -0.5, marginTop: 2 },
-  date: { fontSize: 13, color: '#94A3B8', marginTop: 4 },
-  avatar: { width: 52, height: 52, borderRadius: 16, borderWidth: 2, borderColor: '#E2E8F0' },
-  avatarFallback: { width: 52, height: 52, borderRadius: 16, backgroundColor: '#10B981', justifyContent: 'center', alignItems: 'center' },
-  avatarText: { fontSize: 20, fontWeight: '800', color: '#fff' },
-  upgradeCard: { backgroundColor: '#ECFDF5', borderRadius: 20, padding: 24, alignItems: 'center', borderWidth: 1, borderColor: '#10B981', marginBottom: 24 },
-  upgradeEmoji: { fontSize: 40, marginBottom: 10 },
-  upgradeTitle: { fontSize: 18, fontWeight: '700', color: '#0F172A', marginBottom: 8 },
-  upgradeDesc: { fontSize: 13, color: '#64748B', textAlign: 'center', lineHeight: 20, marginBottom: 16 },
-  upgradeBtn: { backgroundColor: '#10B981', paddingHorizontal: 24, paddingVertical: 12, borderRadius: 12 },
-  upgradeBtnText: { color: '#fff', fontWeight: '700', fontSize: 14 },
-  sectionLabel: { fontSize: 11, fontWeight: '800', color: '#94A3B8', letterSpacing: 1.5, marginBottom: 10, marginTop: 8 },
-  statsRow: { flexDirection: 'row', marginBottom: 24 },
-  section: { marginBottom: 28 },
-  sectionHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 },
-  sectionTitle: { fontSize: 18, fontWeight: '700', color: '#0F172A' },
-  seeAll: { fontSize: 13, color: '#10B981', fontWeight: '600' },
-  empty: { backgroundColor: '#fff', borderRadius: 16, padding: 32, alignItems: 'center', shadowColor: '#000', shadowOpacity: 0.04, shadowRadius: 8, elevation: 1 },
-  emptyTitle: { fontSize: 16, fontWeight: '600', color: '#0F172A', marginTop: 12 },
-  emptyDesc: { fontSize: 13, color: '#94A3B8', marginTop: 4, marginBottom: 16 },
-  emptyBtn: { backgroundColor: '#10B981', borderRadius: 10, paddingVertical: 10, paddingHorizontal: 20 },
-  emptyBtnText: { color: '#fff', fontWeight: '700', fontSize: 14 },
-  apptCard: { backgroundColor: '#fff', borderRadius: 14, flexDirection: 'row', alignItems: 'center', marginBottom: 8, overflow: 'hidden', shadowColor: '#000', shadowOpacity: 0.04, shadowRadius: 6, elevation: 1 },
-  apptStripe: { width: 4, alignSelf: 'stretch' },
-  apptTime: { paddingHorizontal: 12, paddingVertical: 16, minWidth: 62, alignItems: 'center' },
-  apptTimeText: { fontSize: 14, fontWeight: '700', color: '#0F172A' },
-  apptInfo: { flex: 1, paddingVertical: 14 },
-  apptClient: { fontSize: 15, fontWeight: '600', color: '#0F172A' },
-  apptService: { fontSize: 12, color: '#94A3B8', marginTop: 2 },
-  apptBadge: { marginRight: 12, paddingHorizontal: 10, paddingVertical: 4, borderRadius: 8 },
+  container:     { flex: 1, backgroundColor: '#0F172A' },
+  loadingWrap:   { flex: 1, justifyContent: 'center', alignItems: 'center' },
+  scroll:        { paddingHorizontal: 16, paddingTop: 8, paddingBottom: 110 },
+
+  // Header
+  header:        { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 24 },
+  greeting:      { fontSize: 13, color: '#475569', fontWeight: '500', marginBottom: 2 },
+  userName:      { fontSize: 26, fontWeight: '800', color: '#F8FAFC', letterSpacing: -0.5, marginBottom: 8 },
+  datePill:      { flexDirection: 'row', alignItems: 'center', gap: 5, backgroundColor: '#1E293B', alignSelf: 'flex-start', paddingHorizontal: 10, paddingVertical: 5, borderRadius: 20, borderWidth: 1, borderColor: '#334155' },
+  dateText:      { fontSize: 12, color: '#64748B', fontWeight: '500' },
+  avatar:        { width: 52, height: 52, borderRadius: 16, borderWidth: 2, borderColor: '#334155' },
+  avatarFallback:{ width: 52, height: 52, borderRadius: 16, backgroundColor: '#10B981', justifyContent: 'center', alignItems: 'center' },
+  avatarText:    { fontSize: 20, fontWeight: '800', color: '#fff' },
+
+  // Upgrade
+  upgradeCard:   { backgroundColor: '#10B981', borderRadius: 18, padding: 18, flexDirection: 'row', alignItems: 'center', marginBottom: 20, gap: 12 },
+  upgradeLeft:   { flex: 1 },
+  upgradeTitle:  { fontSize: 16, fontWeight: '800', color: '#fff', marginBottom: 3 },
+  upgradeDesc:   { fontSize: 13, color: 'rgba(255,255,255,0.75)', lineHeight: 18 },
+  upgradeArrow:  { width: 36, height: 36, borderRadius: 18, backgroundColor: 'rgba(255,255,255,0.2)', justifyContent: 'center', alignItems: 'center' },
+
+  // Sections
+  sectionRow:    { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12, marginTop: 4 },
+  sectionTitle:  { fontSize: 16, fontWeight: '700', color: '#F8FAFC' },
+  sectionDate:   { fontSize: 12, color: '#475569', fontWeight: '500' },
+  seeAll:        { fontSize: 13, color: '#10B981', fontWeight: '600' },
+
+  // Stats
+  statsRow:      { flexDirection: 'row', marginBottom: 16, marginHorizontal: -4 },
+
+  // Empty state
+  emptyCard:     { backgroundColor: '#1E293B', borderRadius: 18, padding: 28, alignItems: 'center', borderWidth: 1, borderColor: '#334155', marginBottom: 20 },
+  emptyIconWrap: { width: 56, height: 56, borderRadius: 16, backgroundColor: '#0F172A', justifyContent: 'center', alignItems: 'center', marginBottom: 12 },
+  emptyTitle:    { fontSize: 16, fontWeight: '700', color: '#F8FAFC', marginBottom: 4 },
+  emptyDesc:     { fontSize: 13, color: '#475569', marginBottom: 18, textAlign: 'center' },
+  emptyBtn:      { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: '#10B981', paddingVertical: 10, paddingHorizontal: 20, borderRadius: 12 },
+  emptyBtnText:  { color: '#fff', fontWeight: '700', fontSize: 14 },
+
+  // Appointments
+  apptList:      { gap: 8, marginBottom: 20 },
+  apptCard:      { backgroundColor: '#1E293B', borderRadius: 14, flexDirection: 'row', alignItems: 'center', overflow: 'hidden', borderWidth: 1, borderColor: '#334155' },
+  apptAccent:    { width: 3, alignSelf: 'stretch' },
+  apptTimeWrap:  { paddingHorizontal: 14, paddingVertical: 16, minWidth: 64, alignItems: 'center' },
+  apptTime:      { fontSize: 14, fontWeight: '700', color: '#F8FAFC' },
+  apptBody:      { flex: 1, paddingVertical: 14 },
+  apptClient:    { fontSize: 15, fontWeight: '600', color: '#F8FAFC' },
+  apptService:   { fontSize: 12, color: '#64748B', marginTop: 2 },
+  apptBadge:     { marginRight: 8, paddingHorizontal: 9, paddingVertical: 4, borderRadius: 8 },
   apptBadgeText: { fontSize: 11, fontWeight: '700' },
-  actionsGrid: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between' },
-  waBanner: { backgroundColor: '#fff', borderRadius: 16, padding: 14, flexDirection: 'row', alignItems: 'center', gap: 12, borderWidth: 1, borderColor: '#D1FAE5', shadowColor: '#000', shadowOpacity: 0.04, shadowRadius: 6, elevation: 1 },
-  waIconBox: { width: 40, height: 40, borderRadius: 12, backgroundColor: '#F0FDF4', justifyContent: 'center', alignItems: 'center' },
-  waInfo: { flex: 1 },
-  waTitle: { fontSize: 14, fontWeight: '600', color: '#0F172A' },
-  waDesc: { fontSize: 12, color: '#64748B', marginTop: 2 },
-  waArrow: { width: 28, height: 28, borderRadius: 8, backgroundColor: '#F0FDF4', justifyContent: 'center', alignItems: 'center' },
+
+  // Quick actions
+  actionsGrid:   { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between', marginBottom: 20 },
+
+  // WhatsApp banner
+  waBanner:      { backgroundColor: '#1E293B', borderRadius: 16, padding: 14, flexDirection: 'row', alignItems: 'center', gap: 12, borderWidth: 1, borderColor: '#166534' },
+  waIconBox:     { width: 40, height: 40, borderRadius: 12, backgroundColor: '#052E16', justifyContent: 'center', alignItems: 'center' },
+  waTitle:       { fontSize: 14, fontWeight: '600', color: '#F8FAFC', marginBottom: 2 },
+  waDesc:        { fontSize: 12, color: '#475569' },
 });
