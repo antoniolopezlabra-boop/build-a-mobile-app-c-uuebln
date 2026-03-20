@@ -6,10 +6,10 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { colors } from '@/styles/commonStyles';
-import { IconSymbol } from '@/components/IconSymbol';
 import { ConfirmModal } from '@/components/button';
 import { getCached, setCached, CACHE_TTL } from '@/utils/cache';
 import { apiGet } from '@/utils/api';
+import { useTheme } from '@/contexts/ThemeContext';
 import MaterialIcons from '@expo/vector-icons/MaterialIcons';
 
 interface Client {
@@ -38,7 +38,21 @@ const AVATAR_COLORS = [
   { bg: '#FDF4FF', fg: '#86198F' },
 ];
 
-const getAvatarColor = (name: string) => AVATAR_COLORS[(name.charCodeAt(0) || 0) % AVATAR_COLORS.length];
+const AVATAR_COLORS_DARK = [
+  { bg: '#052E16', fg: '#6EE7B7' },
+  { bg: '#1E1B4B', fg: '#A5B4FC' },
+  { bg: '#431407', fg: '#FED7AA' },
+  { bg: '#450A0A', fg: '#FCA5A5' },
+  { bg: '#052E16', fg: '#86EFAC' },
+  { bg: '#2E1065', fg: '#DDD6FE' },
+  { bg: '#083344', fg: '#67E8F9' },
+  { bg: '#3B0764', fg: '#E879F9' },
+];
+
+const getAvatarColor = (name: string, dark: boolean) => {
+  const arr = dark ? AVATAR_COLORS_DARK : AVATAR_COLORS;
+  return arr[(name.charCodeAt(0) || 0) % arr.length];
+};
 
 const getInitials = (name: string) => {
   const parts = name.trim().split(' ');
@@ -59,25 +73,22 @@ const formatLastVisit = (lastVisit: string | null | undefined) => {
 
 export default function ClientsScreen() {
   const router = useRouter();
+  const { colors: tc, isDark } = useTheme();
+
   const [loading, setLoading] = useState(true);
-  const [allClients, setAllClients] = useState<Client[]>([]); // todos los clientes sin filtrar
+  const [allClients, setAllClients] = useState<Client[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
   const [filter, setFilter] = useState<FilterType>('Todos');
   const [errorModal, setErrorModal] = useState({ visible: false, message: '' });
 
-  // FIX: un único useEffect con debounce — elimina la condición de carrera
   useEffect(() => {
-    const timer = setTimeout(() => {
-      loadClients();
-    }, searchQuery ? 300 : 0); // inmediato en mount, debounced en búsqueda
+    const timer = setTimeout(() => { loadClients(); }, searchQuery ? 300 : 0);
     return () => clearTimeout(timer);
   }, [searchQuery]);
 
   const loadClients = async () => {
     setLoading(true);
     try {
-      // FIX: siempre cargar todos del backend y filtrar localmente
-      // No enviar el param search que el backend ignoraba, hacerlo todo en cliente
       const cached = getCached<Client[]>('clients_list');
       if (cached && !searchQuery) {
         setAllClients(cached);
@@ -87,14 +98,13 @@ export default function ClientsScreen() {
       const data = await apiGet<Client[]>('/api/clients');
       setAllClients(data);
       setCached('clients_list', data, CACHE_TTL.CLIENTS);
-    } catch (error) {
+    } catch {
       setErrorModal({ visible: true, message: 'Error al cargar los clientes' });
     } finally {
       setLoading(false);
     }
   };
 
-  // Filtrado 100% local — instantáneo, sin llamadas extra al backend
   const filteredClients = allClients.filter((c) => {
     const matchesSearch = !searchQuery ||
       c.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
@@ -112,14 +122,14 @@ export default function ClientsScreen() {
 
   if (loading && allClients.length === 0) {
     return (
-      <SafeAreaView style={s.container}>
+      <SafeAreaView style={[s.container, { backgroundColor: tc.bg }]}>
         <View style={s.loading}><ActivityIndicator size="large" color={colors.primary} /></View>
       </SafeAreaView>
     );
   }
 
   return (
-    <SafeAreaView style={s.container}>
+    <SafeAreaView style={[s.container, { backgroundColor: tc.bg }]}>
       <ConfirmModal
         visible={errorModal.visible}
         title="Error"
@@ -128,44 +138,55 @@ export default function ClientsScreen() {
         onDismiss={() => setErrorModal({ visible: false, message: '' })}
       />
 
-      <View style={s.header}>
+      {/* Header */}
+      <View style={[s.header, { backgroundColor: tc.surface, borderBottomColor: tc.border }]}>
         <View style={s.headerTop}>
           <View>
-            <Text style={s.title}>Clientes</Text>
-            <Text style={s.subtitle}>{allClients.length} registrados</Text>
+            <Text style={[s.title, { color: tc.text }]}>Clientes</Text>
+            <Text style={[s.subtitle, { color: tc.textMuted }]}>{allClients.length} registrados</Text>
           </View>
           <View style={s.headerStats}>
             <View style={s.headerStat}>
               <Text style={s.headerStatNum}>{activeCount}</Text>
-              <Text style={s.headerStatLabel}>Activos</Text>
+              <Text style={[s.headerStatLabel, { color: tc.textMuted }]}>Activos</Text>
             </View>
-            <View style={[s.headerStat, { borderLeftWidth: 1, borderLeftColor: '#E2E8F0', paddingLeft: 12 }]}>
-              <Text style={[s.headerStatNum, { color: '#94A3B8' }]}>{inactiveCount}</Text>
-              <Text style={s.headerStatLabel}>Inactivos</Text>
+            <View style={[s.headerStat, { borderLeftWidth: 1, borderLeftColor: tc.border, paddingLeft: 12 }]}>
+              <Text style={[s.headerStatNum, { color: tc.textMuted }]}>{inactiveCount}</Text>
+              <Text style={[s.headerStatLabel, { color: tc.textMuted }]}>Inactivos</Text>
             </View>
           </View>
         </View>
 
-        <View style={s.searchBox}>
-          <MaterialIcons name="search" size={20} color="#94A3B8" />
+        {/* Búsqueda */}
+        <View style={[s.searchBox, { backgroundColor: tc.inputBg, borderColor: tc.inputBorder }]}>
+          <MaterialIcons name="search" size={20} color={tc.textMuted} />
           <TextInput
-            style={s.searchInput}
+            style={[s.searchInput, { color: tc.text }]}
             value={searchQuery}
             onChangeText={setSearchQuery}
             placeholder="Buscar por nombre, teléfono o email..."
-            placeholderTextColor="#CBD5E1"
+            placeholderTextColor={tc.textMuted}
           />
           {searchQuery ? (
             <TouchableOpacity onPress={() => setSearchQuery('')}>
-              <MaterialIcons name="close" size={18} color="#94A3B8" />
+              <MaterialIcons name="close" size={18} color={tc.textMuted} />
             </TouchableOpacity>
           ) : null}
         </View>
 
+        {/* Filtros */}
         <View style={s.filters}>
           {(['Todos', 'Activos', 'Inactivos'] as FilterType[]).map((f) => (
-            <TouchableOpacity key={f} style={[s.filterBtn, filter === f && s.filterBtnActive]} onPress={() => setFilter(f)}>
-              <Text style={[s.filterText, filter === f && s.filterTextActive]}>{f}</Text>
+            <TouchableOpacity
+              key={f}
+              style={[
+                s.filterBtn,
+                { backgroundColor: tc.inputBg, borderColor: tc.border },
+                filter === f && s.filterBtnActive,
+              ]}
+              onPress={() => setFilter(f)}
+            >
+              <Text style={[s.filterText, { color: tc.textMuted }, filter === f && s.filterTextActive]}>{f}</Text>
             </TouchableOpacity>
           ))}
         </View>
@@ -174,60 +195,76 @@ export default function ClientsScreen() {
       <ScrollView contentContainerStyle={s.scroll}>
         {filteredClients.length === 0 ? (
           <View style={s.empty}>
-            <MaterialIcons name="group" size={52} color="#CBD5E1" />
-            <Text style={s.emptyTitle}>
+            <View style={[s.emptyIconWrap, { backgroundColor: tc.surface }]}>
+              <MaterialIcons name="group" size={36} color={tc.border} />
+            </View>
+            <Text style={[s.emptyTitle, { color: tc.text }]}>
               {searchQuery ? 'Sin resultados' : filter === 'Inactivos' ? 'Sin clientes inactivos' : 'Sin clientes aún'}
             </Text>
-            <Text style={s.emptyDesc}>
+            <Text style={[s.emptyDesc, { color: tc.textMuted }]}>
               {searchQuery ? 'Intenta con otro término' : 'Agrega tu primer cliente'}
             </Text>
             {!searchQuery && (
               <TouchableOpacity style={s.emptyBtn} onPress={() => router.push('/clients/new')}>
-                <Text style={s.emptyBtnText}>+ Nuevo cliente</Text>
+                <MaterialIcons name="person-add-alt" size={16} color="#fff" />
+                <Text style={s.emptyBtnText}>Nuevo cliente</Text>
               </TouchableOpacity>
             )}
           </View>
         ) : (
           <>
             {filter === 'Inactivos' && (
-              <TouchableOpacity style={s.inactiveBanner} onPress={() => router.push('/clients/inactive')}>
-                <View style={s.inactiveBannerIcon}><MaterialIcons name="warning" size={20} color="#F59E0B" /></View>
+              <TouchableOpacity
+                style={[s.inactiveBanner, { backgroundColor: isDark ? '#431407' : '#FFFBEB', borderColor: isDark ? '#92400E' : '#FDE68A' }]}
+                onPress={() => router.push('/clients/inactive')}
+              >
+                <View style={[s.inactiveBannerIcon, { backgroundColor: isDark ? '#7C2D12' : '#FEF3C7' }]}>
+                  <MaterialIcons name="warning" size={20} color="#F59E0B" />
+                </View>
                 <View style={{ flex: 1 }}>
-                  <Text style={s.inactiveBannerTitle}>Clientes sin visita reciente</Text>
-                  <Text style={s.inactiveBannerDesc}>Ver campaña de reactivación →</Text>
+                  <Text style={[s.inactiveBannerTitle, { color: isDark ? '#FED7AA' : '#92400E' }]}>Clientes sin visita reciente</Text>
+                  <Text style={[s.inactiveBannerDesc, { color: isDark ? '#FB923C' : '#B45309' }]}>Ver campaña de reactivación →</Text>
                 </View>
               </TouchableOpacity>
             )}
+
             {filteredClients.map((client) => {
-              const avatarColor = getAvatarColor(client.name);
+              const avatarColor = getAvatarColor(client.name, isDark);
               const initials = getInitials(client.name);
               const lastVisit = formatLastVisit(client.lastVisit);
               const isActive = client.isActive !== false;
               return (
-                <TouchableOpacity key={client.id} style={s.clientCard} onPress={() => router.push(`/clients/${client.id}`)} activeOpacity={0.75}>
+                <TouchableOpacity
+                  key={client.id}
+                  style={[s.clientCard, { backgroundColor: tc.surface, borderColor: tc.border }]}
+                  onPress={() => router.push(`/clients/${client.id}`)}
+                  activeOpacity={0.75}
+                >
                   <View style={[s.avatar, { backgroundColor: avatarColor.bg }]}>
                     <Text style={[s.avatarText, { color: avatarColor.fg }]}>{initials}</Text>
                   </View>
                   <View style={s.clientInfo}>
                     <View style={s.clientNameRow}>
-                      <Text style={s.clientName}>{client.name}</Text>
-                      <View style={[s.activeDot, { backgroundColor: isActive ? '#10B981' : '#CBD5E1' }]} />
+                      <Text style={[s.clientName, { color: tc.text }]} numberOfLines={1}>{client.name}</Text>
+                      <View style={[s.activeDot, { backgroundColor: isActive ? '#10B981' : tc.border }]} />
                     </View>
-                    <Text style={s.clientPhone}>{client.phone}</Text>
+                    <Text style={[s.clientPhone, { color: tc.textMuted }]}>{client.phone}</Text>
                     <View style={s.clientMeta}>
                       {lastVisit && (
                         <View style={s.metaChip}>
-                          <MaterialIcons name="access-time" size={11} color="#94A3B8" />
-                          <Text style={s.metaText}>{lastVisit}</Text>
+                          <MaterialIcons name="access-time" size={11} color={tc.textMuted} />
+                          <Text style={[s.metaText, { color: tc.textMuted }]}>{lastVisit}</Text>
                         </View>
                       )}
                       <View style={s.metaChip}>
-                        <MaterialIcons name="event" size={11} color="#94A3B8" />
-                        <Text style={s.metaText}>{client.totalVisits} {client.totalVisits === 1 ? 'cita' : 'citas'}</Text>
+                        <MaterialIcons name="event" size={11} color={tc.textMuted} />
+                        <Text style={[s.metaText, { color: tc.textMuted }]}>
+                          {client.totalVisits} {client.totalVisits === 1 ? 'cita' : 'citas'}
+                        </Text>
                       </View>
                     </View>
                   </View>
-                  <MaterialIcons name="chevron-right" size={20} color="#CBD5E1" />
+                  <MaterialIcons name="chevron-right" size={20} color={tc.border} />
                 </TouchableOpacity>
               );
             })}
@@ -243,43 +280,44 @@ export default function ClientsScreen() {
 }
 
 const s = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#F8FAFC' },
-  loading: { flex: 1, justifyContent: 'center', alignItems: 'center' },
-  header: { backgroundColor: '#fff', paddingHorizontal: 20, paddingTop: 16, paddingBottom: 12, borderBottomWidth: 0.5, borderBottomColor: '#E2E8F0' },
-  headerTop: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 14 },
-  title: { fontSize: 28, fontWeight: '800', color: '#0F172A', letterSpacing: -0.5 },
-  subtitle: { fontSize: 13, color: '#94A3B8', marginTop: 2 },
-  headerStats: { flexDirection: 'row', gap: 12, alignItems: 'center' },
-  headerStat: { alignItems: 'center' },
-  headerStatNum: { fontSize: 20, fontWeight: '800', color: '#10B981' },
-  headerStatLabel: { fontSize: 10, color: '#94A3B8', fontWeight: '500', marginTop: 1 },
-  searchBox: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#F8FAFC', borderRadius: 12, paddingHorizontal: 12, paddingVertical: 10, marginBottom: 12, borderWidth: 0.5, borderColor: '#E2E8F0', gap: 8 },
-  searchInput: { flex: 1, fontSize: 15, color: '#0F172A' },
-  filters: { flexDirection: 'row', gap: 8 },
-  filterBtn: { paddingVertical: 7, paddingHorizontal: 16, borderRadius: 20, backgroundColor: '#F8FAFC', borderWidth: 0.5, borderColor: '#E2E8F0' },
-  filterBtnActive: { backgroundColor: '#10B981', borderColor: '#10B981' },
-  filterText: { fontSize: 13, fontWeight: '600', color: '#94A3B8' },
-  filterTextActive: { color: '#fff' },
-  scroll: { padding: 16, paddingBottom: 100 },
-  empty: { alignItems: 'center', paddingVertical: 60, gap: 8 },
-  emptyTitle: { fontSize: 17, fontWeight: '600', color: '#0F172A' },
-  emptyDesc: { fontSize: 13, color: '#94A3B8' },
-  emptyBtn: { backgroundColor: '#10B981', borderRadius: 12, paddingVertical: 12, paddingHorizontal: 24, marginTop: 8 },
-  emptyBtnText: { color: '#fff', fontSize: 14, fontWeight: '700' },
-  inactiveBanner: { backgroundColor: '#FFFBEB', borderRadius: 14, padding: 14, flexDirection: 'row', alignItems: 'center', gap: 12, marginBottom: 12, borderWidth: 0.5, borderColor: '#FDE68A' },
-  inactiveBannerIcon: { width: 36, height: 36, borderRadius: 10, backgroundColor: '#FEF3C7', justifyContent: 'center', alignItems: 'center' },
-  inactiveBannerTitle: { fontSize: 13, fontWeight: '600', color: '#92400E' },
-  inactiveBannerDesc: { fontSize: 12, color: '#B45309', marginTop: 2 },
-  clientCard: { backgroundColor: '#fff', borderRadius: 14, padding: 14, flexDirection: 'row', alignItems: 'center', marginBottom: 8, gap: 12, shadowColor: '#000', shadowOpacity: 0.04, shadowRadius: 6, elevation: 1 },
-  avatar: { width: 46, height: 46, borderRadius: 14, justifyContent: 'center', alignItems: 'center' },
-  avatarText: { fontSize: 16, fontWeight: '800' },
-  clientInfo: { flex: 1, gap: 2 },
-  clientNameRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  clientName: { fontSize: 15, fontWeight: '700', color: '#0F172A' },
-  activeDot: { width: 8, height: 8, borderRadius: 4 },
-  clientPhone: { fontSize: 13, color: '#94A3B8' },
-  clientMeta: { flexDirection: 'row', gap: 10, marginTop: 4 },
-  metaChip: { flexDirection: 'row', alignItems: 'center', gap: 3 },
-  metaText: { fontSize: 11, color: '#94A3B8', fontWeight: '500' },
-  fab: { position: 'absolute', right: 20, bottom: 100, width: 56, height: 56, borderRadius: 28, backgroundColor: colors.primary, justifyContent: 'center', alignItems: 'center', elevation: 6, shadowColor: '#000', shadowOpacity: 0.2, shadowRadius: 8 },
+  container:          { flex: 1 },
+  loading:            { flex: 1, justifyContent: 'center', alignItems: 'center' },
+  header:             { paddingHorizontal: 20, paddingTop: 16, paddingBottom: 12, borderBottomWidth: 0.5 },
+  headerTop:          { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 14 },
+  title:              { fontSize: 28, fontWeight: '800', letterSpacing: -0.5 },
+  subtitle:           { fontSize: 13, marginTop: 2 },
+  headerStats:        { flexDirection: 'row', gap: 12, alignItems: 'center' },
+  headerStat:         { alignItems: 'center' },
+  headerStatNum:      { fontSize: 20, fontWeight: '800', color: '#10B981' },
+  headerStatLabel:    { fontSize: 10, fontWeight: '500', marginTop: 1 },
+  searchBox:          { flexDirection: 'row', alignItems: 'center', borderRadius: 12, paddingHorizontal: 12, paddingVertical: 10, marginBottom: 12, borderWidth: 0.5, gap: 8 },
+  searchInput:        { flex: 1, fontSize: 15 },
+  filters:            { flexDirection: 'row', gap: 8 },
+  filterBtn:          { paddingVertical: 7, paddingHorizontal: 16, borderRadius: 20, borderWidth: 0.5 },
+  filterBtnActive:    { backgroundColor: '#10B981', borderColor: '#10B981' },
+  filterText:         { fontSize: 13, fontWeight: '600' },
+  filterTextActive:   { color: '#fff' },
+  scroll:             { padding: 16, paddingBottom: 100 },
+  empty:              { alignItems: 'center', paddingVertical: 60, gap: 10 },
+  emptyIconWrap:      { width: 72, height: 72, borderRadius: 20, justifyContent: 'center', alignItems: 'center' },
+  emptyTitle:         { fontSize: 17, fontWeight: '600' },
+  emptyDesc:          { fontSize: 13 },
+  emptyBtn:           { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: '#10B981', borderRadius: 12, paddingVertical: 12, paddingHorizontal: 24, marginTop: 4 },
+  emptyBtnText:       { color: '#fff', fontSize: 14, fontWeight: '700' },
+  inactiveBanner:     { borderRadius: 14, padding: 14, flexDirection: 'row', alignItems: 'center', gap: 12, marginBottom: 12, borderWidth: 0.5 },
+  inactiveBannerIcon: { width: 36, height: 36, borderRadius: 10, justifyContent: 'center', alignItems: 'center' },
+  inactiveBannerTitle:{ fontSize: 13, fontWeight: '600' },
+  inactiveBannerDesc: { fontSize: 12, marginTop: 2 },
+  clientCard:         { borderRadius: 14, padding: 14, flexDirection: 'row', alignItems: 'center', marginBottom: 8, gap: 12, borderWidth: 1 },
+  avatar:             { width: 46, height: 46, borderRadius: 14, justifyContent: 'center', alignItems: 'center' },
+  avatarText:         { fontSize: 16, fontWeight: '800' },
+  clientInfo:         { flex: 1, gap: 2 },
+  clientNameRow:      { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  clientName:         { fontSize: 15, fontWeight: '700', flex: 1 },
+  activeDot:          { width: 8, height: 8, borderRadius: 4 },
+  clientPhone:        { fontSize: 13 },
+  clientMeta:         { flexDirection: 'row', gap: 10, marginTop: 4 },
+  metaChip:           { flexDirection: 'row', alignItems: 'center', gap: 3 },
+  metaText:           { fontSize: 11, fontWeight: '500' },
+  fab:                { position: 'absolute', right: 20, bottom: 100, width: 56, height: 56, borderRadius: 28, backgroundColor: colors.primary, justifyContent: 'center', alignItems: 'center', elevation: 6, shadowColor: '#000', shadowOpacity: 0.2, shadowRadius: 8 },
 });
