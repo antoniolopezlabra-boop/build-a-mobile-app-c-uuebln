@@ -12,7 +12,9 @@ import { IconSymbol } from '@/components/IconSymbol';
 import { ConfirmModal } from '@/components/button';
 import { getCached, setCached } from '@/utils/cache';
 import { useAuth } from '@/contexts/AuthContext';
+import { useTheme, ThemeMode } from '@/contexts/ThemeContext';
 import { apiGet } from '@/utils/api';
+import MaterialIcons from '@expo/vector-icons/MaterialIcons';
 
 interface WhatsAppConfig { isConnected: boolean; phoneNumber?: string; }
 interface Subscription { planType: 'Basico' | 'Premium' | 'Gratuito'; price: string; }
@@ -24,43 +26,49 @@ function SettingRow({
   label: string; sublabel?: string; badge?: React.ReactNode;
   right?: React.ReactNode; onPress?: () => void; danger?: boolean;
 }) {
+  const { colors: tc } = useTheme();
   return (
-    <TouchableOpacity style={row.container} onPress={onPress} activeOpacity={onPress ? 0.7 : 1} disabled={!onPress}>
+    <TouchableOpacity
+      style={[row.container, { backgroundColor: tc.surface }]}
+      onPress={onPress}
+      activeOpacity={onPress ? 0.7 : 1}
+      disabled={!onPress}
+    >
       <View style={[row.iconBox, { backgroundColor: iconBg }]}>
         <IconSymbol android_material_icon_name={iconName as any} size={20} color={iconColor} />
       </View>
       <View style={row.textBox}>
         <View style={row.labelRow}>
-          <Text style={[row.label, danger && row.labelDanger]}>{label}</Text>
+          <Text style={[row.label, { color: danger ? '#EF4444' : tc.text }]}>{label}</Text>
           {badge}
         </View>
-        {sublabel ? <Text style={row.sublabel}>{sublabel}</Text> : null}
+        {sublabel ? <Text style={[row.sublabel, { color: tc.textMuted }]}>{sublabel}</Text> : null}
       </View>
-      {right !== undefined ? right : (onPress ? <IconSymbol android_material_icon_name="arrow-forward-ios" size={16} color="#CBD5E1" /> : null)}
+      {right !== undefined ? right : (onPress ? <IconSymbol android_material_icon_name="arrow-forward-ios" size={16} color={tc.border} /> : null)}
     </TouchableOpacity>
   );
 }
 
 const row = StyleSheet.create({
-  container: { flexDirection: 'row', alignItems: 'center', paddingVertical: 13, paddingHorizontal: 16, backgroundColor: '#fff', gap: 14 },
+  container: { flexDirection: 'row', alignItems: 'center', paddingVertical: 13, paddingHorizontal: 16, gap: 14 },
   iconBox: { width: 36, height: 36, borderRadius: 10, justifyContent: 'center', alignItems: 'center' },
   textBox: { flex: 1 },
   labelRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  label: { fontSize: 15, fontWeight: '500', color: '#0F172A' },
-  labelDanger: { color: '#EF4444' },
-  sublabel: { fontSize: 12, color: '#94A3B8', marginTop: 2 },
+  label: { fontSize: 15, fontWeight: '500' },
+  sublabel: { fontSize: 12, marginTop: 2 },
 });
 
 function SettingGroup({ title, children }: { title: string; children: React.ReactNode }) {
+  const { colors: tc } = useTheme();
   const items = React.Children.toArray(children);
   return (
     <View style={grp.wrapper}>
-      <Text style={grp.title}>{title}</Text>
-      <View style={grp.card}>
+      <Text style={[grp.title, { color: tc.textMuted }]}>{title}</Text>
+      <View style={[grp.card, { backgroundColor: tc.surface, shadowColor: tc.shadow }]}>
         {items.map((child, i) => (
           <React.Fragment key={i}>
             {child}
-            {i < items.length - 1 && <View style={grp.divider} />}
+            {i < items.length - 1 && <View style={[grp.divider, { backgroundColor: tc.border }]} />}
           </React.Fragment>
         ))}
       </View>
@@ -69,16 +77,18 @@ function SettingGroup({ title, children }: { title: string; children: React.Reac
 }
 
 const grp = StyleSheet.create({
-  wrapper: { marginBottom: 28 },
-  title: { fontSize: 11, fontWeight: '800', color: '#94A3B8', letterSpacing: 1.2, marginBottom: 8, paddingHorizontal: 4 },
-  card: { backgroundColor: '#fff', borderRadius: 16, overflow: 'hidden', shadowColor: '#000', shadowOpacity: 0.05, shadowRadius: 8, elevation: 2 },
-  divider: { height: 1, backgroundColor: '#F1F5F9', marginLeft: 66 },
+  wrapper: { marginBottom: 24 },
+  title: { fontSize: 11, fontWeight: '800', letterSpacing: 1.2, marginBottom: 8, paddingHorizontal: 4 },
+  card: { borderRadius: 16, overflow: 'hidden', shadowOpacity: 0.05, shadowRadius: 8, elevation: 2 },
+  divider: { height: 1, marginLeft: 66 },
 });
 
 export default function SettingsScreen() {
   const router = useRouter();
   const { user, businessProfile, signOut } = useAuth();
   const { canOverlap, isPremium, isBasico, isGratuito, canUseBookingLink } = usePlan();
+  const { colors: tc, mode, setMode, isDark } = useTheme();
+
   const [logoutModal, setLogoutModal] = useState(false);
   const [deleteModal, setDeleteModal] = useState(false);
   const [deleting, setDeleting] = useState(false);
@@ -114,14 +124,12 @@ export default function SettingsScreen() {
         setAllowOverlapping(bpData.allow_overlapping || false);
         setBirthdayEnabled(bpData.birthday_reminders_enabled || false);
       }
-      // Cargar estado del booking link
       const { data: blData } = await supabase
         .from('booking_links')
         .select('is_active')
         .eq('user_id', user?.id)
         .single();
       if (blData) setBookingLinkActive(blData.is_active || false);
-
       if (subscriptionData) setCached('settings_subscription', subscriptionData);
       setWhatsappConfig(whatsappData); setSubscription(subscriptionData);
     } catch (error) {
@@ -165,14 +173,14 @@ export default function SettingsScreen() {
 
   if (loading) {
     return (
-      <SafeAreaView style={s.container}>
+      <SafeAreaView style={[s.container, { backgroundColor: tc.bg }]}>
         <View style={s.loading}><ActivityIndicator size="large" color={colors.primary} /></View>
       </SafeAreaView>
     );
   }
 
   return (
-    <SafeAreaView style={s.container}>
+    <SafeAreaView style={[s.container, { backgroundColor: tc.bg }]}>
       <ConfirmModal visible={logoutModal} title="Cerrar sesión" message="¿Estás seguro de que deseas cerrar sesión?"
         buttons={[{ text: 'Cerrar sesión', onPress: handleLogout, style: 'destructive' }, { text: 'Cancelar', onPress: () => setLogoutModal(false), style: 'cancel' }]}
         onDismiss={() => setLogoutModal(false)} />
@@ -180,37 +188,54 @@ export default function SettingsScreen() {
         buttons={[{ text: 'Cancelar', onPress: () => setDeleteModal(false), style: 'cancel' }, { text: deleting ? 'Eliminando...' : 'Sí, eliminar todo', onPress: () => { setDeleteModal(false); handleDeleteAccount(); }, style: 'destructive' }]}
         onDismiss={() => setDeleteModal(false)} />
 
-      <View style={s.header}><Text style={s.headerTitle}>Ajustes</Text></View>
+      <View style={[s.header, { backgroundColor: tc.bg }]}>
+        <Text style={[s.headerTitle, { color: tc.text }]}>Ajustes</Text>
+      </View>
 
       <ScrollView contentContainerStyle={s.scroll} showsVerticalScrollIndicator={false}>
 
-        <TouchableOpacity style={s.heroCard} onPress={() => router.push('/settings/profile')} activeOpacity={0.85}>
+        {/* Perfil hero */}
+        <TouchableOpacity
+          style={[s.heroCard, { backgroundColor: tc.surface, shadowColor: tc.shadow }]}
+          onPress={() => router.push('/settings/profile')}
+          activeOpacity={0.85}
+        >
           <View style={s.heroAvatarWrap}>
             {businessProfile?.logoUrl
               ? <Image source={{ uri: businessProfile.logoUrl }} style={s.heroAvatar} />
               : <View style={[s.heroAvatar, s.heroAvatarFallback]}><Text style={s.heroAvatarText}>{initials}</Text></View>
             }
-            <View style={s.heroOnline} />
+            <View style={[s.heroOnline, { borderColor: tc.surface }]} />
           </View>
           <View style={s.heroInfo}>
-            <Text style={s.heroName}>{user?.name || 'Usuario'}</Text>
-            <Text style={s.heroEmail}>{user?.email}</Text>
-            {businessProfile?.businessName ? <Text style={s.heroBusiness}>🏢 {businessProfile.businessName}</Text> : null}
+            <Text style={[s.heroName, { color: tc.text }]}>{user?.name || 'Usuario'}</Text>
+            <Text style={[s.heroEmail, { color: tc.textMuted }]}>{user?.email}</Text>
+            {businessProfile?.businessName
+              ? <Text style={s.heroBusiness}>{businessProfile.businessName}</Text>
+              : null
+            }
           </View>
-          <IconSymbol android_material_icon_name="arrow-forward-ios" size={16} color="#CBD5E1" />
+          <MaterialIcons name="arrow-forward-ios" size={16} color={tc.border} />
         </TouchableOpacity>
 
-        <TouchableOpacity style={[s.planCard, { borderColor: planColor }]} onPress={() => router.push('/settings/subscription')} activeOpacity={0.85}>
+        {/* Plan card */}
+        <TouchableOpacity
+          style={[s.planCard, { backgroundColor: tc.surface, borderColor: planColor, shadowColor: tc.shadow }]}
+          onPress={() => router.push('/settings/subscription')}
+          activeOpacity={0.85}
+        >
           <View style={[s.planIconBox, { backgroundColor: planBg }]}><Text style={s.planEmoji}>{planEmoji}</Text></View>
           <View style={s.planInfo}>
             <View style={s.planRow}>
-              <Text style={s.planName}>Plan {planDisplay}</Text>
-              <View style={[s.planBadge, { backgroundColor: planBg }]}><Text style={[s.planBadgeText, { color: planColor }]}>{planDisplay.toUpperCase()}</Text></View>
+              <Text style={[s.planName, { color: tc.text }]}>Plan {planDisplay}</Text>
+              <View style={[s.planBadge, { backgroundColor: planBg }]}>
+                <Text style={[s.planBadgeText, { color: planColor }]}>{planDisplay.toUpperCase()}</Text>
+              </View>
             </View>
-            <Text style={s.planPrice}>{planPrice}</Text>
+            <Text style={[s.planPrice, { color: tc.textMuted }]}>{planPrice}</Text>
             {!isPremium && <Text style={s.planUpgrade}>{isGratuito ? 'Activa WhatsApp y reportes →' : 'Obtén tu número propio →'}</Text>}
           </View>
-          <IconSymbol android_material_icon_name="arrow-forward-ios" size={16} color={planColor} />
+          <MaterialIcons name="arrow-forward-ios" size={16} color={planColor} />
         </TouchableOpacity>
 
         <SettingGroup title="MI NEGOCIO">
@@ -256,7 +281,7 @@ export default function SettingsScreen() {
             right={
               <View style={s.statusRight}>
                 {birthdayEnabled && <View style={[s.statusDot, { backgroundColor: '#EC4899' }]} />}
-                <IconSymbol android_material_icon_name="arrow-forward-ios" size={16} color="#CBD5E1" />
+                <MaterialIcons name="arrow-forward-ios" size={16} color={tc.border} />
               </View>
             }
             onPress={() => router.push('/settings/birthday')}
@@ -285,6 +310,45 @@ export default function SettingsScreen() {
           />
         </SettingGroup>
 
+        {/* ── APARIENCIA ── */}
+        <SettingGroup title="APARIENCIA">
+          <View style={[row.container, { backgroundColor: tc.surface }]}>
+            <View style={[row.iconBox, { backgroundColor: isDark ? '#1E3A5F' : '#EFF6FF' }]}>
+              <MaterialIcons name={isDark ? 'dark-mode' : 'light-mode'} size={20} color={isDark ? '#60A5FA' : '#F59E0B'} />
+            </View>
+            <View style={row.textBox}>
+              <Text style={[row.label, { color: tc.text }]}>Tema de la app</Text>
+              <Text style={[row.sublabel, { color: tc.textMuted }]}>
+                {isDark ? 'Modo oscuro activado' : 'Modo claro activado'}
+              </Text>
+            </View>
+            {/* Selector de modo: 3 opciones */}
+            <View style={s.themeToggleWrap}>
+              {(['light', 'dark'] as ThemeMode[]).map((m) => (
+                <TouchableOpacity
+                  key={m}
+                  style={[
+                    s.themeOption,
+                    { borderColor: tc.border, backgroundColor: tc.bg },
+                    mode === m && s.themeOptionActive,
+                  ]}
+                  onPress={() => setMode(m)}
+                  activeOpacity={0.75}
+                >
+                  <MaterialIcons
+                    name={m === 'light' ? 'light-mode' : 'dark-mode'}
+                    size={18}
+                    color={mode === m ? '#fff' : tc.textMuted}
+                  />
+                  <Text style={[s.themeOptionText, mode === m && { color: '#fff' }]}>
+                    {m === 'light' ? 'Claro' : 'Oscuro'}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+          </View>
+        </SettingGroup>
+
         <SettingGroup title="CUENTA">
           <SettingRow iconName="person" iconColor="#6366F1" iconBg="#EEF2FF" label="Editar perfil" onPress={() => router.push('/settings/profile')} />
           <SettingRow iconName="lock" iconColor="#8B5CF6" iconBg="#F5F3FF" label="Cambiar contraseña" onPress={() => router.push('/settings/password')} />
@@ -297,9 +361,9 @@ export default function SettingsScreen() {
         </SettingGroup>
 
         <View style={s.footer}>
-          <Text style={s.footerBrand}>VYLTA</Text>
-          <Text style={s.footerTagline}>Cada cliente regresa</Text>
-          <Text style={s.footerVersion}>v1.0.0</Text>
+          <Text style={[s.footerBrand, { color: tc.border }]}>VYLTA</Text>
+          <Text style={[s.footerTagline, { color: tc.border }]}>Cada cliente regresa</Text>
+          <Text style={[s.footerVersion, { color: tc.border }]}>v1.0.0</Text>
         </View>
       </ScrollView>
     </SafeAreaView>
@@ -307,42 +371,54 @@ export default function SettingsScreen() {
 }
 
 const s = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#F8FAFC' },
+  container: { flex: 1 },
   loading: { flex: 1, justifyContent: 'center', alignItems: 'center' },
-  header: { paddingHorizontal: 20, paddingTop: 12, paddingBottom: 16, backgroundColor: '#F8FAFC' },
-  headerTitle: { fontSize: 32, fontWeight: '800', color: '#0F172A', letterSpacing: -0.5 },
+  header: { paddingHorizontal: 20, paddingTop: 12, paddingBottom: 16 },
+  headerTitle: { fontSize: 32, fontWeight: '800', letterSpacing: -0.5 },
   scroll: { padding: 20, paddingBottom: 100 },
-  heroCard: { backgroundColor: '#fff', borderRadius: 20, padding: 16, flexDirection: 'row', alignItems: 'center', gap: 14, marginBottom: 14, shadowColor: '#000', shadowOpacity: 0.06, shadowRadius: 12, elevation: 3 },
+
+  heroCard: { borderRadius: 20, padding: 16, flexDirection: 'row', alignItems: 'center', gap: 14, marginBottom: 14, shadowOpacity: 0.06, shadowRadius: 12, elevation: 3 },
   heroAvatarWrap: { position: 'relative' },
   heroAvatar: { width: 60, height: 60, borderRadius: 30, borderWidth: 2, borderColor: '#E2E8F0' },
   heroAvatarFallback: { backgroundColor: '#10B981', justifyContent: 'center', alignItems: 'center' },
   heroAvatarText: { fontSize: 22, fontWeight: '800', color: '#fff' },
-  heroOnline: { position: 'absolute', bottom: 1, right: 1, width: 14, height: 14, borderRadius: 7, backgroundColor: '#10B981', borderWidth: 2, borderColor: '#fff' },
+  heroOnline: { position: 'absolute', bottom: 1, right: 1, width: 14, height: 14, borderRadius: 7, backgroundColor: '#10B981', borderWidth: 2 },
   heroInfo: { flex: 1 },
-  heroName: { fontSize: 17, fontWeight: '700', color: '#0F172A' },
-  heroEmail: { fontSize: 12, color: '#94A3B8', marginTop: 2 },
+  heroName: { fontSize: 17, fontWeight: '700' },
+  heroEmail: { fontSize: 12, marginTop: 2 },
   heroBusiness: { fontSize: 12, color: '#10B981', fontWeight: '600', marginTop: 4 },
-  planCard: { backgroundColor: '#fff', borderRadius: 18, padding: 16, flexDirection: 'row', alignItems: 'center', gap: 14, marginBottom: 28, borderWidth: 1.5, shadowColor: '#000', shadowOpacity: 0.05, shadowRadius: 8, elevation: 2 },
+
+  planCard: { borderRadius: 18, padding: 16, flexDirection: 'row', alignItems: 'center', gap: 14, marginBottom: 28, borderWidth: 1.5, shadowOpacity: 0.05, shadowRadius: 8, elevation: 2 },
   planIconBox: { width: 48, height: 48, borderRadius: 14, justifyContent: 'center', alignItems: 'center' },
   planEmoji: { fontSize: 24 },
   planInfo: { flex: 1 },
   planRow: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 2 },
-  planName: { fontSize: 16, fontWeight: '700', color: '#0F172A' },
+  planName: { fontSize: 16, fontWeight: '700' },
   planBadge: { paddingHorizontal: 7, paddingVertical: 2, borderRadius: 6 },
   planBadgeText: { fontSize: 10, fontWeight: '800' },
-  planPrice: { fontSize: 13, color: '#64748B', marginBottom: 2 },
+  planPrice: { fontSize: 13, marginBottom: 2 },
   planUpgrade: { fontSize: 12, color: '#6366F1', fontWeight: '600' },
+
   waBadge: { flexDirection: 'row', alignItems: 'center', gap: 5, paddingHorizontal: 10, paddingVertical: 5, borderRadius: 20 },
   waDot: { width: 7, height: 7, borderRadius: 4 },
   waText: { fontSize: 12, fontWeight: '700' },
+
   premiumChip: { backgroundColor: '#FFFBEB', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 5 },
   premiumChipText: { fontSize: 9, fontWeight: '800', color: '#92400E' },
   basicoChip: { backgroundColor: '#ECFDF5', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 5 },
   basicoChipText: { fontSize: 9, fontWeight: '800', color: '#065F46' },
+
   statusRight: { flexDirection: 'row', alignItems: 'center', gap: 6 },
   statusDot: { width: 8, height: 8, borderRadius: 4 },
+
+  // Selector de tema
+  themeToggleWrap: { flexDirection: 'row', gap: 6 },
+  themeOption: { flexDirection: 'row', alignItems: 'center', gap: 5, paddingHorizontal: 10, paddingVertical: 7, borderRadius: 10, borderWidth: 1 },
+  themeOptionActive: { backgroundColor: '#10B981', borderColor: '#10B981' },
+  themeOptionText: { fontSize: 12, fontWeight: '600', color: '#94A3B8' },
+
   footer: { alignItems: 'center', paddingTop: 8, paddingBottom: 16, gap: 4 },
-  footerBrand: { fontSize: 16, fontWeight: '900', color: '#CBD5E1', letterSpacing: 3 },
-  footerTagline: { fontSize: 12, color: '#CBD5E1', fontStyle: 'italic' },
-  footerVersion: { fontSize: 11, color: '#E2E8F0' },
+  footerBrand: { fontSize: 16, fontWeight: '900', letterSpacing: 3 },
+  footerTagline: { fontSize: 12, fontStyle: 'italic' },
+  footerVersion: { fontSize: 11 },
 });
