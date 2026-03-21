@@ -127,6 +127,59 @@ export async function apiGet<T>(path: string): Promise<T> {
     return (data || []) as T;
   }
 
+  // ── Stats de un cliente específico ──────────────────────────────────────
+  // IMPORTANTE: este handler debe ir ANTES del handler genérico /api/clients/:id
+  const statsMatch = path.match(/^\/api\/clients\/([^/]+)\/stats$/);
+  if (statsMatch) {
+    const clientId = statsMatch[1];
+    const { data: apts, error } = await supabase
+      .from('appointments')
+      .select('id, status, date')
+      .eq('user_id', userId)
+      .eq('client_id', clientId)
+      .order('date', { ascending: false });
+    if (error) throw error;
+
+    const total = apts?.length || 0;
+    const attended = apts?.filter((a: any) =>
+      ['Confirmada', 'Completada', 'Pagado'].includes(a.status)
+    ).length || 0;
+    const noShows = apts?.filter((a: any) => a.status === 'No asistió').length || 0;
+    const attendanceRate = total > 0 ? Math.round((attended / total) * 100) : 0;
+    const lastVisit = apts && apts.length > 0 ? apts[0].date : null;
+
+    return {
+      totalAppointments: total,
+      attendanceRate,
+      lastVisit,
+      noShowCount: noShows,
+    } as T;
+  }
+
+  // ── Historial de citas de un cliente específico ──────────────────────────
+  // IMPORTANTE: este handler debe ir ANTES del handler genérico /api/appointments/:id
+  const clientApptsMatch = path.match(/^\/api\/clients\/([^/]+)\/appointments$/);
+  if (clientApptsMatch) {
+    const clientId = clientApptsMatch[1];
+    const { data, error } = await supabase
+      .from('appointments')
+      .select('id, date, start_time, end_time, service_name, status, notes')
+      .eq('user_id', userId)
+      .eq('client_id', clientId)
+      .order('date', { ascending: false })
+      .order('start_time', { ascending: false });
+    if (error) throw error;
+    return ((data || []).map((a: any) => ({
+      id: a.id,
+      date: a.date,
+      startTime: a.start_time,
+      endTime: a.end_time,
+      service: a.service_name,
+      status: a.status,
+      notes: a.notes,
+    }))) as T;
+  }
+
   if (path.startsWith('/api/appointments/')) {
     const id = path.split('/').pop();
     // FIX: incluir client_name_temp, client_phone_temp y source en el detalle de cita
