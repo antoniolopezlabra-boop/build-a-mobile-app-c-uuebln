@@ -8,6 +8,25 @@ export async function getCurrentUserId(): Promise<string> {
   return user.id;
 }
 
+// Helper: mapear appointment row -> objeto normalizado incluyendo campos del link público
+const mapAppointment = (a: any) => ({
+  id: a.id,
+  clientId: a.client_id,
+  service: a.service_name,
+  date: a.date,
+  time: a.start_time,
+  startTime: a.start_time,
+  endTime: a.end_time,
+  status: a.status,
+  isRescheduled: a.is_rescheduled || false,
+  notes: a.notes,
+  client: a.client,
+  // Campos del link público
+  clientNameTemp: a.client_name_temp || null,
+  clientPhone: a.client_phone_temp || null,
+  source: a.source || null,
+});
+
 export async function apiGet<T>(path: string): Promise<T> {
   const userId = await getCurrentUserId();
 
@@ -18,8 +37,6 @@ export async function apiGet<T>(path: string): Promise<T> {
   }
 
   if (path === '/api/clients') {
-    // FIX: remover filtro is_active — se filtra localmente en la UI
-    // Con el filtro, los clientes inactivos nunca aparecen y inactiveCount siempre es 0
     const { data, error } = await supabase.from('clients').select('*').eq('user_id', userId).order('name');
     if (error) throw error;
     return (data?.map(c => ({ id: c.id, name: c.name, phone: c.phone, email: c.email, birthday: c.birthday, notes: c.notes, isActive: c.is_active, lastVisit: c.last_visit, totalVisits: c.total_visits })) || []) as T;
@@ -32,27 +49,43 @@ export async function apiGet<T>(path: string): Promise<T> {
   }
 
   if (path === '/api/appointments') {
-    const { data, error } = await supabase.from('appointments').select('*, client:clients(name, phone)').eq('user_id', userId).order('start_time');
+    // FIX: incluir client_name_temp, client_phone_temp y source para citas del link público
+    const { data, error } = await supabase
+      .from('appointments')
+      .select('*, client:clients(name, phone)')
+      .eq('user_id', userId)
+      .order('start_time');
     if (error) throw error;
-    return (data?.map(a => ({ id: a.id, clientId: a.client_id, service: a.service_name, date: a.date, time: a.start_time, startTime: a.start_time, endTime: a.end_time, status: a.status, isRescheduled: a.is_rescheduled || false, notes: a.notes, client: a.client })) || []) as T;
+    return (data?.map(mapAppointment) || []) as T;
   }
 
   if (path === '/api/appointments/today') {
     const today = getTodayString();
-    const { data, error } = await supabase.from('appointments').select('*, client:clients(name, phone)').eq('user_id', userId).eq('date', today).order('start_time');
+    const { data, error } = await supabase
+      .from('appointments')
+      .select('*, client:clients(name, phone)')
+      .eq('user_id', userId)
+      .eq('date', today)
+      .order('start_time');
     if (error) throw error;
-    return (data?.map(a => ({ id: a.id, clientId: a.client_id, service: a.service_name, date: a.date, time: a.start_time, status: a.status, isRescheduled: a.is_rescheduled || false, notes: a.notes, client: a.client })) || []) as T;
+    return (data?.map(mapAppointment) || []) as T;
   }
 
   if (path === '/api/appointments/week') {
     const tomorrow = new Date(); tomorrow.setDate(tomorrow.getDate() + 1);
     const weekEnd = new Date(); weekEnd.setDate(weekEnd.getDate() + 7);
-    const { data, error } = await supabase.from('appointments').select('*, client:clients(name, phone)').eq('user_id', userId).gte('date', tomorrow.toISOString().split('T')[0]).lte('date', weekEnd.toISOString().split('T')[0]).order('date').order('start_time');
+    const { data, error } = await supabase
+      .from('appointments')
+      .select('*, client:clients(name, phone)')
+      .eq('user_id', userId)
+      .gte('date', tomorrow.toISOString().split('T')[0])
+      .lte('date', weekEnd.toISOString().split('T')[0])
+      .order('date')
+      .order('start_time');
     if (error) throw error;
-    return (data?.map(a => ({ id: a.id, clientId: a.client_id, service: a.service_name, date: a.date, time: a.start_time, status: a.status, isRescheduled: a.is_rescheduled || false, notes: a.notes, client: a.client })) || []) as T;
+    return (data?.map(mapAppointment) || []) as T;
   }
 
-  // FIX: nuevo endpoint para obtener citas de un día específico — evita descargar todas las citas
   if (path.startsWith('/api/appointments/date/')) {
     const dateStr = path.split('/api/appointments/date/')[1];
     const { data, error } = await supabase
@@ -63,7 +96,7 @@ export async function apiGet<T>(path: string): Promise<T> {
       .not('status', 'in', '("Cancelada","No asistió")')
       .order('start_time');
     if (error) throw error;
-    return (data?.map(a => ({ id: a.id, clientId: a.client_id, service: a.service_name, date: a.date, time: a.start_time, startTime: a.start_time, endTime: a.end_time, status: a.status, isRescheduled: a.is_rescheduled || false, notes: a.notes, client: a.client })) || []) as T;
+    return (data?.map(mapAppointment) || []) as T;
   }
 
   if (path === '/api/stats/dashboard') {
@@ -78,7 +111,7 @@ export async function apiGet<T>(path: string): Promise<T> {
       supabase.from('clients').select('*', { count: 'exact', head: true }).eq('user_id', userId),
       supabase.from('appointments').select('*', { count: 'exact', head: true }).eq('user_id', userId),
     ]);
-    return { todayAppointments: todayApts?.length || 0, confirmedToday: todayApts?.filter(a => a.status === 'Confirmada').length || 0, unconfirmedToday: todayApts?.filter(a => a.status === 'Pendiente').length || 0, weekAppointments: weekApts?.length || 0, confirmedWeek: weekApts?.filter(a => a.status === 'Confirmada').length || 0, unconfirmedWeek: weekApts?.filter(a => a.status === 'Pendiente').length || 0, totalClients: totalClients || 0, totalAppointments: totalAppointments || 0 } as T;
+    return { todayAppointments: todayApts?.length || 0, confirmedToday: todayApts?.filter((a: any) => a.status === 'Confirmada').length || 0, unconfirmedToday: todayApts?.filter((a: any) => a.status === 'Pendiente').length || 0, weekAppointments: weekApts?.length || 0, confirmedWeek: weekApts?.filter((a: any) => a.status === 'Confirmada').length || 0, unconfirmedWeek: weekApts?.filter((a: any) => a.status === 'Pendiente').length || 0, totalClients: totalClients || 0, totalAppointments: totalAppointments || 0 } as T;
   }
 
   if (path === '/api/business-hours') {
@@ -96,9 +129,22 @@ export async function apiGet<T>(path: string): Promise<T> {
 
   if (path.startsWith('/api/appointments/')) {
     const id = path.split('/').pop();
-    const { data, error } = await supabase.from('appointments').select('*, client:clients(*)').eq('id', id).eq('user_id', userId).single();
+    // FIX: incluir client_name_temp, client_phone_temp y source en el detalle de cita
+    const { data, error } = await supabase
+      .from('appointments')
+      .select('*, client:clients(*)')
+      .eq('id', id)
+      .eq('user_id', userId)
+      .single();
     if (error) throw error;
-    return { ...data, service: data.service_name, time: data.start_time } as T;
+    return {
+      ...data,
+      service: data.service_name,
+      time: data.start_time,
+      clientNameTemp: data.client_name_temp || null,
+      clientPhone: data.client_phone_temp || null,
+      source: data.source || null,
+    } as T;
   }
 
   if (path.startsWith('/api/clients/')) {
@@ -259,7 +305,6 @@ export async function apiPut<T>(path: string, body: any): Promise<T> {
     const t = body.time ? body.time.split(':').map(Number) : [9, 0];
     const endMin = t[0] * 60 + t[1] + 30;
     const endTime = `${Math.floor(endMin/60).toString().padStart(2,'0')}:${(endMin%60).toString().padStart(2,'0')}`;
-    // FIX: status correcto al reagendar — usar 'Reagendada' no 'Pendiente'
     const { data, error } = await supabase.from('appointments').update({ date: body.date, start_time: body.time, end_time: endTime, status: 'Reagendada', updated_at: new Date().toISOString() }).eq('id', id).eq('user_id', userId).select().single();
     if (error) throw error;
     return data as T;
