@@ -108,11 +108,12 @@ export default function ClientDetailScreen() {
     return name.substring(0, 2).toUpperCase();
   };
 
+  // Año en 2 dígitos: 24/03/26 en lugar de 24/03/2026
   const formatDate = (dateStr: string) => {
-    const date = new Date(dateStr);
+    const date = new Date(dateStr + 'T12:00:00');
     const day = date.getDate().toString().padStart(2, '0');
     const month = (date.getMonth() + 1).toString().padStart(2, '0');
-    const year = date.getFullYear();
+    const year = date.getFullYear().toString().slice(-2);
     return `${day}/${month}/${year}`;
   };
 
