@@ -3,6 +3,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import {
   View, Text, StyleSheet, ScrollView,
   TouchableOpacity, ActivityIndicator, TextInput, Alert,
+  KeyboardAvoidingView, Platform, Modal,
 } from 'react-native';
 import { colors } from '@/styles/commonStyles';
 import { invalidateCache } from '@/utils/cache';
@@ -407,9 +408,23 @@ export default function AppointmentDetailScreen() {
       </ScrollView>
 
       {/* ── Modal: Guardar como cliente ── */}
-      {saveClientModal && (
-        <View style={styles.modalOverlay}>
+      <Modal
+        visible={saveClientModal}
+        transparent
+        animationType="slide"
+        onRequestClose={() => setSaveClientModal(false)}
+      >
+        <KeyboardAvoidingView
+          style={styles.modalOverlay}
+          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        >
+          <TouchableOpacity
+            style={styles.modalBackdrop}
+            activeOpacity={1}
+            onPress={() => setSaveClientModal(false)}
+          />
           <View style={[styles.modalBox, { backgroundColor: tc.surface }]}>
+            <View style={styles.modalHandle} />
             <View style={styles.modalHeader}>
               <Text style={[styles.modalTitle, { color: tc.text }]}>Guardar como cliente</Text>
               <TouchableOpacity onPress={() => setSaveClientModal(false)}>
@@ -420,62 +435,67 @@ export default function AppointmentDetailScreen() {
               Esta información se guardará en tu base de clientes y quedará vinculada a esta cita.
             </Text>
 
-            <Text style={[styles.fieldLabel, { color: tc.textMuted }]}>Nombre *</Text>
-            <TextInput
-              style={[styles.fieldInput, { backgroundColor: tc.inputBg, borderColor: tc.inputBorder, color: tc.text }]}
-              value={clientForm.name}
-              onChangeText={v => setClientForm(p => ({ ...p, name: v }))}
-              placeholder="Nombre completo"
-              placeholderTextColor={tc.textMuted}
-            />
+            <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
+              <Text style={[styles.fieldLabel, { color: tc.textMuted }]}>Nombre *</Text>
+              <TextInput
+                style={[styles.fieldInput, { backgroundColor: tc.inputBg, borderColor: tc.inputBorder, color: tc.text }]}
+                value={clientForm.name}
+                onChangeText={v => setClientForm(p => ({ ...p, name: v }))}
+                placeholder="Nombre completo"
+                placeholderTextColor={tc.textMuted}
+                returnKeyType="next"
+              />
 
-            <Text style={[styles.fieldLabel, { color: tc.textMuted }]}>Teléfono / WhatsApp *</Text>
-            <TextInput
-              style={[styles.fieldInput, { backgroundColor: tc.inputBg, borderColor: tc.inputBorder, color: tc.text }]}
-              value={clientForm.phone}
-              onChangeText={v => setClientForm(p => ({ ...p, phone: v }))}
-              placeholder="Ej: 442 123 4567"
-              placeholderTextColor={tc.textMuted}
-              keyboardType="phone-pad"
-            />
+              <Text style={[styles.fieldLabel, { color: tc.textMuted }]}>Teléfono / WhatsApp *</Text>
+              <TextInput
+                style={[styles.fieldInput, { backgroundColor: tc.inputBg, borderColor: tc.inputBorder, color: tc.text }]}
+                value={clientForm.phone}
+                onChangeText={v => setClientForm(p => ({ ...p, phone: v }))}
+                placeholder="Ej: 442 123 4567"
+                placeholderTextColor={tc.textMuted}
+                keyboardType="phone-pad"
+                returnKeyType="next"
+              />
 
-            <Text style={[styles.fieldLabel, { color: tc.textMuted }]}>Email (opcional)</Text>
-            <TextInput
-              style={[styles.fieldInput, { backgroundColor: tc.inputBg, borderColor: tc.inputBorder, color: tc.text }]}
-              value={clientForm.email}
-              onChangeText={v => setClientForm(p => ({ ...p, email: v }))}
-              placeholder="correo@ejemplo.com"
-              placeholderTextColor={tc.textMuted}
-              keyboardType="email-address"
-              autoCapitalize="none"
-            />
+              <Text style={[styles.fieldLabel, { color: tc.textMuted }]}>Email (opcional)</Text>
+              <TextInput
+                style={[styles.fieldInput, { backgroundColor: tc.inputBg, borderColor: tc.inputBorder, color: tc.text }]}
+                value={clientForm.email}
+                onChangeText={v => setClientForm(p => ({ ...p, email: v }))}
+                placeholder="correo@ejemplo.com"
+                placeholderTextColor={tc.textMuted}
+                keyboardType="email-address"
+                autoCapitalize="none"
+                returnKeyType="next"
+              />
 
-            <Text style={[styles.fieldLabel, { color: tc.textMuted }]}>Notas (opcional)</Text>
-            <TextInput
-              style={[styles.fieldInput, styles.fieldTextarea, { backgroundColor: tc.inputBg, borderColor: tc.inputBorder, color: tc.text }]}
-              value={clientForm.notes}
-              onChangeText={v => setClientForm(p => ({ ...p, notes: v }))}
-              placeholder="Preferencias, alergias..."
-              placeholderTextColor={tc.textMuted}
-              multiline
-            />
+              <Text style={[styles.fieldLabel, { color: tc.textMuted }]}>Notas (opcional)</Text>
+              <TextInput
+                style={[styles.fieldInput, styles.fieldTextarea, { backgroundColor: tc.inputBg, borderColor: tc.inputBorder, color: tc.text }]}
+                value={clientForm.notes}
+                onChangeText={v => setClientForm(p => ({ ...p, notes: v }))}
+                placeholder="Preferencias, alergias..."
+                placeholderTextColor={tc.textMuted}
+                multiline
+              />
 
-            <TouchableOpacity
-              style={[styles.modalSaveBtn, savingClient && { opacity: 0.6 }]}
-              onPress={handleSaveAsClient}
-              disabled={savingClient}
-            >
-              {savingClient
-                ? <ActivityIndicator color="#fff" />
-                : <>
-                    <MaterialIcons name="person-add-alt" size={18} color="#fff" />
-                    <Text style={styles.modalSaveBtnText}>Guardar cliente</Text>
-                  </>
-              }
-            </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.modalSaveBtn, savingClient && { opacity: 0.6 }]}
+                onPress={handleSaveAsClient}
+                disabled={savingClient}
+              >
+                {savingClient
+                  ? <ActivityIndicator color="#fff" />
+                  : <>
+                      <MaterialIcons name="person-add-alt" size={18} color="#fff" />
+                      <Text style={styles.modalSaveBtnText}>Guardar cliente</Text>
+                    </>
+                }
+              </TouchableOpacity>
+            </ScrollView>
           </View>
-        </View>
-      )}
+        </KeyboardAvoidingView>
+      </Modal>
 
       <ConfirmModal
         visible={confirmModal.visible}
@@ -548,14 +568,16 @@ const styles = StyleSheet.create({
   solicitudSub:         { fontSize: 12, color: '#6B7280', marginTop: 2 },
   actionLoadingOverlay: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.3)', justifyContent: 'center', alignItems: 'center' },
   // Modal guardar cliente
-  modalOverlay:         { position: 'absolute', inset: 0, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-end' },
-  modalBox:             { borderTopLeftRadius: 24, borderTopRightRadius: 24, padding: 24, paddingBottom: 40, gap: 4 },
+  modalOverlay:         { flex: 1, justifyContent: 'flex-end' },
+  modalBackdrop:        { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(0,0,0,0.5)' },
+  modalHandle:          { width: 36, height: 4, borderRadius: 2, backgroundColor: '#D1D5DB', alignSelf: 'center', marginBottom: 12 },
+  modalBox:             { borderTopLeftRadius: 24, borderTopRightRadius: 24, padding: 24, paddingBottom: 40, maxHeight: '90%' },
   modalHeader:          { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 },
   modalTitle:           { fontSize: 18, fontWeight: '800' },
   modalSub:             { fontSize: 13, lineHeight: 18, marginBottom: 14 },
   fieldLabel:           { fontSize: 12, fontWeight: '600', marginBottom: 5, marginTop: 8 },
   fieldInput:           { borderRadius: 12, borderWidth: 1.5, padding: 12, fontSize: 15 },
   fieldTextarea:        { height: 70, textAlignVertical: 'top' },
-  modalSaveBtn:         { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, backgroundColor: '#10B981', borderRadius: 14, padding: 16, marginTop: 16 },
+  modalSaveBtn:         { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, backgroundColor: '#10B981', borderRadius: 14, padding: 16, marginTop: 16, marginBottom: 8 },
   modalSaveBtnText:     { color: '#fff', fontWeight: '800', fontSize: 15 },
 });
