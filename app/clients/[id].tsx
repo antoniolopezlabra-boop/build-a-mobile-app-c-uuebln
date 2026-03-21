@@ -14,6 +14,7 @@ import { colors } from '@/styles/commonStyles';
 import { IconSymbol } from '@/components/IconSymbol';
 import { ConfirmModal } from '@/components/button';
 import { apiGet } from '@/utils/api';
+import MaterialIcons from '@expo/vector-icons/MaterialIcons';
 
 interface Client {
   id: string;
@@ -61,24 +62,17 @@ export default function ClientDetailScreen() {
   });
 
   useEffect(() => {
-    if (id) {
-      loadClientData();
-    }
+    if (id) loadClientData();
   }, [id]);
 
   const loadClientData = async () => {
-    console.log('[ClientDetail] Loading client data for:', id);
     setLoading(true);
     try {
-      // Fetch all clients and find the one with matching id
       const allClients = await apiGet<Client[]>('/api/clients');
       const clientData = allClients.find((c) => c.id === id);
-      if (!clientData) {
-        throw new Error('Cliente no encontrado');
-      }
+      if (!clientData) throw new Error('Cliente no encontrado');
       setClient(clientData);
 
-      // Fetch stats and appointments in parallel, with graceful fallback
       const [statsData, appointmentsData] = await Promise.all([
         apiGet<ClientStats>(`/api/clients/${id}/stats`).catch(() => ({
           totalAppointments: clientData.totalVisits || 0,
@@ -89,11 +83,9 @@ export default function ClientDetailScreen() {
         apiGet<Appointment[]>(`/api/clients/${id}/appointments`).catch(() => []),
       ]);
 
-      console.log('[ClientDetail] Loaded client data');
       setStats(statsData);
       setAppointments(appointmentsData);
     } catch (error) {
-      console.error('[ClientDetail] Failed to load:', error);
       setErrorModal({ visible: true, message: 'Error al cargar los datos del cliente' });
     } finally {
       setLoading(false);
@@ -102,33 +94,26 @@ export default function ClientDetailScreen() {
 
   const getInitials = (name: string) => {
     const parts = name.trim().split(' ');
-    if (parts.length >= 2) {
-      return (parts[0][0] + parts[1][0]).toUpperCase();
-    }
+    if (parts.length >= 2) return (parts[0][0] + parts[1][0]).toUpperCase();
     return name.substring(0, 2).toUpperCase();
   };
 
-  // Año en 2 dígitos: 24/03/26 en lugar de 24/03/2026
+  // Formato legible: "24 mar 26"
   const formatDate = (dateStr: string) => {
     const date = new Date(dateStr + 'T12:00:00');
-    const day = date.getDate().toString().padStart(2, '0');
-    const month = (date.getMonth() + 1).toString().padStart(2, '0');
+    const day = date.getDate();
+    const month = date.toLocaleString('es-MX', { month: 'short' });
     const year = date.getFullYear().toString().slice(-2);
-    return `${day}/${month}/${year}`;
+    return `${day} ${month} '${year}`;
   };
 
   const getStatusColor = (status: string) => {
     switch (status) {
-      case 'Confirmada':
-        return colors.primary;
-      case 'Pendiente':
-        return colors.warning;
-      case 'Cancelada':
-        return colors.error;
-      case 'Completada':
-        return colors.textSecondary;
-      default:
-        return colors.textSecondary;
+      case 'Confirmada':  return colors.primary;
+      case 'Pendiente':   return colors.warning;
+      case 'Cancelada':   return colors.error;
+      case 'Completada':  return colors.textSecondary;
+      default:            return colors.textSecondary;
     }
   };
 
@@ -165,13 +150,7 @@ export default function ClientDetailScreen() {
         visible={errorModal.visible}
         title="Error"
         message={errorModal.message}
-        buttons={[
-          {
-            text: 'Aceptar',
-            onPress: () => setErrorModal({ visible: false, message: '' }),
-            style: 'cancel',
-          },
-        ]}
+        buttons={[{ text: 'Aceptar', onPress: () => setErrorModal({ visible: false, message: '' }), style: 'cancel' }]}
         onDismiss={() => setErrorModal({ visible: false, message: '' })}
       />
 
@@ -186,6 +165,7 @@ export default function ClientDetailScreen() {
       </View>
 
       <ScrollView contentContainerStyle={styles.scrollContent}>
+
         {/* Client info card */}
         <View style={styles.clientCard}>
           <View style={styles.clientAvatar}>
@@ -196,8 +176,8 @@ export default function ClientDetailScreen() {
           {client.email ? <Text style={styles.clientEmail}>{client.email}</Text> : null}
         </View>
 
-        {/* Stats cards */}
-        <View style={styles.statsContainer}>
+        {/* Stats — fila superior: Total Citas + Asistencia */}
+        <View style={styles.statsRow}>
           <View style={styles.statCard}>
             <Text style={styles.statValue}>{stats.totalAppointments}</Text>
             <Text style={styles.statLabel}>Total Citas</Text>
@@ -206,33 +186,29 @@ export default function ClientDetailScreen() {
             <Text style={styles.statValue}>{attendanceRateText}</Text>
             <Text style={styles.statLabel}>Asistencia</Text>
           </View>
-          <View style={styles.statCard}>
-            <Text style={styles.statValue}>{lastVisitText}</Text>
-            <Text style={styles.statLabel}>Última Visita</Text>
+        </View>
+
+        {/* Stats — fila inferior: Última visita en card ancha */}
+        <View style={styles.statCardWide}>
+          <View style={styles.statCardWideInner}>
+            <MaterialIcons name="event-available" size={20} color={colors.primary} />
+            <Text style={styles.statLabelWide}>Última visita</Text>
           </View>
+          <Text style={styles.statValueWide}>{lastVisitText}</Text>
         </View>
 
         {/* Action buttons */}
         <View style={styles.actionButtons}>
           <TouchableOpacity
             style={styles.actionButton}
-            onPress={() => {
-              console.log('User tapped Agendar cita');
-              router.push('/appointments/new');
-            }}
+            onPress={() => router.push('/appointments/new')}
           >
-            <IconSymbol
-              android_material_icon_name="calendar-today"
-              size={20}
-              color="#FFFFFF"
-            />
+            <IconSymbol android_material_icon_name="calendar-today" size={20} color="#FFFFFF" />
             <Text style={styles.actionButtonText}>Agendar cita</Text>
           </TouchableOpacity>
           <TouchableOpacity
             style={[styles.actionButton, styles.actionButtonSecondary]}
-            onPress={() => {
-              console.log('User tapped Enviar mensaje');
-            }}
+            onPress={() => {}}
           >
             <IconSymbol android_material_icon_name="message" size={20} color={colors.primary} />
             <Text style={[styles.actionButtonText, styles.actionButtonTextSecondary]}>
@@ -247,9 +223,7 @@ export default function ClientDetailScreen() {
             style={[styles.tab, activeTab === 'appointments' && styles.tabActive]}
             onPress={() => setActiveTab('appointments')}
           >
-            <Text
-              style={[styles.tabText, activeTab === 'appointments' && styles.tabTextActive]}
-            >
+            <Text style={[styles.tabText, activeTab === 'appointments' && styles.tabTextActive]}>
               Historial de Citas
             </Text>
           </TouchableOpacity>
@@ -268,48 +242,32 @@ export default function ClientDetailScreen() {
           <View style={styles.tabContent}>
             {appointments.length === 0 ? (
               <View style={styles.emptyState}>
-                <IconSymbol
-                  android_material_icon_name="calendar-today"
-                  size={48}
-                  color={colors.textSecondary}
-                />
+                <IconSymbol android_material_icon_name="calendar-today" size={48} color={colors.textSecondary} />
                 <Text style={styles.emptyStateText}>Sin citas registradas</Text>
               </View>
             ) : (
-              appointments.map((appointment) => {
-                const dateText = formatDate(appointment.date);
-                const statusColor = getStatusColor(appointment.status);
-
-                return (
-                  <TouchableOpacity
-                    key={appointment.id}
-                    style={styles.appointmentCard}
-                    onPress={() => {
-                      console.log('User tapped appointment:', appointment.id);
-                      router.push(`/appointments/${appointment.id}`);
-                    }}
-                  >
-                    <View style={styles.appointmentInfo}>
-                      <Text style={styles.appointmentService}>{appointment.service}</Text>
-                      <Text style={styles.appointmentDate}>{dateText}</Text>
-                      <Text style={styles.appointmentTime}>{appointment.startTime}</Text>
-                    </View>
-                    <View style={[styles.statusBadge, { backgroundColor: statusColor }]}>
-                      <Text style={styles.statusText}>{appointment.status}</Text>
-                    </View>
-                  </TouchableOpacity>
-                );
-              })
+              appointments.map((appointment) => (
+                <TouchableOpacity
+                  key={appointment.id}
+                  style={styles.appointmentCard}
+                  onPress={() => router.push(`/appointments/${appointment.id}`)}
+                >
+                  <View style={styles.appointmentInfo}>
+                    <Text style={styles.appointmentService}>{appointment.service}</Text>
+                    <Text style={styles.appointmentDate}>{formatDate(appointment.date)}</Text>
+                    <Text style={styles.appointmentTime}>{appointment.startTime}</Text>
+                  </View>
+                  <View style={[styles.statusBadge, { backgroundColor: getStatusColor(appointment.status) }]}>
+                    <Text style={styles.statusText}>{appointment.status}</Text>
+                  </View>
+                </TouchableOpacity>
+              ))
             )}
           </View>
         ) : (
           <View style={styles.tabContent}>
             <View style={styles.emptyState}>
-              <IconSymbol
-                android_material_icon_name="message"
-                size={48}
-                color={colors.textSecondary}
-              />
+              <IconSymbol android_material_icon_name="message" size={48} color={colors.textSecondary} />
               <Text style={styles.emptyStateText}>Sin mensajes de WhatsApp</Text>
               <Text style={styles.emptyStateSubtext}>
                 Configura WhatsApp Business para enviar mensajes
@@ -323,238 +281,63 @@ export default function ClientDetailScreen() {
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: colors.background,
-  },
-  loadingContainer: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  errorContainer: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    padding: 20,
-  },
-  errorText: {
-    fontSize: 18,
-    color: colors.text,
-    marginBottom: 20,
-  },
-  backButton: {
-    backgroundColor: colors.primary,
-    borderRadius: 12,
-    paddingVertical: 12,
-    paddingHorizontal: 24,
-  },
-  backButtonText: {
-    color: '#FFFFFF',
-    fontSize: 16,
-    fontWeight: '600',
-  },
-  header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    padding: 20,
-    paddingTop: 48,
-    backgroundColor: colors.card,
-    borderBottomWidth: 1,
-    borderBottomColor: colors.border,
-  },
-  headerBackButton: {
-    padding: 4,
-  },
-  headerTitle: {
-    fontSize: 18,
-    fontWeight: 'bold',
-    color: colors.text,
-  },
-  scrollContent: {
-    padding: 20,
-    paddingBottom: 40,
-  },
-  clientCard: {
-    backgroundColor: colors.card,
-    borderRadius: 16,
-    padding: 24,
-    alignItems: 'center',
-    marginBottom: 20,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.05,
-    shadowRadius: 8,
-    elevation: 2,
-  },
-  clientAvatar: {
-    width: 80,
-    height: 80,
-    borderRadius: 40,
-    backgroundColor: colors.primary,
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginBottom: 16,
-  },
-  clientAvatarText: {
-    fontSize: 32,
-    fontWeight: 'bold',
-    color: '#FFFFFF',
-  },
-  clientName: {
-    fontSize: 24,
-    fontWeight: 'bold',
-    color: colors.text,
-    marginBottom: 4,
-  },
-  clientPhone: {
-    fontSize: 16,
-    color: colors.textSecondary,
-    marginBottom: 2,
-  },
-  clientEmail: {
-    fontSize: 14,
-    color: colors.textSecondary,
-  },
-  statsContainer: {
-    flexDirection: 'row',
-    gap: 12,
-    marginBottom: 20,
-  },
-  statCard: {
-    flex: 1,
-    backgroundColor: colors.card,
-    borderRadius: 12,
-    padding: 16,
-    alignItems: 'center',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.05,
-    shadowRadius: 4,
-    elevation: 1,
-  },
-  statValue: {
-    fontSize: 24,
-    fontWeight: 'bold',
-    color: colors.primary,
-    marginBottom: 4,
-  },
-  statLabel: {
-    fontSize: 12,
-    color: colors.textSecondary,
-    textAlign: 'center',
-  },
-  actionButtons: {
-    flexDirection: 'row',
-    gap: 12,
-    marginBottom: 24,
-  },
-  actionButton: {
-    flex: 1,
-    backgroundColor: colors.primary,
-    borderRadius: 12,
-    padding: 14,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 8,
-  },
-  actionButtonSecondary: {
-    backgroundColor: colors.card,
-    borderWidth: 1,
-    borderColor: colors.primary,
-  },
-  actionButtonText: {
-    color: '#FFFFFF',
-    fontSize: 15,
-    fontWeight: '600',
-  },
-  actionButtonTextSecondary: {
-    color: colors.primary,
-  },
-  tabsContainer: {
-    flexDirection: 'row',
-    backgroundColor: colors.card,
-    borderRadius: 12,
-    padding: 4,
-    marginBottom: 20,
-  },
-  tab: {
-    flex: 1,
-    paddingVertical: 10,
-    alignItems: 'center',
-    borderRadius: 8,
-  },
-  tabActive: {
-    backgroundColor: colors.primary,
-  },
-  tabText: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: colors.textSecondary,
-  },
-  tabTextActive: {
-    color: '#FFFFFF',
-  },
-  tabContent: {
-    minHeight: 200,
-  },
-  emptyState: {
-    alignItems: 'center',
-    paddingVertical: 40,
-  },
-  emptyStateText: {
-    fontSize: 16,
-    color: colors.textSecondary,
-    marginTop: 12,
-  },
-  emptyStateSubtext: {
-    fontSize: 14,
-    color: colors.textSecondary,
-    marginTop: 4,
-    textAlign: 'center',
-  },
-  appointmentCard: {
-    backgroundColor: colors.card,
-    borderRadius: 12,
-    padding: 16,
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 12,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.05,
-    shadowRadius: 4,
-    elevation: 1,
-  },
-  appointmentInfo: {
-    flex: 1,
-  },
-  appointmentService: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: colors.text,
-    marginBottom: 4,
-  },
-  appointmentDate: {
-    fontSize: 14,
-    color: colors.textSecondary,
-  },
-  appointmentTime: {
-    fontSize: 13,
-    color: colors.textSecondary,
-    marginTop: 2,
-  },
-  statusBadge: {
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 12,
-  },
-  statusText: {
-    fontSize: 12,
-    color: '#FFFFFF',
-    fontWeight: '600',
-  },
+  container:            { flex: 1, backgroundColor: colors.background },
+  loadingContainer:     { flex: 1, justifyContent: 'center', alignItems: 'center' },
+  errorContainer:       { flex: 1, justifyContent: 'center', alignItems: 'center', padding: 20 },
+  errorText:            { fontSize: 18, color: colors.text, marginBottom: 20 },
+  backButton:           { backgroundColor: colors.primary, borderRadius: 12, paddingVertical: 12, paddingHorizontal: 24 },
+  backButtonText:       { color: '#FFFFFF', fontSize: 16, fontWeight: '600' },
+  header:               { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', padding: 20, paddingTop: 48, backgroundColor: colors.card, borderBottomWidth: 1, borderBottomColor: colors.border },
+  headerBackButton:     { padding: 4 },
+  headerTitle:          { fontSize: 18, fontWeight: 'bold', color: colors.text },
+  scrollContent:        { padding: 20, paddingBottom: 40 },
+
+  // Cliente
+  clientCard:           { backgroundColor: colors.card, borderRadius: 16, padding: 24, alignItems: 'center', marginBottom: 16, shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.05, shadowRadius: 8, elevation: 2 },
+  clientAvatar:         { width: 80, height: 80, borderRadius: 40, backgroundColor: colors.primary, justifyContent: 'center', alignItems: 'center', marginBottom: 16 },
+  clientAvatarText:     { fontSize: 32, fontWeight: 'bold', color: '#FFFFFF' },
+  clientName:           { fontSize: 24, fontWeight: 'bold', color: colors.text, marginBottom: 4 },
+  clientPhone:          { fontSize: 16, color: colors.textSecondary, marginBottom: 2 },
+  clientEmail:          { fontSize: 14, color: colors.textSecondary },
+
+  // Stats — fila de 2
+  statsRow:             { flexDirection: 'row', gap: 12, marginBottom: 12 },
+  statCard:             { flex: 1, backgroundColor: colors.card, borderRadius: 12, padding: 16, alignItems: 'center', shadowColor: '#000', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.05, shadowRadius: 4, elevation: 1 },
+  statValue:            { fontSize: 28, fontWeight: 'bold', color: colors.primary, marginBottom: 4 },
+  statLabel:            { fontSize: 12, color: colors.textSecondary, textAlign: 'center' },
+
+  // Stats — card ancha última visita
+  statCardWide:         { backgroundColor: colors.card, borderRadius: 12, paddingHorizontal: 20, paddingVertical: 14, marginBottom: 20, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', shadowColor: '#000', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.05, shadowRadius: 4, elevation: 1 },
+  statCardWideInner:    { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  statLabelWide:        { fontSize: 13, color: colors.textSecondary, fontWeight: '600' },
+  statValueWide:        { fontSize: 16, fontWeight: 'bold', color: colors.primary },
+
+  // Acciones
+  actionButtons:        { flexDirection: 'row', gap: 12, marginBottom: 24 },
+  actionButton:         { flex: 1, backgroundColor: colors.primary, borderRadius: 12, padding: 14, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8 },
+  actionButtonSecondary:{ backgroundColor: colors.card, borderWidth: 1, borderColor: colors.primary },
+  actionButtonText:     { color: '#FFFFFF', fontSize: 15, fontWeight: '600' },
+  actionButtonTextSecondary: { color: colors.primary },
+
+  // Tabs
+  tabsContainer:        { flexDirection: 'row', backgroundColor: colors.card, borderRadius: 12, padding: 4, marginBottom: 20 },
+  tab:                  { flex: 1, paddingVertical: 10, alignItems: 'center', borderRadius: 8 },
+  tabActive:            { backgroundColor: colors.primary },
+  tabText:              { fontSize: 14, fontWeight: '600', color: colors.textSecondary },
+  tabTextActive:        { color: '#FFFFFF' },
+  tabContent:           { minHeight: 200 },
+
+  // Empty state
+  emptyState:           { alignItems: 'center', paddingVertical: 40 },
+  emptyStateText:       { fontSize: 16, color: colors.textSecondary, marginTop: 12 },
+  emptyStateSubtext:    { fontSize: 14, color: colors.textSecondary, marginTop: 4, textAlign: 'center' },
+
+  // Historial citas
+  appointmentCard:      { backgroundColor: colors.card, borderRadius: 12, padding: 16, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12, shadowColor: '#000', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.05, shadowRadius: 4, elevation: 1 },
+  appointmentInfo:      { flex: 1 },
+  appointmentService:   { fontSize: 16, fontWeight: '600', color: colors.text, marginBottom: 4 },
+  appointmentDate:      { fontSize: 14, color: colors.textSecondary },
+  appointmentTime:      { fontSize: 13, color: colors.textSecondary, marginTop: 2 },
+  statusBadge:          { paddingHorizontal: 12, paddingVertical: 6, borderRadius: 12 },
+  statusText:           { fontSize: 12, color: '#FFFFFF', fontWeight: '600' },
 });
