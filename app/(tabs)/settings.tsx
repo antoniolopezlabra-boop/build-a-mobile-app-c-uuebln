@@ -16,7 +16,12 @@ import { useTheme, ThemeMode } from '@/contexts/ThemeContext';
 import { apiGet } from '@/utils/api';
 import MaterialIcons from '@expo/vector-icons/MaterialIcons';
 
-interface WhatsAppConfig { isConnected: boolean; phoneNumber?: string; }
+interface WhatsAppConfig {
+  isConnected: boolean;
+  confirmationOnBooking: boolean;
+  reminder24h: boolean;
+  reminder2h: boolean;
+}
 interface Subscription { planType: 'Basico' | 'Premium' | 'Gratuito'; price: string; }
 
 function SettingRow({
@@ -86,7 +91,7 @@ const grp = StyleSheet.create({
 export default function SettingsScreen() {
   const router = useRouter();
   const { user, businessProfile, signOut } = useAuth();
-  const { canOverlap, isPremium, isBasico, isGratuito, canUseBookingLink } = usePlan();
+  const { canOverlap, isPremium, isBasico, isGratuito, canUseBookingLink, canUseWhatsApp } = usePlan();
   const { colors: tc, mode, setMode, isDark } = useTheme();
 
   const [logoutModal, setLogoutModal] = useState(false);
@@ -168,8 +173,19 @@ export default function SettingsScreen() {
   const planPrice   = isPremium ? '$1,490 MXN/mes' : isBasico ? '$990 MXN/mes' : 'Gratis';
   const planEmoji   = isPremium ? '⭐' : isBasico ? '🚀' : '🌱';
   const planDisplay = isPremium ? 'Premium' : isBasico ? 'Básico' : 'Gratuito';
-  const waConnected = whatsappConfig?.isConnected || false;
   const initials = user?.name?.split(' ').map((w: string) => w[0]).slice(0, 2).join('').toUpperCase() || 'U';
+
+  // WhatsApp: activo si tiene plan y al menos un toggle activo
+  const waActive = canUseWhatsApp && (
+    whatsappConfig?.confirmationOnBooking ||
+    whatsappConfig?.reminder24h ||
+    whatsappConfig?.reminder2h
+  );
+  const waSubLabel = isGratuito
+    ? 'Disponible en Plan Básico'
+    : waActive
+      ? 'Recordatorios activos · Número VYLTA'
+      : 'Recordatorios desactivados';
 
   if (loading) {
     return (
@@ -233,7 +249,7 @@ export default function SettingsScreen() {
               </View>
             </View>
             <Text style={[s.planPrice, { color: tc.textMuted }]}>{planPrice}</Text>
-            {!isPremium && <Text style={s.planUpgrade}>{isGratuito ? 'Activa WhatsApp y reportes →' : 'Obtén tu número propio →'}</Text>}
+            {!isPremium && <Text style={s.planUpgrade}>{isGratuito ? 'Activa recordatorios y reportes →' : 'Activa email marketing y más →'}</Text>}
           </View>
           <MaterialIcons name="arrow-forward-ios" size={16} color={planColor} />
         </TouchableOpacity>
@@ -244,7 +260,7 @@ export default function SettingsScreen() {
           <SettingRow iconName="content-cut" iconColor="#F59E0B" iconBg="#FFFBEB" label="Catálogo de servicios" sublabel="Gestiona tus servicios y precios" onPress={() => router.push('/settings/services')} />
           <SettingRow
             iconName="event-available" iconColor="#8B5CF6" iconBg="#F5F3FF"
-            label="Citas simultáneas" sublabel="Permite sobreponer citas"
+            label="Citas simultáneas" sublabel="Permite atender más de una cita al mismo tiempo"
             badge={!isPremium ? <View style={s.premiumChip}><Text style={s.premiumChipText}>PREMIUM</Text></View> : undefined}
             right={<Switch value={allowOverlapping} onValueChange={handleOverlappingToggle} trackColor={{ false: '#E2E8F0', true: '#10B981' }} thumbColor="#fff" disabled={savingOverlap || !canOverlap} />}
           />
@@ -278,13 +294,14 @@ export default function SettingsScreen() {
             iconName="cake" iconColor="#EC4899" iconBg="#FDF2F8"
             label="Cumpleaños automáticos"
             sublabel={birthdayEnabled ? 'Activado — envía WhatsApp el día del cumpleaños' : 'Desactivado'}
+            badge={!isPremium ? <View style={s.premiumChip}><Text style={s.premiumChipText}>PREMIUM</Text></View> : undefined}
             right={
               <View style={s.statusRight}>
                 {birthdayEnabled && <View style={[s.statusDot, { backgroundColor: '#EC4899' }]} />}
                 <MaterialIcons name="arrow-forward-ios" size={16} color={tc.border} />
               </View>
             }
-            onPress={() => router.push('/settings/birthday')}
+            onPress={() => isPremium ? router.push('/settings/birthday') : router.push('/settings/subscription')}
           />
           <SettingRow
             iconName="email" iconColor="#6366F1" iconBg="#EEF2FF"
@@ -293,18 +310,28 @@ export default function SettingsScreen() {
             badge={!isPremium ? <View style={s.premiumChip}><Text style={s.premiumChipText}>PREMIUM</Text></View> : undefined}
             onPress={() => isPremium ? router.push('/marketing') : router.push('/settings/subscription')}
           />
+          <SettingRow
+            iconName="person-search" iconColor="#F59E0B" iconBg="#FFFBEB"
+            label="Recuperar clientes inactivos"
+            sublabel="Detecta y reactiva clientes sin visita reciente"
+            badge={!isPremium ? <View style={s.premiumChip}><Text style={s.premiumChipText}>PREMIUM</Text></View> : undefined}
+            onPress={() => isPremium ? router.push('/clients/inactive') : router.push('/settings/subscription')}
+          />
         </SettingGroup>
 
         <SettingGroup title="WHATSAPP BUSINESS">
           <SettingRow
             iconName="message" iconColor="#25D366" iconBg="#F0FDF4"
-            label="Configuración de WhatsApp"
-            sublabel={waConnected ? `Conectado · ${whatsappConfig?.phoneNumber || ''}` : 'Sin configurar'}
+            label="Recordatorios automáticos"
+            sublabel={waSubLabel}
+            badge={isGratuito ? <View style={s.basicoChip}><Text style={s.basicoChipText}>BÁSICO</Text></View> : undefined}
             right={
-              <View style={[s.waBadge, { backgroundColor: waConnected ? '#ECFDF5' : '#FEF3C7' }]}>
-                <View style={[s.waDot, { backgroundColor: waConnected ? '#10B981' : '#F59E0B' }]} />
-                <Text style={[s.waText, { color: waConnected ? '#10B981' : '#92400E' }]}>{waConnected ? 'Activo' : 'Inactivo'}</Text>
-              </View>
+              !isGratuito ? (
+                <View style={[s.waBadge, { backgroundColor: waActive ? '#ECFDF5' : '#FEF3C7' }]}>
+                  <View style={[s.waDot, { backgroundColor: waActive ? '#10B981' : '#F59E0B' }]} />
+                  <Text style={[s.waText, { color: waActive ? '#10B981' : '#92400E' }]}>{waActive ? 'Activos' : 'Inactivos'}</Text>
+                </View>
+              ) : undefined
             }
             onPress={() => router.push('/settings/whatsapp')}
           />
@@ -322,7 +349,6 @@ export default function SettingsScreen() {
                 {isDark ? 'Modo oscuro activado' : 'Modo claro activado'}
               </Text>
             </View>
-            {/* Selector de modo: 3 opciones */}
             <View style={s.themeToggleWrap}>
               {(['light', 'dark'] as ThemeMode[]).map((m) => (
                 <TouchableOpacity
@@ -411,7 +437,6 @@ const s = StyleSheet.create({
   statusRight: { flexDirection: 'row', alignItems: 'center', gap: 6 },
   statusDot: { width: 8, height: 8, borderRadius: 4 },
 
-  // Selector de tema
   themeToggleWrap: { flexDirection: 'row', gap: 6 },
   themeOption: { flexDirection: 'row', alignItems: 'center', gap: 5, paddingHorizontal: 10, paddingVertical: 7, borderRadius: 10, borderWidth: 1 },
   themeOptionActive: { backgroundColor: '#10B981', borderColor: '#10B981' },

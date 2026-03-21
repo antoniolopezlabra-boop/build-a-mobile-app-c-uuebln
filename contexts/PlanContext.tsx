@@ -17,13 +17,12 @@ interface PlanContextType {
   loading: boolean;
   canSchedule: boolean;
   canViewReports: boolean;
-  canUseWhatsApp: boolean;
-  canUseOwnNumber: boolean;
-  canOverlap: boolean;
-  canUseCollaborators: boolean;
-  canRunCampaigns: boolean;
-  canExportCSV: boolean;
-  canUseBookingLink: boolean;
+  canUseWhatsApp: boolean;       // Básico+ — recordatorios salientes número VYLTA
+  canOverlap: boolean;           // Premium — citas simultáneas
+  canUseCollaborators: boolean;  // Premium
+  canRunCampaigns: boolean;      // Premium — email marketing + reactivación
+  canExportCSV: boolean;         // Premium
+  canUseBookingLink: boolean;    // Básico+ — link público de citas
   isGratuito: boolean;
   isBasico: boolean;
   isPremium: boolean;
@@ -118,30 +117,29 @@ export function PlanProvider({ children }: { children: React.ReactNode }) {
   }, [user?.id, authLoading]);
 
   const isGratuito = plan.planType === 'Gratuito';
-  const isBasico = plan.planType === 'Basico' || plan.planType === 'Básico';
-  const isPremium = plan.planType === 'Premium';
+  const isBasico   = plan.planType === 'Basico' || plan.planType === 'Básico';
+  const isPremium  = plan.planType === 'Premium';
 
   const daysLeftInTrial = plan.trialEndsAt
     ? Math.max(0, Math.ceil((new Date(plan.trialEndsAt).getTime() - Date.now()) / (1000 * 60 * 60 * 24)))
     : 0;
   const isTrialActive = plan.status === 'trial' && daysLeftInTrial > 0;
 
-  const canSchedule        = isBasico || isPremium || isTrialActive;
-  const canViewReports     = isBasico || isPremium || isTrialActive;
-  const canUseWhatsApp     = isBasico || isPremium || isTrialActive;
-  const canUseOwnNumber    = isPremium;
-  const canOverlap         = isPremium;
+  // Permisos por plan — arquitectura simplificada Mar 2026
+  const canSchedule         = isBasico || isPremium || isTrialActive;
+  const canViewReports      = isBasico || isPremium || isTrialActive;
+  const canUseWhatsApp      = isBasico || isPremium || isTrialActive; // recordatorios salientes
+  const canOverlap          = isPremium;   // citas simultáneas
   const canUseCollaborators = isPremium;
-  const canRunCampaigns    = isPremium;
-  const canExportCSV       = isPremium;
-  // Link de cita pública — disponible en Básico y Premium
-  const canUseBookingLink  = isBasico || isPremium || isTrialActive;
+  const canRunCampaigns     = isPremium;   // email marketing + reactivación inactivos
+  const canExportCSV        = isPremium;
+  const canUseBookingLink   = isBasico || isPremium || isTrialActive;
 
   return (
     <PlanContext.Provider value={{
       plan, loading,
       canSchedule, canViewReports, canUseWhatsApp,
-      canUseOwnNumber, canOverlap, canUseCollaborators,
+      canOverlap, canUseCollaborators,
       canRunCampaigns, canExportCSV, canUseBookingLink,
       isGratuito, isBasico, isPremium,
       isTrialActive, daysLeftInTrial,
