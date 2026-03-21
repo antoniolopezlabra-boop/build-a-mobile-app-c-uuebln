@@ -10,27 +10,32 @@ import {
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { colors } from '@/styles/commonStyles';
-import { IconSymbol } from '@/components/IconSymbol';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import MaterialIcons from '@expo/vector-icons/MaterialIcons';
 
 const { width } = Dimensions.get('window');
 
 const slides = [
   {
-    icon: 'calendar-today',
-    title: 'Gestiona tus citas',
-    description: 'Organiza todas tus citas en un solo lugar. Nunca más pierdas el control de tu agenda.',
+    icon: 'link',
+    color: '#10B981',
+    bg: '#ECFDF5',
+    title: 'Tu link de citas',
+    description: 'Comparte un link único con tus clientes. Ellos eligen servicio, fecha y hora — la cita llega directo a tu app.',
+  },
+  {
+    icon: 'notifications-active',
+    color: '#3B82F6',
+    bg: '#EFF6FF',
+    title: 'Recordatorios automáticos',
+    description: 'VYLTA envía confirmaciones y recordatorios por WhatsApp a tus clientes. Tú no tienes que hacer nada.',
   },
   {
     icon: 'group',
-    title: 'Conoce a tus clientes',
-    description: 'Mantén un registro completo de tus clientes y su historial de visitas.',
-  },
-  {
-    icon: 'notifications',
+    color: '#8B5CF6',
+    bg: '#F5F3FF',
     title: 'Cada cliente regresa',
-    description: 'Envía recordatorios automáticos y mantén a tus clientes comprometidos con tu negocio.',
+    description: 'Detecta clientes inactivos, envía campañas y llena tu agenda. Todo desde una sola app.',
   },
 ];
 
@@ -55,139 +60,93 @@ export default function OnboardingScreen() {
     router.replace('/auth/login');
   };
 
-  const buttonText = currentIndex === slides.length - 1 ? 'Comenzar' : 'Siguiente';
+  const slide = slides[currentIndex];
+  const isLast = currentIndex === slides.length - 1;
 
   return (
-    <SafeAreaView style={styles.container}>
-      <TouchableOpacity style={styles.skipButton} onPress={handleSkip}>
-        <Text style={styles.skipText}>Saltar</Text>
-      </TouchableOpacity>
+    <SafeAreaView style={s.container}>
 
+      {/* Skip */}
+      {!isLast && (
+        <TouchableOpacity style={s.skipBtn} onPress={handleSkip}>
+          <Text style={s.skipText}>Saltar</Text>
+        </TouchableOpacity>
+      )}
+
+      {/* Slides */}
       <ScrollView
         ref={scrollViewRef}
         horizontal
         pagingEnabled
         showsHorizontalScrollIndicator={false}
         scrollEnabled={false}
-        style={styles.scrollView}
+        style={s.scroll}
       >
-        {slides.map((slide, index) => (
-          <View key={index} style={styles.slide}>
-            <View style={styles.iconContainer}>
-              <IconSymbol
-                android_material_icon_name={slide.icon as any}
-                size={80}
-                color={colors.primary}
-              />
+        {slides.map((sl, i) => (
+          <View key={i} style={s.slide}>
+            {/* Icon */}
+            <View style={[s.iconWrap, { backgroundColor: sl.bg }]}>
+              <MaterialIcons name={sl.icon as any} size={56} color={sl.color} />
             </View>
-            <Text style={styles.title}>{slide.title}</Text>
-            <Text style={styles.description}>{slide.description}</Text>
+
+            {/* Logo VYLTA */}
+            <View style={s.logoRow}>
+              <View style={s.logoDot} />
+              <Text style={s.logoText}>VYLTA</Text>
+            </View>
+
+            <Text style={s.title}>{sl.title}</Text>
+            <Text style={s.desc}>{sl.description}</Text>
           </View>
         ))}
       </ScrollView>
 
-      <View style={styles.pagination}>
-        {slides.map((_, index) => {
-          const isActive = index === currentIndex;
-          return (
-            <View
-              key={index}
-              style={[
-                styles.dot,
-                isActive ? styles.dotActive : styles.dotInactive,
-              ]}
-            />
-          );
-        })}
+      {/* Dots */}
+      <View style={s.dots}>
+        {slides.map((_, i) => (
+          <View
+            key={i}
+            style={[
+              s.dot,
+              i === currentIndex ? s.dotActive : s.dotInactive,
+            ]}
+          />
+        ))}
       </View>
 
-      <TouchableOpacity style={styles.button} onPress={handleNext}>
-        <Text style={styles.buttonText}>{buttonText}</Text>
+      {/* CTA */}
+      <TouchableOpacity
+        style={[s.btn, isLast && s.btnLast]}
+        onPress={handleNext}
+        activeOpacity={0.85}
+      >
+        <Text style={s.btnText}>
+          {isLast ? 'Crear mi cuenta →' : 'Siguiente'}
+        </Text>
       </TouchableOpacity>
+
+      <View style={{ height: 16 }} />
     </SafeAreaView>
   );
 }
 
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: colors.background,
-  },
-  skipButton: {
-    alignSelf: 'flex-end',
-    padding: 16,
-    marginRight: 8,
-  },
-  skipText: {
-    color: colors.textSecondary,
-    fontSize: 16,
-  },
-  scrollView: {
-    flex: 1,
-  },
-  slide: {
-    width,
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingHorizontal: 40,
-  },
-  iconContainer: {
-    width: 120,
-    height: 120,
-    borderRadius: 60,
-    backgroundColor: colors.card,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: 32,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.1,
-    shadowRadius: 12,
-    elevation: 4,
-  },
-  title: {
-    fontSize: 28,
-    fontWeight: 'bold',
-    color: colors.text,
-    textAlign: 'center',
-    marginBottom: 16,
-  },
-  description: {
-    fontSize: 16,
-    color: colors.textSecondary,
-    textAlign: 'center',
-    lineHeight: 24,
-  },
-  pagination: {
-    flexDirection: 'row',
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginBottom: 32,
-  },
-  dot: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-    marginHorizontal: 4,
-  },
-  dotActive: {
-    backgroundColor: colors.primary,
-    width: 24,
-  },
-  dotInactive: {
-    backgroundColor: colors.border,
-  },
-  button: {
-    backgroundColor: colors.primary,
-    borderRadius: 12,
-    padding: 16,
-    marginHorizontal: 24,
-    marginBottom: 24,
-    alignItems: 'center',
-  },
-  buttonText: {
-    color: '#FFFFFF',
-    fontSize: 18,
-    fontWeight: '600',
-  },
+const s = StyleSheet.create({
+  container:   { flex: 1, backgroundColor: '#F8FAFC' },
+  skipBtn:     { alignSelf: 'flex-end', paddingHorizontal: 20, paddingVertical: 14 },
+  skipText:    { color: '#94A3B8', fontSize: 15, fontWeight: '500' },
+  scroll:      { flex: 1 },
+  slide:       { width, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 40 },
+  iconWrap:    { width: 120, height: 120, borderRadius: 36, justifyContent: 'center', alignItems: 'center', marginBottom: 32 },
+  logoRow:     { flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 20 },
+  logoDot:     { width: 8, height: 8, borderRadius: 4, backgroundColor: '#10B981' },
+  logoText:    { fontSize: 13, fontWeight: '900', color: '#10B981', letterSpacing: 2 },
+  title:       { fontSize: 28, fontWeight: '800', color: '#0F172A', textAlign: 'center', marginBottom: 14, letterSpacing: -0.5 },
+  desc:        { fontSize: 16, color: '#64748B', textAlign: 'center', lineHeight: 26 },
+  dots:        { flexDirection: 'row', justifyContent: 'center', alignItems: 'center', marginBottom: 24, gap: 6 },
+  dot:         { height: 8, borderRadius: 4 },
+  dotActive:   { width: 24, backgroundColor: '#10B981' },
+  dotInactive: { width: 8, backgroundColor: '#E2E8F0' },
+  btn:         { backgroundColor: '#10B981', borderRadius: 16, paddingVertical: 17, marginHorizontal: 24, alignItems: 'center' },
+  btnLast:     { backgroundColor: '#0F172A' },
+  btnText:     { color: '#fff', fontSize: 17, fontWeight: '700' },
 });
