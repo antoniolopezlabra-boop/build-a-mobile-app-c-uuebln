@@ -13,31 +13,37 @@ import { usePlan } from '@/contexts/PlanContext';
 import { PLAN_PRICES } from '@/services/stripe';
 import MaterialIcons from '@expo/vector-icons/MaterialIcons';
 
+// ─── Features por plan (arquitectura simplificada Mar 2026) ──────────────────
 const PLAN_FEATURES = {
   Gratuito: [
-    'Acceso al perfil del negocio',
+    'Link de citas público',
+    'Hasta 10 citas por mes',
+    '1 servicio en catálogo',
     'Configuración de horarios',
-    'Catálogo de servicios',
-    'Vista previa de la app',
+    'Perfil del negocio',
   ],
   Basico: [
+    'Link de citas público ilimitado',
     'Citas ilimitadas',
-    'Gestión de clientes ilimitada',
-    'Calendario y agenda',
-    'Reportes financieros',
-    'Confirmaciones WhatsApp (número VYLTA)',
-    'Recordatorios 24h y 2h antes',
-    'Catálogo de servicios con precios',
+    'Hasta 3 servicios en catálogo',
+    'Recordatorios WhatsApp automáticos',
+    'Confirmación al agendar',
+    'Recordatorio 24h y 2h antes',
+    'Lista de espera simple',
+    'Dashboard del día',
+    'Gestión de clientes',
+    'Reportes básicos',
     'Soporte por email',
   ],
   Premium: [
-    'Todo lo del plan Básico',
-    'Número de WhatsApp propio del negocio',
-    'Citas simultáneas (solapamiento)',
-    'Email Marketing a clientes',
+    'Todo lo del Plan Básico',
+    'Servicios ilimitados en catálogo',
+    'Email Marketing (campañas a clientes)',
+    'Recuperación de clientes inactivos',
     'Recordatorios de cumpleaños',
-    'Reportes avanzados',
-    'Soporte prioritario 24/7',
+    'Empalme de citas (atención simultánea)',
+    'Reportes avanzados de ingresos',
+    'Soporte prioritario',
   ],
 };
 
@@ -70,7 +76,6 @@ export default function SubscriptionScreen() {
   const emoji       = PLAN_EMOJI[currentPlan] || '🌱';
 
   const handleActivatePlan = (target: PlanTarget) => {
-    // Mostrar modal de confirmación antes de abrir el navegador
     setConfirmModal({ visible: true, target });
   };
 
@@ -109,7 +114,6 @@ export default function SubscriptionScreen() {
   return (
     <SafeAreaView style={s.container}>
 
-      {/* Modal confirmación antes de abrir Stripe */}
       <ConfirmModal
         visible={confirmModal.visible}
         title={`Activar Plan ${targetName}`}
@@ -160,7 +164,14 @@ export default function SubscriptionScreen() {
           {isGratuito && (
             <View style={s.upgradeBanner}>
               <Text style={s.upgradeBannerText}>
-                Activa el Plan Básico para empezar a agendar citas y enviar recordatorios por WhatsApp.
+                Activa el Plan Básico para agendar citas ilimitadas y enviar recordatorios automáticos por WhatsApp.
+              </Text>
+            </View>
+          )}
+          {isBasico && (
+            <View style={[s.upgradeBanner, { backgroundColor: '#EEF2FF', borderColor: '#6366F1' }]}>
+              <Text style={[s.upgradeBannerText, { color: '#3730A3' }]}>
+                Mejora al Plan Premium para activar email marketing, recuperación de clientes inactivos y más.
               </Text>
             </View>
           )}
@@ -262,7 +273,6 @@ const s = StyleSheet.create({
   title: { fontSize: 20, fontWeight: 'bold', color: colors.text },
   scroll: { padding: 20, paddingBottom: 60 },
 
-  // Plan actual
   currentCard: {
     backgroundColor: colors.card, borderRadius: 16, padding: 20,
     marginBottom: 24, shadowColor: '#000', shadowOpacity: 0.05, shadowRadius: 8, elevation: 2,
@@ -279,7 +289,6 @@ const s = StyleSheet.create({
 
   sectionLabel: { fontSize: 11, fontWeight: '800', color: colors.textSecondary, marginBottom: 12, letterSpacing: 1 },
 
-  // Cards planes
   planCard: {
     backgroundColor: colors.card, borderRadius: 16, padding: 20,
     marginBottom: 16, borderWidth: 1.5, borderColor: 'transparent',
@@ -300,14 +309,12 @@ const s = StyleSheet.create({
   featureRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
   featureText: { fontSize: 14, color: colors.text, flex: 1 },
 
-  // CTA button
   ctaBtn: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8,
     backgroundColor: colors.primary, borderRadius: 12, padding: 14, marginTop: 18,
   },
   ctaBtnText: { color: '#fff', fontSize: 15, fontWeight: '700' },
 
-  // Nota seguridad
   secureNote: {
     flexDirection: 'row', alignItems: 'center', gap: 6,
     backgroundColor: colors.card, borderRadius: 10, padding: 12, marginTop: 4,
