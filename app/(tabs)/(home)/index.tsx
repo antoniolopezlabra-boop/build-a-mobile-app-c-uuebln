@@ -31,7 +31,9 @@ interface TodayAppointment {
   time: string;
   service: string;
   status: string;
-  client: { id: string; name: string; phone: string };
+  client: { id: string; name: string; phone: string } | null;
+  clientNameTemp?: string | null;
+  source?: string | null;
 }
 
 interface WhatsAppConfig {
@@ -52,21 +54,15 @@ function StatCard({ value, label, accent, surface, border }: {
 }
 
 const sc = StyleSheet.create({
-  card: {
-    flex: 1,
-    borderRadius: 14,
-    padding: 14,
-    marginHorizontal: 4,
-    borderWidth: 1,
-    borderTopWidth: 2,
-  },
+  card:  { flex: 1, borderRadius: 14, padding: 14, marginHorizontal: 4, borderWidth: 1, borderTopWidth: 2 },
   value: { fontSize: 28, fontWeight: '800', letterSpacing: -0.5, lineHeight: 32 },
   label: { fontSize: 11, color: '#94A3B8', marginTop: 4, fontWeight: '500' },
 });
 
 // ─── Acción rápida ─────────────────────────────────────────────────────────
-function QuickAction({ icon, label, onPress, accent = '#10B981', surface, border }: {
-  icon: string; label: string; onPress: () => void; accent?: string; surface: string; border: string;
+// FIX: usar tc.text en lugar de '#F8FAFC' hardcodeado (invisible en light mode)
+function QuickAction({ icon, label, onPress, accent = '#10B981', surface, border, textColor }: {
+  icon: string; label: string; onPress: () => void; accent?: string; surface: string; border: string; textColor: string;
 }) {
   return (
     <TouchableOpacity
@@ -77,30 +73,15 @@ function QuickAction({ icon, label, onPress, accent = '#10B981', surface, border
       <View style={[qa.iconWrap, { backgroundColor: accent + '18' }]}>
         <MaterialIcons name={icon as any} size={24} color={accent} />
       </View>
-      <Text style={[qa.label, { color: '#F8FAFC' }]}>{label}</Text>
+      <Text style={[qa.label, { color: textColor }]}>{label}</Text>
     </TouchableOpacity>
   );
 }
 
 const qa = StyleSheet.create({
-  btn: {
-    width: '48%',
-    borderRadius: 16,
-    padding: 16,
-    marginBottom: 10,
-    borderWidth: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-  },
-  iconWrap: {
-    width: 42,
-    height: 42,
-    borderRadius: 12,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  label: { fontSize: 13, fontWeight: '600', flex: 1 },
+  btn:      { width: '48%', borderRadius: 16, padding: 16, marginBottom: 10, borderWidth: 1, flexDirection: 'row', alignItems: 'center', gap: 12 },
+  iconWrap: { width: 42, height: 42, borderRadius: 12, justifyContent: 'center', alignItems: 'center' },
+  label:    { fontSize: 13, fontWeight: '600', flex: 1 },
 });
 
 // ─── Pantalla principal ────────────────────────────────────────────────────
@@ -234,7 +215,6 @@ export default function HomeScreen() {
             </View>
           </View>
 
-          {/* Avatar prominente — es el logo del negocio */}
           <TouchableOpacity
             onPress={() => router.push('/settings/profile')}
             activeOpacity={0.85}
@@ -250,7 +230,6 @@ export default function HomeScreen() {
                 <Text style={s.avatarText}>{initials}</Text>
               </View>
             )}
-            {/* Indicador de perfil editable */}
             <View style={[s.avatarBadge, { borderColor: tc.bg }]}>
               <MaterialIcons name="edit" size={10} color="#fff" />
             </View>
@@ -328,6 +307,8 @@ export default function HomeScreen() {
           <View style={[s.apptList, { gap: 8, marginBottom: 20 }]}>
             {todayAppointments.map((appt) => {
               const statusColor = getStatusColor(appt.status);
+              // FIX: mostrar nombre temporal para citas del link público
+              const displayName = appt.client?.name || appt.clientNameTemp || 'Cliente';
               return (
                 <TouchableOpacity
                   key={appt.id}
@@ -340,7 +321,7 @@ export default function HomeScreen() {
                     <Text style={[s.apptTime, { color: tc.text }]}>{appt.time}</Text>
                   </View>
                   <View style={s.apptBody}>
-                    <Text style={[s.apptClient, { color: tc.text }]} numberOfLines={1}>{appt.client?.name}</Text>
+                    <Text style={[s.apptClient, { color: tc.text }]} numberOfLines={1}>{displayName}</Text>
                     <Text style={[s.apptService, { color: tc.textMuted }]} numberOfLines={1}>{appt.service}</Text>
                   </View>
                   <View style={[s.apptBadge, { backgroundColor: statusColor + '22' }]}>
@@ -358,10 +339,10 @@ export default function HomeScreen() {
           <Text style={[s.sectionTitle, { color: tc.text }]}>Acciones rápidas</Text>
         </View>
         <View style={s.actionsGrid}>
-          <QuickAction icon="add-circle-outline" label="Nueva cita" accent="#10B981" surface={tc.surface} border={tc.border} onPress={() => router.push('/appointments/new')} />
-          <QuickAction icon="person-add-alt" label="Nuevo cliente" accent="#3B82F6" surface={tc.surface} border={tc.border} onPress={() => router.push('/clients/new')} />
-          <QuickAction icon="calendar-month" label="Ver agenda" accent="#8B5CF6" surface={tc.surface} border={tc.border} onPress={() => router.push('/(tabs)/appointments')} />
-          <QuickAction icon="person-search" label="Clientes inactivos" accent="#F59E0B" surface={tc.surface} border={tc.border} onPress={() => router.push('/clients/inactive')} />
+          <QuickAction icon="add-circle-outline" label="Nueva cita" accent="#10B981" surface={tc.surface} border={tc.border} textColor={tc.text} onPress={() => router.push('/appointments/new')} />
+          <QuickAction icon="person-add-alt" label="Nuevo cliente" accent="#3B82F6" surface={tc.surface} border={tc.border} textColor={tc.text} onPress={() => router.push('/clients/new')} />
+          <QuickAction icon="calendar-month" label="Ver agenda" accent="#8B5CF6" surface={tc.surface} border={tc.border} textColor={tc.text} onPress={() => router.push('/(tabs)/appointments')} />
+          <QuickAction icon="person-search" label="Clientes inactivos" accent="#F59E0B" surface={tc.surface} border={tc.border} textColor={tc.text} onPress={() => router.push('/clients/inactive')} />
         </View>
 
         {/* ── Banner WhatsApp ── */}
@@ -391,46 +372,32 @@ const s = StyleSheet.create({
   container:      { flex: 1 },
   loadingWrap:    { flex: 1, justifyContent: 'center', alignItems: 'center' },
   scroll:         { paddingHorizontal: 16, paddingTop: 8, paddingBottom: 110 },
-
-  // Header
   header:         { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 24 },
   greeting:       { fontSize: 13, fontWeight: '500', marginBottom: 2 },
   userName:       { fontSize: 28, fontWeight: '800', letterSpacing: -0.5, marginBottom: 10 },
   datePill:       { flexDirection: 'row', alignItems: 'center', gap: 5, alignSelf: 'flex-start', paddingHorizontal: 10, paddingVertical: 5, borderRadius: 20, borderWidth: 1 },
   dateText:       { fontSize: 12, fontWeight: '500' },
-
-  // Avatar — protagonista del negocio
   avatarBtn:      { position: 'relative' },
   avatar:         { width: 68, height: 68, borderRadius: 20, borderWidth: 2 },
   avatarFallback: { width: 68, height: 68, borderRadius: 20, backgroundColor: '#10B981', justifyContent: 'center', alignItems: 'center' },
   avatarText:     { fontSize: 24, fontWeight: '800', color: '#fff' },
   avatarBadge:    { position: 'absolute', bottom: -2, right: -2, width: 20, height: 20, borderRadius: 10, backgroundColor: '#10B981', borderWidth: 2, justifyContent: 'center', alignItems: 'center' },
-
-  // Upgrade
   upgradeCard:    { backgroundColor: '#10B981', borderRadius: 18, padding: 18, flexDirection: 'row', alignItems: 'center', marginBottom: 20, gap: 12 },
   upgradeLeft:    { flex: 1 },
   upgradeTitle:   { fontSize: 16, fontWeight: '800', color: '#fff', marginBottom: 3 },
   upgradeDesc:    { fontSize: 13, color: 'rgba(255,255,255,0.75)', lineHeight: 18 },
   upgradeArrow:   { width: 36, height: 36, borderRadius: 18, backgroundColor: 'rgba(255,255,255,0.2)', justifyContent: 'center', alignItems: 'center' },
-
-  // Sections
   sectionRow:     { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12, marginTop: 4 },
   sectionTitle:   { fontSize: 16, fontWeight: '700' },
   sectionSub:     { fontSize: 12, fontWeight: '500' },
   seeAll:         { fontSize: 13, color: '#10B981', fontWeight: '600' },
-
-  // Stats
   statsRow:       { flexDirection: 'row', marginBottom: 16, marginHorizontal: -4 },
-
-  // Empty
   emptyCard:      { borderRadius: 18, padding: 28, alignItems: 'center', borderWidth: 1, marginBottom: 20 },
   emptyIconWrap:  { width: 56, height: 56, borderRadius: 16, justifyContent: 'center', alignItems: 'center', marginBottom: 12 },
   emptyTitle:     { fontSize: 16, fontWeight: '700', marginBottom: 4 },
   emptyDesc:      { fontSize: 13, marginBottom: 18, textAlign: 'center' },
   emptyBtn:       { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: '#10B981', paddingVertical: 10, paddingHorizontal: 20, borderRadius: 12 },
   emptyBtnText:   { color: '#fff', fontWeight: '700', fontSize: 14 },
-
-  // Appointments
   apptList:       {},
   apptCard:       { borderRadius: 14, flexDirection: 'row', alignItems: 'center', overflow: 'hidden', borderWidth: 1 },
   apptAccent:     { width: 3, alignSelf: 'stretch' },
@@ -441,11 +408,7 @@ const s = StyleSheet.create({
   apptService:    { fontSize: 12, marginTop: 2 },
   apptBadge:      { marginRight: 8, paddingHorizontal: 9, paddingVertical: 4, borderRadius: 8 },
   apptBadgeText:  { fontSize: 11, fontWeight: '700' },
-
-  // Quick actions
   actionsGrid:    { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between', marginBottom: 20 },
-
-  // WhatsApp
   waBanner:       { borderRadius: 16, padding: 14, flexDirection: 'row', alignItems: 'center', gap: 12, borderWidth: 1 },
   waIconBox:      { width: 40, height: 40, borderRadius: 12, backgroundColor: '#052E16', justifyContent: 'center', alignItems: 'center' },
   waTitle:        { fontSize: 14, fontWeight: '600', marginBottom: 2 },

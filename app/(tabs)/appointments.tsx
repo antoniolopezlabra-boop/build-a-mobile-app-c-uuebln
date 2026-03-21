@@ -12,7 +12,7 @@ import { usePlan } from '@/contexts/PlanContext';
 import { useTheme } from '@/contexts/ThemeContext';
 import { Calendar } from 'react-native-calendars';
 import MaterialIcons from '@expo/vector-icons/MaterialIcons';
-import { getStatusColor } from '@/utils/appointmentUtils';
+import { getTodayString } from '@/utils/dateUtils';
 
 interface ApiAppointment {
   id: string;
@@ -23,19 +23,23 @@ interface ApiAppointment {
   status: string;
   isRescheduled?: boolean;
   notes?: string | null;
-  client: { id: string; name: string; phone: string };
-  client_name_temp?: string;
+  client: { id: string; name: string; phone: string } | null;
+  clientNameTemp?: string | null;
+  clientPhone?: string | null;
+  source?: string | null;
 }
 
+// FIX: 'No asistió' en lugar de 'No-show' para coincidir con los valores reales en DB
 const STATUS_META: Record<string, { color: string; label: string }> = {
-  Confirmada: { color: '#10B981', label: 'Confirmada' },
-  Pendiente:  { color: '#F59E0B', label: 'Pendiente' },
-  Cancelada:  { color: '#EF4444', label: 'Cancelada' },
-  Completada: { color: '#6B7280', label: 'Completada' },
-  'No-show':  { color: '#F97316', label: 'No-show' },
-  Reagendada: { color: '#3B82F6', label: 'Reagendada' },
-  Pagado:     { color: '#8B5CF6', label: 'Pagado' },
-  Solicitud:  { color: '#3B82F6', label: 'Solicitud' },
+  Confirmada:   { color: '#10B981', label: 'Confirmada' },
+  Pendiente:    { color: '#F59E0B', label: 'Pendiente' },
+  Cancelada:    { color: '#EF4444', label: 'Cancelada' },
+  Completada:   { color: '#6B7280', label: 'Completada' },
+  'No asistió': { color: '#F97316', label: 'No asistió' },
+  Reagendada:   { color: '#3B82F6', label: 'Reagendada' },
+  Pagado:       { color: '#8B5CF6', label: 'Pagado' },
+  Solicitud:    { color: '#3B82F6', label: 'Solicitud' },
+  'En espera':  { color: '#0EA5E9', label: 'En espera' },
 };
 
 export default function AppointmentsScreen() {
@@ -46,7 +50,8 @@ export default function AppointmentsScreen() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [appointments, setAppointments] = useState<ApiAppointment[]>([]);
-  const [selectedDate, setSelectedDate] = useState(new Date().toISOString().split('T')[0]);
+  // FIX: usar getTodayString() para obtener fecha local, no UTC
+  const [selectedDate, setSelectedDate] = useState(getTodayString());
   const [loadError, setLoadError] = useState(false);
 
   useFocusEffect(
@@ -107,7 +112,6 @@ export default function AppointmentsScreen() {
   const formattedDate = selectedDateObj.toLocaleDateString('es-MX', { weekday: 'long', month: 'long', day: 'numeric' });
   const monthYear     = selectedDateObj.toLocaleDateString('es-MX', { month: 'long', year: 'numeric' });
 
-  // Colores del calendario según tema
   const calTheme = {
     backgroundColor: tc.surface,
     calendarBackground: tc.surface,
@@ -195,7 +199,7 @@ export default function AppointmentsScreen() {
                 {confirmedCount > 0 && (
                   <View style={[s.summaryChip, { backgroundColor: tc.surface, borderColor: tc.border }]}>
                     <View style={[s.summaryDot, { backgroundColor: '#10B981' }]} />
-                    <Text style={[s.summaryText, { color: tc.textSecondary }]}>
+                    <Text style={[s.summaryText, { color: tc.textMuted }]}>
                       {confirmedCount} confirmada{confirmedCount > 1 ? 's' : ''}
                     </Text>
                   </View>
@@ -203,7 +207,7 @@ export default function AppointmentsScreen() {
                 {pendingCount > 0 && (
                   <View style={[s.summaryChip, { backgroundColor: tc.surface, borderColor: tc.border }]}>
                     <View style={[s.summaryDot, { backgroundColor: '#F59E0B' }]} />
-                    <Text style={[s.summaryText, { color: tc.textSecondary }]}>
+                    <Text style={[s.summaryText, { color: tc.textMuted }]}>
                       {pendingCount} pendiente{pendingCount > 1 ? 's' : ''}
                     </Text>
                   </View>
@@ -217,10 +221,7 @@ export default function AppointmentsScreen() {
             <View style={s.errorState}>
               <MaterialIcons name="wifi-off" size={32} color={tc.border} />
               <Text style={[s.errorText, { color: '#EF4444' }]}>No se pudieron cargar las citas.</Text>
-              <TouchableOpacity
-                onPress={() => loadAppointments()}
-                style={s.retryBtn}
-              >
+              <TouchableOpacity onPress={() => loadAppointments()} style={s.retryBtn}>
                 <Text style={s.retryText}>Reintentar</Text>
               </TouchableOpacity>
             </View>
@@ -239,6 +240,8 @@ export default function AppointmentsScreen() {
             <View style={s.list}>
               {dateAppointments.map((appt) => {
                 const meta = STATUS_META[appt.status] || { color: '#94A3B8', label: appt.status };
+                // FIX: mostrar nombre temporal para citas del link público
+                const displayName = appt.client?.name || appt.clientNameTemp || 'Cliente';
                 return (
                   <TouchableOpacity
                     key={appt.id}
@@ -252,7 +255,7 @@ export default function AppointmentsScreen() {
                     </View>
                     <View style={s.infoCol}>
                       <Text style={[s.clientName, { color: tc.text }]} numberOfLines={1}>
-                        {appt.client?.name || appt.client_name_temp || 'Cliente'}
+                        {displayName}
                       </Text>
                       <Text style={[s.serviceName, { color: tc.textMuted }]} numberOfLines={1}>
                         {appt.service || 'Servicio'}
@@ -260,6 +263,11 @@ export default function AppointmentsScreen() {
                       {appt.isRescheduled && (
                         <View style={s.rescheduledPill}>
                           <Text style={s.rescheduledText}>Reagendada</Text>
+                        </View>
+                      )}
+                      {appt.source === 'public_link' && !appt.client && (
+                        <View style={[s.rescheduledPill, { backgroundColor: '#EFF6FF' }]}>
+                          <Text style={[s.rescheduledText, { color: '#3B82F6' }]}>Link público</Text>
                         </View>
                       )}
                     </View>

@@ -1,13 +1,14 @@
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useState, useCallback } from 'react';
 import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity,
-  ActivityIndicator, TextInput,
+  ActivityIndicator, TextInput, RefreshControl,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
+import { useFocusEffect } from '@react-navigation/native';
 import { colors } from '@/styles/commonStyles';
 import { ConfirmModal } from '@/components/button';
-import { getCached, setCached, CACHE_TTL } from '@/utils/cache';
+import { getCached, setCached, invalidateCache, CACHE_TTL } from '@/utils/cache';
 import { apiGet } from '@/utils/api';
 import { useTheme } from '@/contexts/ThemeContext';
 import MaterialIcons from '@expo/vector-icons/MaterialIcons';
@@ -60,9 +61,11 @@ const getInitials = (name: string) => {
   return name.substring(0, 2).toUpperCase();
 };
 
+// FIX: usar T12:00:00 para evitar bug de timezone en lastVisit
 const formatLastVisit = (lastVisit: string | null | undefined) => {
   if (!lastVisit) return null;
-  const diffDays = Math.ceil(Math.abs(new Date().getTime() - new Date(lastVisit).getTime()) / 86400000);
+  const visitDate = new Date(lastVisit + 'T12:00:00');
+  const diffDays = Math.ceil(Math.abs(new Date().getTime() - visitDate.getTime()) / 86400000);
   if (diffDays === 0) return 'Hoy';
   if (diffDays === 1) return 'Ayer';
   if (diffDays < 7) return `Hace ${diffDays} días`;
@@ -76,25 +79,28 @@ export default function ClientsScreen() {
   const { colors: tc, isDark } = useTheme();
 
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [allClients, setAllClients] = useState<Client[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
   const [filter, setFilter] = useState<FilterType>('Todos');
   const [errorModal, setErrorModal] = useState({ visible: false, message: '' });
 
-  useEffect(() => {
-    const timer = setTimeout(() => { loadClients(); }, searchQuery ? 300 : 0);
-    return () => clearTimeout(timer);
-  }, [searchQuery]);
-
-  const loadClients = async () => {
-    setLoading(true);
-    try {
+  // FIX: useFocusEffect para refrescar al volver de crear/editar cliente
+  useFocusEffect(
+    useCallback(() => {
       const cached = getCached<Client[]>('clients_list');
-      if (cached && !searchQuery) {
+      if (cached) {
         setAllClients(cached);
         setLoading(false);
-        return;
+      } else {
+        loadClients();
       }
+    }, [])
+  );
+
+  const loadClients = async (silent = false) => {
+    if (!silent) setLoading(true);
+    try {
       const data = await apiGet<Client[]>('/api/clients');
       setAllClients(data);
       setCached('clients_list', data, CACHE_TTL.CLIENTS);
@@ -102,8 +108,15 @@ export default function ClientsScreen() {
       setErrorModal({ visible: true, message: 'Error al cargar los clientes' });
     } finally {
       setLoading(false);
+      setRefreshing(false);
     }
   };
+
+  const onRefresh = useCallback(() => {
+    setRefreshing(true);
+    invalidateCache('clients_list');
+    loadClients(true);
+  }, []);
 
   const filteredClients = allClients.filter((c) => {
     const matchesSearch = !searchQuery ||
@@ -192,7 +205,17 @@ export default function ClientsScreen() {
         </View>
       </View>
 
-      <ScrollView contentContainerStyle={s.scroll}>
+      <ScrollView
+        contentContainerStyle={s.scroll}
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={onRefresh}
+            tintColor={colors.primary}
+            colors={[colors.primary]}
+          />
+        }
+      >
         {filteredClients.length === 0 ? (
           <View style={s.empty}>
             <View style={[s.emptyIconWrap, { backgroundColor: tc.surface }]}>
