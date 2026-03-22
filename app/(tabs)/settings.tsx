@@ -14,6 +14,7 @@ import { getCached, setCached } from '@/utils/cache';
 import { useAuth } from '@/contexts/AuthContext';
 import { useTheme, ThemeMode } from '@/contexts/ThemeContext';
 import { apiGet } from '@/utils/api';
+import { supabase } from '@/lib/supabase';
 import MaterialIcons from '@expo/vector-icons/MaterialIcons';
 
 interface WhatsAppConfig {
@@ -104,6 +105,7 @@ export default function SettingsScreen() {
   const [bookingLinkActive, setBookingLinkActive] = useState(false);
   const [subscription, setSubscription] = useState<Subscription | null>(null);
   const [loading, setLoading] = useState(true);
+  const [staffCount, setStaffCount] = useState(0);
 
   useEffect(() => { loadSettings(); }, []);
 
@@ -120,7 +122,6 @@ export default function SettingsScreen() {
         apiGet<Subscription>('/api/subscription').catch(() => null),
       ]);
       if (whatsappData) setCached('settings_whatsapp', whatsappData);
-      const { supabase } = await import('@/lib/supabase');
       const { data: bpData } = await supabase
         .from('business_profiles')
         .select('allow_overlapping, birthday_reminders_enabled')
@@ -135,6 +136,15 @@ export default function SettingsScreen() {
         .eq('user_id', user?.id)
         .single();
       if (blData) setBookingLinkActive(blData.is_active || false);
+
+      // Contar staff activos
+      const { count } = await supabase
+        .from('staff_members')
+        .select('id', { count: 'exact', head: true })
+        .eq('user_id', user?.id)
+        .eq('is_active', true);
+      setStaffCount(count || 0);
+
       if (subscriptionData) setCached('settings_subscription', subscriptionData);
       setWhatsappConfig(whatsappData); setSubscription(subscriptionData);
     } catch (error) {
@@ -153,7 +163,6 @@ export default function SettingsScreen() {
     if (!canOverlap) { router.push('/settings/subscription'); return; }
     setAllowOverlapping(value); setSavingOverlap(true);
     try {
-      const { supabase } = await import('@/lib/supabase');
       await supabase.from('business_profiles').update({ allow_overlapping: value }).eq('user_id', user?.id);
     } catch { setAllowOverlapping(!value); } finally { setSavingOverlap(false); }
   };
@@ -161,7 +170,6 @@ export default function SettingsScreen() {
   const handleDeleteAccount = async () => {
     setDeleting(true);
     try {
-      const { supabase } = await import('@/lib/supabase');
       const { error } = await supabase.rpc('delete_user_account');
       if (error) throw error;
       await signOut();
@@ -175,7 +183,6 @@ export default function SettingsScreen() {
   const planDisplay = isPremium ? 'Premium' : isBasico ? 'Básico' : 'Gratuito';
   const initials = user?.name?.split(' ').map((w: string) => w[0]).slice(0, 2).join('').toUpperCase() || 'U';
 
-  // WhatsApp: activo si tiene plan y al menos un toggle activo
   const waActive = canUseWhatsApp && (
     whatsappConfig?.confirmationOnBooking ||
     whatsappConfig?.reminder24h ||
@@ -186,6 +193,10 @@ export default function SettingsScreen() {
     : waActive
       ? 'Recordatorios activos · Número VYLTA'
       : 'Recordatorios desactivados';
+
+  const staffSublabel = staffCount > 0
+    ? `${staffCount} colaborador${staffCount !== 1 ? 'es' : ''} activo${staffCount !== 1 ? 's' : ''}`
+    : 'Sin colaboradores — toca para agregar';
 
   if (loading) {
     return (
@@ -254,12 +265,29 @@ export default function SettingsScreen() {
           <MaterialIcons name="arrow-forward-ios" size={16} color={planColor} />
         </TouchableOpacity>
 
+        {/* MI NEGOCIO — ahora incluye Mi equipo */}
         <SettingGroup title="MI NEGOCIO">
-          <SettingRow iconName="store" iconColor="#10B981" iconBg="#ECFDF5" label="Información del negocio" sublabel={businessProfile?.businessName || 'Configura tu negocio'} onPress={() => router.push('/settings/business')} />
-          <SettingRow iconName="schedule" iconColor="#3B82F6" iconBg="#EFF6FF" label="Horarios de atención" sublabel="Configura tu disponibilidad" onPress={() => router.push('/settings/schedule')} />
-          <SettingRow iconName="content-cut" iconColor="#F59E0B" iconBg="#FFFBEB" label="Catálogo de servicios" sublabel="Gestiona tus servicios y precios" onPress={() => router.push('/settings/services')} />
+          <SettingRow iconName="store" iconColor="#10B981" iconBg="#ECFDF5"
+            label="Información del negocio"
+            sublabel={businessProfile?.businessName || 'Configura tu negocio'}
+            onPress={() => router.push('/settings/business')} />
+          <SettingRow iconName="schedule" iconColor="#3B82F6" iconBg="#EFF6FF"
+            label="Horarios de atención"
+            sublabel="Configura tu disponibilidad"
+            onPress={() => router.push('/settings/schedule')} />
+          <SettingRow iconName="content-cut" iconColor="#F59E0B" iconBg="#FFFBEB"
+            label="Catálogo de servicios"
+            sublabel="Gestiona tus servicios y precios"
+            onPress={() => router.push('/settings/services')} />
+          {/* NUEVO: Mi equipo — staff members */}
           <SettingRow
-            iconName="event-available" iconColor="#8B5CF6" iconBg="#F5F3FF"
+            iconName="group" iconColor="#8B5CF6" iconBg="#F5F3FF"
+            label="Mi equipo"
+            sublabel={staffSublabel}
+            onPress={() => router.push('/settings/staff' as any)}
+          />
+          <SettingRow
+            iconName="event-available" iconColor="#06B6D4" iconBg="#ECFEFF"
             label="Citas simultáneas" sublabel="Permite atender más de una cita al mismo tiempo"
             badge={!isPremium ? <View style={s.premiumChip}><Text style={s.premiumChipText}>PREMIUM</Text></View> : undefined}
             right={<Switch value={allowOverlapping} onValueChange={handleOverlappingToggle} trackColor={{ false: '#E2E8F0', true: '#10B981' }} thumbColor="#fff" disabled={savingOverlap || !canOverlap} />}
@@ -337,7 +365,6 @@ export default function SettingsScreen() {
           />
         </SettingGroup>
 
-        {/* ── APARIENCIA ── */}
         <SettingGroup title="APARIENCIA">
           <View style={[row.container, { backgroundColor: tc.surface }]}>
             <View style={[row.iconBox, { backgroundColor: isDark ? '#1E3A5F' : '#EFF6FF' }]}>
@@ -353,22 +380,12 @@ export default function SettingsScreen() {
               {(['light', 'dark'] as ThemeMode[]).map((m) => (
                 <TouchableOpacity
                   key={m}
-                  style={[
-                    s.themeOption,
-                    { borderColor: tc.border, backgroundColor: tc.bg },
-                    mode === m && s.themeOptionActive,
-                  ]}
+                  style={[s.themeOption, { borderColor: tc.border, backgroundColor: tc.bg }, mode === m && s.themeOptionActive]}
                   onPress={() => setMode(m)}
                   activeOpacity={0.75}
                 >
-                  <MaterialIcons
-                    name={m === 'light' ? 'light-mode' : 'dark-mode'}
-                    size={18}
-                    color={mode === m ? '#fff' : tc.textMuted}
-                  />
-                  <Text style={[s.themeOptionText, mode === m && { color: '#fff' }]}>
-                    {m === 'light' ? 'Claro' : 'Oscuro'}
-                  </Text>
+                  <MaterialIcons name={m === 'light' ? 'light-mode' : 'dark-mode'} size={18} color={mode === m ? '#fff' : tc.textMuted} />
+                  <Text style={[s.themeOptionText, mode === m && { color: '#fff' }]}>{m === 'light' ? 'Claro' : 'Oscuro'}</Text>
                 </TouchableOpacity>
               ))}
             </View>
@@ -402,7 +419,6 @@ const s = StyleSheet.create({
   header: { paddingHorizontal: 20, paddingTop: 12, paddingBottom: 16 },
   headerTitle: { fontSize: 32, fontWeight: '800', letterSpacing: -0.5 },
   scroll: { padding: 20, paddingBottom: 100 },
-
   heroCard: { borderRadius: 20, padding: 16, flexDirection: 'row', alignItems: 'center', gap: 14, marginBottom: 14, shadowOpacity: 0.06, shadowRadius: 12, elevation: 3 },
   heroAvatarWrap: { position: 'relative' },
   heroAvatar: { width: 60, height: 60, borderRadius: 30, borderWidth: 2, borderColor: '#E2E8F0' },
@@ -413,7 +429,6 @@ const s = StyleSheet.create({
   heroName: { fontSize: 17, fontWeight: '700' },
   heroEmail: { fontSize: 12, marginTop: 2 },
   heroBusiness: { fontSize: 12, color: '#10B981', fontWeight: '600', marginTop: 4 },
-
   planCard: { borderRadius: 18, padding: 16, flexDirection: 'row', alignItems: 'center', gap: 14, marginBottom: 28, borderWidth: 1.5, shadowOpacity: 0.05, shadowRadius: 8, elevation: 2 },
   planIconBox: { width: 48, height: 48, borderRadius: 14, justifyContent: 'center', alignItems: 'center' },
   planEmoji: { fontSize: 24 },
@@ -424,24 +439,19 @@ const s = StyleSheet.create({
   planBadgeText: { fontSize: 10, fontWeight: '800' },
   planPrice: { fontSize: 13, marginBottom: 2 },
   planUpgrade: { fontSize: 12, color: '#6366F1', fontWeight: '600' },
-
   waBadge: { flexDirection: 'row', alignItems: 'center', gap: 5, paddingHorizontal: 10, paddingVertical: 5, borderRadius: 20 },
   waDot: { width: 7, height: 7, borderRadius: 4 },
   waText: { fontSize: 12, fontWeight: '700' },
-
   premiumChip: { backgroundColor: '#FFFBEB', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 5 },
   premiumChipText: { fontSize: 9, fontWeight: '800', color: '#92400E' },
   basicoChip: { backgroundColor: '#ECFDF5', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 5 },
   basicoChipText: { fontSize: 9, fontWeight: '800', color: '#065F46' },
-
   statusRight: { flexDirection: 'row', alignItems: 'center', gap: 6 },
   statusDot: { width: 8, height: 8, borderRadius: 4 },
-
   themeToggleWrap: { flexDirection: 'row', gap: 6 },
   themeOption: { flexDirection: 'row', alignItems: 'center', gap: 5, paddingHorizontal: 10, paddingVertical: 7, borderRadius: 10, borderWidth: 1 },
   themeOptionActive: { backgroundColor: '#10B981', borderColor: '#10B981' },
   themeOptionText: { fontSize: 12, fontWeight: '600', color: '#94A3B8' },
-
   footer: { alignItems: 'center', paddingTop: 8, paddingBottom: 16, gap: 4 },
   footerBrand: { fontSize: 16, fontWeight: '900', letterSpacing: 3 },
   footerTagline: { fontSize: 12, fontStyle: 'italic' },
