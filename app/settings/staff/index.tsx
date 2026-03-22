@@ -7,9 +7,12 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useFocusEffect } from '@react-navigation/native';
 import { useAuth } from '@/contexts/AuthContext';
+import { usePlan } from '@/contexts/PlanContext';
 import { useTheme } from '@/contexts/ThemeContext';
 import { supabase } from '@/lib/supabase';
 import MaterialIcons from '@expo/vector-icons/MaterialIcons';
+
+const MAX_STAFF_PREMIUM = 5;
 
 interface StaffMember {
   id: string;
@@ -21,14 +24,10 @@ interface StaffMember {
   sort_order: number;
 }
 
-const COLORS = [
-  '#10B981','#3B82F6','#F59E0B','#EF4444','#8B5CF6',
-  '#EC4899','#06B6D4','#F97316','#84CC16','#6366F1',
-];
-
 export default function StaffListScreen() {
   const router = useRouter();
   const { user } = useAuth();
+  const { isPremium, canUseCollaborators } = usePlan();
   const { colors: tc } = useTheme();
   const [staff, setStaff] = useState<StaffMember[]>([]);
   const [loading, setLoading] = useState(true);
@@ -55,19 +54,16 @@ export default function StaffListScreen() {
 
   const handleToggleActive = async (member: StaffMember) => {
     const newState = !member.is_active;
-    const label = newState ? 'activar' : 'desactivar';
     Alert.alert(
       `${newState ? 'Activar' : 'Desactivar'} a ${member.name}`,
-      `¿Deseas ${label} a este colaborador? ${!newState ? 'Sus citas existentes no se verán afectadas.' : ''}`,
+      `¿Deseas ${newState ? 'activar' : 'desactivar'} a este colaborador?${!newState ? ' Sus citas existentes no se verán afectadas.' : ''}`,
       [
         { text: 'Cancelar', style: 'cancel' },
         {
           text: newState ? 'Activar' : 'Desactivar',
           style: newState ? 'default' : 'destructive',
           onPress: async () => {
-            await supabase.from('staff_members')
-              .update({ is_active: newState })
-              .eq('id', member.id);
+            await supabase.from('staff_members').update({ is_active: newState }).eq('id', member.id);
             loadStaff();
           },
         },
@@ -75,8 +71,23 @@ export default function StaffListScreen() {
     );
   };
 
+  const handleAddNew = () => {
+    // Verificar límite de 5 colaboradores en Premium
+    const activeCount = staff.filter(s => s.is_active).length;
+    const totalCount  = staff.length;
+    if (totalCount >= MAX_STAFF_PREMIUM) {
+      Alert.alert(
+        'Límite alcanzado',
+        `El plan Premium permite hasta ${MAX_STAFF_PREMIUM} colaboradores. Desactiva o elimina uno para agregar otro.`
+      );
+      return;
+    }
+    router.push('/settings/staff/new' as any);
+  };
+
   const activeStaff   = staff.filter(s => s.is_active);
   const inactiveStaff = staff.filter(s => !s.is_active);
+  const atLimit       = staff.length >= MAX_STAFF_PREMIUM;
 
   const renderMember = (member: StaffMember) => (
     <TouchableOpacity
@@ -85,24 +96,16 @@ export default function StaffListScreen() {
       onPress={() => router.push(`/settings/staff/${member.id}` as any)}
       activeOpacity={0.75}
     >
-      {/* Avatar con inicial y color */}
       <View style={[st.avatar, { backgroundColor: member.color + '20', borderColor: member.color }]}>
         <Text style={[st.avatarText, { color: member.color }]}>
           {member.name.split(' ').map(w => w[0]).slice(0, 2).join('').toUpperCase()}
         </Text>
       </View>
-
-      {/* Info */}
       <View style={st.cardInfo}>
         <Text style={[st.cardName, { color: tc.text }]}>{member.name}</Text>
-        {member.role ? (
-          <Text style={[st.cardRole, { color: tc.textMuted }]}>{member.role}</Text>
-        ) : null}
+        {member.role ? <Text style={[st.cardRole, { color: tc.textMuted }]}>{member.role}</Text> : null}
       </View>
-
-      {/* Acciones */}
       <View style={st.cardActions}>
-        {/* Dot de color identificador */}
         <View style={[st.colorDot, { backgroundColor: member.color }]} />
         <TouchableOpacity
           onPress={() => handleToggleActive(member)}
@@ -117,10 +120,52 @@ export default function StaffListScreen() {
     </TouchableOpacity>
   );
 
+  // Si no tiene Premium, mostrar paywall
+  if (!canUseCollaborators) {
+    return (
+      <SafeAreaView style={[st.container, { backgroundColor: tc.bg }]} edges={['top']}>
+        <View style={[st.header, { backgroundColor: tc.surface, borderBottomColor: tc.border }]}>
+          <TouchableOpacity onPress={() => router.back()} style={st.back}>
+            <MaterialIcons name="arrow-back" size={24} color={tc.text} />
+          </TouchableOpacity>
+          <Text style={[st.title, { color: tc.text }]}>Mi equipo</Text>
+          <View style={{ width: 36 }} />
+        </View>
+        <View style={st.paywall}>
+          <View style={st.paywallIconWrap}>
+            <MaterialIcons name="group" size={40} color="#6366F1" />
+          </View>
+          <Text style={[st.paywallTitle, { color: tc.text }]}>Gestión de equipo</Text>
+          <Text style={[st.paywallDesc, { color: tc.textMuted }]}>
+            Registra hasta {MAX_STAFF_PREMIUM} colaboradores, asigna citas a cada uno y gestiona sus horarios individuales desde el Plan Premium.
+          </Text>
+          <View style={st.paywallFeatures}>
+            {[
+              'Hasta 5 colaboradores activos',
+              'Horarios independientes por persona',
+              'Filtro de agenda por colaborador',
+              'Selección de colaborador en el link público',
+            ].map(f => (
+              <View key={f} style={st.paywallFeatureRow}>
+                <MaterialIcons name="check-circle" size={16} color="#6366F1" />
+                <Text style={[st.paywallFeatureText, { color: tc.textMuted }]}>{f}</Text>
+              </View>
+            ))}
+          </View>
+          <TouchableOpacity
+            style={st.paywallBtn}
+            onPress={() => router.push('/settings/subscription')}
+          >
+            <MaterialIcons name="star" size={18} color="#fff" />
+            <Text style={st.paywallBtnText}>Ver Plan Premium</Text>
+          </TouchableOpacity>
+        </View>
+      </SafeAreaView>
+    );
+  }
+
   return (
     <SafeAreaView style={[st.container, { backgroundColor: tc.bg }]} edges={['top']}>
-
-      {/* Header */}
       <View style={[st.header, { backgroundColor: tc.surface, borderBottomColor: tc.border }]}>
         <TouchableOpacity onPress={() => router.back()} style={st.back}>
           <MaterialIcons name="arrow-back" size={24} color={tc.text} />
@@ -128,35 +173,29 @@ export default function StaffListScreen() {
         <View style={st.headerMid}>
           <Text style={[st.title, { color: tc.text }]}>Mi equipo</Text>
           <Text style={[st.subtitle, { color: tc.textMuted }]}>
-            {activeStaff.length} colaborador{activeStaff.length !== 1 ? 'es' : ''} activo{activeStaff.length !== 1 ? 's' : ''}
+            {activeStaff.length} activo{activeStaff.length !== 1 ? 's' : ''} de {MAX_STAFF_PREMIUM} máx.
           </Text>
         </View>
         <TouchableOpacity
-          style={st.addBtn}
-          onPress={() => router.push('/settings/staff/new' as any)}
+          style={[st.addBtn, atLimit && st.addBtnDisabled]}
+          onPress={handleAddNew}
         >
           <MaterialIcons name="add" size={22} color="#fff" />
         </TouchableOpacity>
       </View>
 
       {loading ? (
-        <View style={st.centered}>
-          <ActivityIndicator size="large" color="#10B981" />
-        </View>
+        <View style={st.centered}><ActivityIndicator size="large" color="#10B981" /></View>
       ) : staff.length === 0 ? (
-        // Estado vacío
         <View style={st.empty}>
           <View style={st.emptyIcon}>
-            <MaterialIcons name="group" size={48} color="#10B981" />
+            <MaterialIcons name="group" size={48} color="#6366F1" />
           </View>
           <Text style={[st.emptyTitle, { color: tc.text }]}>Agrega tu equipo</Text>
           <Text style={[st.emptyDesc, { color: tc.textMuted }]}>
-            Registra a tus colaboradores para asignarles citas y gestionar su agenda por separado.
+            Registra hasta {MAX_STAFF_PREMIUM} colaboradores para asignarles citas y gestionar su agenda por separado.
           </Text>
-          <TouchableOpacity
-            style={st.emptyBtn}
-            onPress={() => router.push('/settings/staff/new' as any)}
-          >
+          <TouchableOpacity style={st.emptyBtn} onPress={handleAddNew}>
             <MaterialIcons name="add" size={18} color="#fff" />
             <Text style={st.emptyBtnText}>Agregar primer colaborador</Text>
           </TouchableOpacity>
@@ -164,23 +203,29 @@ export default function StaffListScreen() {
       ) : (
         <ScrollView contentContainerStyle={st.scroll} showsVerticalScrollIndicator={false}>
 
-          {/* Banner informativo */}
-          <View style={st.infoBanner}>
-            <MaterialIcons name="info-outline" size={16} color="#3B82F6" />
-            <Text style={st.infoText}>
-              Cada colaborador tiene su propio horario y agenda. Tus clientes podrán elegir con quién quieren su cita al agendar en línea.
-            </Text>
-          </View>
+          {/* Banner de límite */}
+          {atLimit ? (
+            <View style={st.limitBanner}>
+              <MaterialIcons name="info" size={16} color="#92400E" />
+              <Text style={st.limitBannerText}>
+                Has alcanzado el límite de {MAX_STAFF_PREMIUM} colaboradores del Plan Premium.
+              </Text>
+            </View>
+          ) : (
+            <View style={st.infoBanner}>
+              <MaterialIcons name="info-outline" size={16} color="#3B82F6" />
+              <Text style={st.infoText}>
+                {staff.length}/{MAX_STAFF_PREMIUM} colaboradores — Cada uno tiene su propio horario y agenda.
+              </Text>
+            </View>
+          )}
 
-          {/* Activos */}
           {activeStaff.length > 0 && (
             <>
               <Text style={[st.sectionLabel, { color: tc.textMuted }]}>ACTIVOS</Text>
               {activeStaff.map(renderMember)}
             </>
           )}
-
-          {/* Inactivos */}
           {inactiveStaff.length > 0 && (
             <>
               <Text style={[st.sectionLabel, { color: tc.textMuted }]}>INACTIVOS</Text>
@@ -188,14 +233,12 @@ export default function StaffListScreen() {
             </>
           )}
 
-          {/* Botón agregar */}
-          <TouchableOpacity
-            style={st.addMoreBtn}
-            onPress={() => router.push('/settings/staff/new' as any)}
-          >
-            <MaterialIcons name="person-add" size={18} color="#10B981" />
-            <Text style={st.addMoreText}>Agregar colaborador</Text>
-          </TouchableOpacity>
+          {!atLimit && (
+            <TouchableOpacity style={st.addMoreBtn} onPress={handleAddNew}>
+              <MaterialIcons name="person-add" size={18} color="#6366F1" />
+              <Text style={st.addMoreText}>Agregar colaborador</Text>
+            </TouchableOpacity>
+          )}
 
           <View style={{ height: 40 }} />
         </ScrollView>
@@ -205,34 +248,47 @@ export default function StaffListScreen() {
 }
 
 const st = StyleSheet.create({
-  container:      { flex: 1 },
-  centered:       { flex: 1, justifyContent: 'center', alignItems: 'center' },
-  header:         { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, paddingVertical: 14, borderBottomWidth: 0.5 },
-  back:           { padding: 4 },
-  headerMid:      { flex: 1, paddingHorizontal: 12 },
-  title:          { fontSize: 20, fontWeight: '700' },
-  subtitle:       { fontSize: 12, marginTop: 1 },
-  addBtn:         { width: 36, height: 36, borderRadius: 10, backgroundColor: '#10B981', justifyContent: 'center', alignItems: 'center' },
-  scroll:         { padding: 16 },
-  infoBanner:     { flexDirection: 'row', gap: 10, backgroundColor: '#EFF6FF', borderRadius: 12, padding: 12, borderWidth: 0.5, borderColor: '#BFDBFE', marginBottom: 16 },
-  infoText:       { flex: 1, fontSize: 12, color: '#1E40AF', lineHeight: 18 },
-  sectionLabel:   { fontSize: 11, fontWeight: '800', letterSpacing: 1.2, marginBottom: 8, marginTop: 8 },
-  card:           { flexDirection: 'row', alignItems: 'center', borderRadius: 16, padding: 14, marginBottom: 10, shadowColor: '#000', shadowOpacity: 0.04, shadowRadius: 6, elevation: 1 },
-  avatar:         { width: 48, height: 48, borderRadius: 14, justifyContent: 'center', alignItems: 'center', borderWidth: 2, marginRight: 12 },
-  avatarText:     { fontSize: 16, fontWeight: '800' },
-  cardInfo:       { flex: 1 },
-  cardName:       { fontSize: 15, fontWeight: '700' },
-  cardRole:       { fontSize: 12, marginTop: 2 },
-  cardActions:    { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  colorDot:       { width: 8, height: 8, borderRadius: 4 },
-  statusBadge:    { paddingHorizontal: 8, paddingVertical: 3, borderRadius: 8 },
-  statusText:     { fontSize: 11, fontWeight: '700' },
-  empty:          { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 40, gap: 12 },
-  emptyIcon:      { width: 88, height: 88, borderRadius: 24, backgroundColor: '#ECFDF5', justifyContent: 'center', alignItems: 'center' },
-  emptyTitle:     { fontSize: 20, fontWeight: '800', textAlign: 'center' },
-  emptyDesc:      { fontSize: 14, textAlign: 'center', lineHeight: 22 },
-  emptyBtn:       { flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: '#10B981', paddingHorizontal: 24, paddingVertical: 14, borderRadius: 14, marginTop: 8 },
-  emptyBtnText:   { color: '#fff', fontWeight: '700', fontSize: 15 },
-  addMoreBtn:     { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, borderWidth: 1.5, borderColor: '#10B981', borderRadius: 14, paddingVertical: 14, marginTop: 8 },
-  addMoreText:    { color: '#10B981', fontWeight: '700', fontSize: 15 },
+  container:          { flex: 1 },
+  centered:           { flex: 1, justifyContent: 'center', alignItems: 'center' },
+  header:             { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, paddingVertical: 14, borderBottomWidth: 0.5 },
+  back:               { padding: 4 },
+  headerMid:          { flex: 1, paddingHorizontal: 12 },
+  title:              { fontSize: 20, fontWeight: '700' },
+  subtitle:           { fontSize: 12, marginTop: 1 },
+  addBtn:             { width: 36, height: 36, borderRadius: 10, backgroundColor: '#6366F1', justifyContent: 'center', alignItems: 'center' },
+  addBtnDisabled:     { backgroundColor: '#94A3B8' },
+  scroll:             { padding: 16 },
+  infoBanner:         { flexDirection: 'row', gap: 10, backgroundColor: '#EFF6FF', borderRadius: 12, padding: 12, borderWidth: 0.5, borderColor: '#BFDBFE', marginBottom: 16 },
+  infoText:           { flex: 1, fontSize: 12, color: '#1E40AF', lineHeight: 18 },
+  limitBanner:        { flexDirection: 'row', gap: 10, backgroundColor: '#FFFBEB', borderRadius: 12, padding: 12, borderWidth: 0.5, borderColor: '#FCD34D', marginBottom: 16 },
+  limitBannerText:    { flex: 1, fontSize: 12, color: '#92400E', lineHeight: 18 },
+  sectionLabel:       { fontSize: 11, fontWeight: '800', letterSpacing: 1.2, marginBottom: 8, marginTop: 8 },
+  card:               { flexDirection: 'row', alignItems: 'center', borderRadius: 16, padding: 14, marginBottom: 10, shadowColor: '#000', shadowOpacity: 0.04, shadowRadius: 6, elevation: 1 },
+  avatar:             { width: 48, height: 48, borderRadius: 14, justifyContent: 'center', alignItems: 'center', borderWidth: 2, marginRight: 12 },
+  avatarText:         { fontSize: 16, fontWeight: '800' },
+  cardInfo:           { flex: 1 },
+  cardName:           { fontSize: 15, fontWeight: '700' },
+  cardRole:           { fontSize: 12, marginTop: 2 },
+  cardActions:        { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  colorDot:           { width: 8, height: 8, borderRadius: 4 },
+  statusBadge:        { paddingHorizontal: 8, paddingVertical: 3, borderRadius: 8 },
+  statusText:         { fontSize: 11, fontWeight: '700' },
+  empty:              { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 40, gap: 12 },
+  emptyIcon:          { width: 88, height: 88, borderRadius: 24, backgroundColor: '#EEF2FF', justifyContent: 'center', alignItems: 'center' },
+  emptyTitle:         { fontSize: 20, fontWeight: '800', textAlign: 'center' },
+  emptyDesc:          { fontSize: 14, textAlign: 'center', lineHeight: 22 },
+  emptyBtn:           { flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: '#6366F1', paddingHorizontal: 24, paddingVertical: 14, borderRadius: 14, marginTop: 8 },
+  emptyBtnText:       { color: '#fff', fontWeight: '700', fontSize: 15 },
+  addMoreBtn:         { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, borderWidth: 1.5, borderColor: '#6366F1', borderRadius: 14, paddingVertical: 14, marginTop: 8 },
+  addMoreText:        { color: '#6366F1', fontWeight: '700', fontSize: 15 },
+  // Paywall
+  paywall:            { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 36, gap: 14 },
+  paywallIconWrap:    { width: 80, height: 80, borderRadius: 22, backgroundColor: '#EEF2FF', justifyContent: 'center', alignItems: 'center' },
+  paywallTitle:       { fontSize: 22, fontWeight: '800', textAlign: 'center' },
+  paywallDesc:        { fontSize: 15, textAlign: 'center', lineHeight: 24 },
+  paywallFeatures:    { alignSelf: 'stretch', gap: 10, marginTop: 4 },
+  paywallFeatureRow:  { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  paywallFeatureText: { fontSize: 14, flex: 1 },
+  paywallBtn:         { flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: '#6366F1', paddingHorizontal: 28, paddingVertical: 14, borderRadius: 14, marginTop: 8 },
+  paywallBtnText:     { color: '#fff', fontWeight: '700', fontSize: 15 },
 });
