@@ -8,7 +8,7 @@ export async function getCurrentUserId(): Promise<string> {
   return user.id;
 }
 
-// Helper: mapear appointment row -> objeto normalizado incluyendo campos del link público
+// FIX: mapAppointment ahora incluye staff_id
 const mapAppointment = (a: any) => ({
   id: a.id,
   clientId: a.client_id,
@@ -21,10 +21,11 @@ const mapAppointment = (a: any) => ({
   isRescheduled: a.is_rescheduled || false,
   notes: a.notes,
   client: a.client,
-  // Campos del link público
   clientNameTemp: a.client_name_temp || null,
   clientPhone: a.client_phone_temp || null,
   source: a.source || null,
+  staff_id: a.staff_id || null,           // FIX: incluido
+  serviceCost: a.service_cost || null,
 });
 
 export async function apiGet<T>(path: string): Promise<T> {
@@ -49,7 +50,6 @@ export async function apiGet<T>(path: string): Promise<T> {
   }
 
   if (path === '/api/appointments') {
-    // FIX: incluir client_name_temp, client_phone_temp y source para citas del link público
     const { data, error } = await supabase
       .from('appointments')
       .select('*, client:clients(name, phone)')
@@ -93,7 +93,7 @@ export async function apiGet<T>(path: string): Promise<T> {
       .select('*, client:clients(name, phone)')
       .eq('user_id', userId)
       .eq('date', dateStr)
-      .not('status', 'in', '("Cancelada","No asistió")')
+      .not('status', 'in', '("Cancelada","No asisti\xF3")')
       .order('start_time');
     if (error) throw error;
     return (data?.map(mapAppointment) || []) as T;
@@ -127,62 +127,30 @@ export async function apiGet<T>(path: string): Promise<T> {
     return (data || []) as T;
   }
 
-  // ── Stats de un cliente específico ──────────────────────────────────────
-  // IMPORTANTE: este handler debe ir ANTES del handler genérico /api/clients/:id
   const statsMatch = path.match(/^\/api\/clients\/([^/]+)\/stats$/);
   if (statsMatch) {
     const clientId = statsMatch[1];
-    const { data: apts, error } = await supabase
-      .from('appointments')
-      .select('id, status, date')
-      .eq('user_id', userId)
-      .eq('client_id', clientId)
-      .order('date', { ascending: false });
+    const { data: apts, error } = await supabase.from('appointments').select('id, status, date').eq('user_id', userId).eq('client_id', clientId).order('date', { ascending: false });
     if (error) throw error;
-
     const total = apts?.length || 0;
-    const attended = apts?.filter((a: any) =>
-      ['Confirmada', 'Completada', 'Pagado'].includes(a.status)
-    ).length || 0;
-    const noShows = apts?.filter((a: any) => a.status === 'No asistió').length || 0;
+    const attended = apts?.filter((a: any) => ['Confirmada', 'Completada', 'Pagado'].includes(a.status)).length || 0;
+    const noShows = apts?.filter((a: any) => a.status === 'No asisti\xF3').length || 0;
     const attendanceRate = total > 0 ? Math.round((attended / total) * 100) : 0;
     const lastVisit = apts && apts.length > 0 ? apts[0].date : null;
-
-    return {
-      totalAppointments: total,
-      attendanceRate,
-      lastVisit,
-      noShowCount: noShows,
-    } as T;
+    return { totalAppointments: total, attendanceRate, lastVisit, noShowCount: noShows } as T;
   }
 
-  // ── Historial de citas de un cliente específico ──────────────────────────
-  // IMPORTANTE: este handler debe ir ANTES del handler genérico /api/appointments/:id
   const clientApptsMatch = path.match(/^\/api\/clients\/([^/]+)\/appointments$/);
   if (clientApptsMatch) {
     const clientId = clientApptsMatch[1];
-    const { data, error } = await supabase
-      .from('appointments')
-      .select('id, date, start_time, end_time, service_name, status, notes')
-      .eq('user_id', userId)
-      .eq('client_id', clientId)
-      .order('date', { ascending: false })
-      .order('start_time', { ascending: false });
+    const { data, error } = await supabase.from('appointments').select('id, date, start_time, end_time, service_name, status, notes').eq('user_id', userId).eq('client_id', clientId).order('date', { ascending: false }).order('start_time', { ascending: false });
     if (error) throw error;
-    return ((data || []).map((a: any) => ({
-      id: a.id,
-      date: a.date,
-      startTime: a.start_time,
-      endTime: a.end_time,
-      service: a.service_name,
-      status: a.status,
-      notes: a.notes,
-    }))) as T;
+    return ((data || []).map((a: any) => ({ id: a.id, date: a.date, startTime: a.start_time, endTime: a.end_time, service: a.service_name, status: a.status, notes: a.notes }))) as T;
   }
 
   if (path.startsWith('/api/appointments/')) {
     const id = path.split('/').pop();
-    // FIX: incluir client_name_temp, client_phone_temp y source en el detalle de cita
+    // FIX: incluir staff_id en el detalle de cita
     const { data, error } = await supabase
       .from('appointments')
       .select('*, client:clients(*)')
@@ -197,6 +165,7 @@ export async function apiGet<T>(path: string): Promise<T> {
       clientNameTemp: data.client_name_temp || null,
       clientPhone: data.client_phone_temp || null,
       source: data.source || null,
+      staff_id: data.staff_id || null,   // FIX: incluido
     } as T;
   }
 
@@ -227,8 +196,24 @@ export async function apiPost<T>(path: string, body: any): Promise<T> {
 
   if (path === '/api/appointments') {
     const startTime = body.time;
-    const endTime = body.endTime || (() => { const [h, m] = startTime.split(':').map(Number); const endMin = h * 60 + m + 30; return `${Math.floor(endMin/60).toString().padStart(2,'0')}:${(endMin%60).toString().padStart(2,'0')}`; })();
-    const { data, error } = await supabase.from('appointments').insert({ user_id: userId, client_id: body.clientId, service_name: body.service, date: body.date, start_time: startTime, end_time: endTime, status: body.isOverlapping ? 'En espera' : 'Pendiente', notes: body.notes || null, service_cost: body.service_cost || 0, whatsapp_notification: body.sendWhatsApp || false }).select().single();
+    const endTime = body.endTime || (() => {
+      const [h, m] = startTime.split(':').map(Number);
+      const endMin = h * 60 + m + 30;
+      return `${Math.floor(endMin/60).toString().padStart(2,'0')}:${(endMin%60).toString().padStart(2,'0')}`;
+    })();
+    const { data, error } = await supabase.from('appointments').insert({
+      user_id: userId,
+      client_id: body.clientId,
+      service_name: body.service,
+      date: body.date,
+      start_time: startTime,
+      end_time: endTime,
+      status: body.isOverlapping ? 'En espera' : 'Pendiente',
+      notes: body.notes || null,
+      service_cost: body.service_cost || 0,
+      whatsapp_notification: body.sendWhatsApp || false,
+      staff_id: body.staff_id || null,   // FIX: guardar staff_id al crear cita
+    }).select().single();
     if (error) throw error;
     return { ...data, service: data.service_name, time: data.start_time } as T;
   }
@@ -260,7 +245,11 @@ export async function apiPatch<T>(path: string, body: any): Promise<T> {
 
   if (path.startsWith('/api/appointments/') && !path.includes('/reschedule')) {
     const id = path.split('/').pop();
-    const { data, error } = await supabase.from('appointments').update({ status: body.status, updated_at: new Date().toISOString() }).eq('id', id).eq('user_id', userId).select().single();
+    // FIX: permitir actualizar staff_id ademas del status
+    const updateFields: any = { updated_at: new Date().toISOString() };
+    if (body.status !== undefined)   updateFields.status   = body.status;
+    if (body.staff_id !== undefined) updateFields.staff_id = body.staff_id;
+    const { data, error } = await supabase.from('appointments').update(updateFields).eq('id', id).eq('user_id', userId).select().single();
     if (error) throw error;
     return data as T;
   }
