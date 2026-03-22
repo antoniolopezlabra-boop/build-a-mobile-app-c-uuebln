@@ -99,17 +99,17 @@ export default function SettingsScreen() {
   const { canOverlap, isPremium, isBasico, isGratuito, canUseBookingLink, canUseWhatsApp, canUseCollaborators } = usePlan();
   const { colors: tc, mode, setMode, isDark } = useTheme();
 
-  const [logoutModal, setLogoutModal]         = useState(false);
-  const [deleteModal, setDeleteModal]         = useState(false);
-  const [deleting, setDeleting]               = useState(false);
-  const [whatsappConfig, setWhatsappConfig]   = useState<WhatsAppConfig | null>(null);
+  const [logoutModal, setLogoutModal]           = useState(false);
+  const [deleteModal, setDeleteModal]           = useState(false);
+  const [deleting, setDeleting]                 = useState(false);
+  const [whatsappConfig, setWhatsappConfig]     = useState<WhatsAppConfig | null>(null);
   const [allowOverlapping, setAllowOverlapping] = useState(false);
-  const [savingOverlap, setSavingOverlap]     = useState(false);
-  const [birthdayEnabled, setBirthdayEnabled] = useState(false);
+  const [savingOverlap, setSavingOverlap]       = useState(false);
+  const [birthdayEnabled, setBirthdayEnabled]   = useState(false);
   const [bookingLinkActive, setBookingLinkActive] = useState(false);
-  const [subscription, setSubscription]       = useState<Subscription | null>(null);
-  const [loading, setLoading]                 = useState(true);
-  const [staffCount, setStaffCount]           = useState(0);
+  const [subscription, setSubscription]         = useState<Subscription | null>(null);
+  const [loading, setLoading]                   = useState(true);
+  const [staffCount, setStaffCount]             = useState(0);
 
   useEffect(() => { loadSettings(); }, []);
 
@@ -177,8 +177,8 @@ export default function SettingsScreen() {
   const planColor   = isPremium ? '#6366F1' : isBasico ? '#10B981' : '#94A3B8';
   const planBg      = isPremium ? '#EDE9FE' : isBasico ? '#ECFDF5' : '#F1F5F9';
   const planPrice   = isPremium ? '$1,490 MXN/mes' : isBasico ? '$990 MXN/mes' : 'Gratis';
-  const planEmoji   = isPremium ? '\u2B50' : isBasico ? '\uD83D\uDE80' : '\uD83C\uDF31';
-  const planDisplay = isPremium ? 'Premium' : isBasico ? 'B\u00E1sico' : 'Gratuito';
+  const planEmoji   = isPremium ? '⭐' : isBasico ? '🚀' : '🌱';
+  const planDisplay = isPremium ? 'Premium' : isBasico ? 'Básico' : 'Gratuito';
   const initials = user?.name?.split(' ').map((w: string) => w[0]).slice(0, 2).join('').toUpperCase() || 'U';
 
   const waActive = canUseWhatsApp && (
@@ -187,17 +187,16 @@ export default function SettingsScreen() {
     whatsappConfig?.reminder2h
   );
   const waSubLabel = isGratuito
-    ? 'Disponible en Plan B\u00E1sico'
+    ? 'Disponible en Plan Básico'
     : waActive
-      ? 'Recordatorios activos \u00B7 N\u00FAmero VYLTA'
+      ? 'Recordatorios activos · Número VYLTA'
       : 'Recordatorios desactivados';
 
-  // Sublabel de Mi equipo seg\xFAn plan
   const staffSublabel = !canUseCollaborators
     ? 'Solo disponible en Plan Premium'
     : staffCount > 0
-      ? `${staffCount} colaborador${staffCount !== 1 ? 'es' : ''} activo${staffCount !== 1 ? 's' : ''} (m\u00E1x. 5)`
-      : 'Sin colaboradores \u2014 toca para agregar';
+      ? `${staffCount} colaborador${staffCount !== 1 ? 'es' : ''} activo${staffCount !== 1 ? 's' : ''} (máx. 5)`
+      : 'Sin colaboradores — toca para agregar';
 
   if (loading) {
     return (
@@ -209,12 +208,26 @@ export default function SettingsScreen() {
 
   return (
     <SafeAreaView style={[s.container, { backgroundColor: tc.bg }]}>
-      <ConfirmModal visible={logoutModal} title="Cerrar sesi\u00F3n" message="\u00BFEst\u00E1s seguro de que deseas cerrar sesi\u00F3n?"
-        buttons={[{ text: 'Cerrar sesi\u00F3n', onPress: handleLogout, style: 'destructive' }, { text: 'Cancelar', onPress: () => setLogoutModal(false), style: 'cancel' }]}
-        onDismiss={() => setLogoutModal(false)} />
-      <ConfirmModal visible={deleteModal} title="\u26A0\uFE0F Eliminar cuenta" message="Se eliminar\u00E1n TODOS tus datos permanentemente. Esta acci\u00F3n no tiene vuelta atr\u00E1s."
-        buttons={[{ text: 'Cancelar', onPress: () => setDeleteModal(false), style: 'cancel' }, { text: deleting ? 'Eliminando...' : 'S\u00ED, eliminar todo', onPress: () => { setDeleteModal(false); handleDeleteAccount(); }, style: 'destructive' }]}
-        onDismiss={() => setDeleteModal(false)} />
+      <ConfirmModal
+        visible={logoutModal}
+        title="Cerrar sesión"
+        message="¿Estás seguro de que deseas cerrar sesión?"
+        buttons={[
+          { text: 'Cerrar sesión', onPress: handleLogout, style: 'destructive' },
+          { text: 'Cancelar', onPress: () => setLogoutModal(false), style: 'cancel' },
+        ]}
+        onDismiss={() => setLogoutModal(false)}
+      />
+      <ConfirmModal
+        visible={deleteModal}
+        title="⚠️ Eliminar cuenta"
+        message="Se eliminarán TODOS tus datos permanentemente. Esta acción no tiene vuelta atrás."
+        buttons={[
+          { text: 'Cancelar', onPress: () => setDeleteModal(false), style: 'cancel' },
+          { text: deleting ? 'Eliminando...' : 'Sí, eliminar todo', onPress: () => { setDeleteModal(false); handleDeleteAccount(); }, style: 'destructive' },
+        ]}
+        onDismiss={() => setDeleteModal(false)}
+      />
 
       <View style={[s.header, { backgroundColor: tc.bg }]}>
         <Text style={[s.headerTitle, { color: tc.text }]}>Ajustes</Text>
@@ -258,27 +271,37 @@ export default function SettingsScreen() {
               </View>
             </View>
             <Text style={[s.planPrice, { color: tc.textMuted }]}>{planPrice}</Text>
-            {!isPremium && <Text style={s.planUpgrade}>{isGratuito ? 'Activa recordatorios y reportes \u2192' : 'Activa equipo, email marketing y m\u00E1s \u2192'}</Text>}
+            {!isPremium && (
+              <Text style={s.planUpgrade}>
+                {isGratuito ? 'Activa recordatorios y reportes →' : 'Activa equipo, email marketing y más →'}
+              </Text>
+            )}
           </View>
           <MaterialIcons name="arrow-forward-ios" size={16} color={planColor} />
         </TouchableOpacity>
 
         {/* MI NEGOCIO */}
         <SettingGroup title="MI NEGOCIO">
-          <SettingRow iconName="store" iconColor="#10B981" iconBg="#ECFDF5"
-            label="Informaci\u00F3n del negocio"
+          <SettingRow
+            iconName="store" iconColor="#10B981" iconBg="#ECFDF5"
+            label="Información del negocio"
             sublabel={businessProfile?.businessName || 'Configura tu negocio'}
-            onPress={() => router.push('/settings/business')} />
-          <SettingRow iconName="schedule" iconColor="#3B82F6" iconBg="#EFF6FF"
-            label="Horarios de atenci\u00F3n"
+            onPress={() => router.push('/settings/business')}
+          />
+          <SettingRow
+            iconName="schedule" iconColor="#3B82F6" iconBg="#EFF6FF"
+            label="Horarios de atención"
             sublabel="Configura tu disponibilidad"
-            onPress={() => router.push('/settings/schedule')} />
-          <SettingRow iconName="content-cut" iconColor="#F59E0B" iconBg="#FFFBEB"
-            label="Cat\u00E1logo de servicios"
+            onPress={() => router.push('/settings/schedule')}
+          />
+          <SettingRow
+            iconName="content-cut" iconColor="#F59E0B" iconBg="#FFFBEB"
+            label="Catálogo de servicios"
             sublabel="Gestiona tus servicios y precios"
-            onPress={() => router.push('/settings/services')} />
+            onPress={() => router.push('/settings/services')}
+          />
 
-          {/* Mi equipo: deshabilitado si no es Premium */}
+          {/* Mi equipo — deshabilitado si no es Premium */}
           <SettingRow
             iconName="group"
             iconColor={canUseCollaborators ? '#8B5CF6' : '#CBD5E1'}
@@ -292,23 +315,21 @@ export default function SettingsScreen() {
             }
             disabled={!canUseCollaborators}
             onPress={() => {
-              if (!canUseCollaborators) {
-                router.push('/settings/subscription');
-                return;
-              }
+              if (!canUseCollaborators) { router.push('/settings/subscription'); return; }
               router.push('/settings/staff' as any);
             }}
           />
 
-          {/* Citas simult\u00E1neas: deshabilitado si no es Premium */}
+          {/* Citas simultáneas — deshabilitado si no es Premium */}
           <SettingRow
             iconName="event-available"
             iconColor={canOverlap ? '#06B6D4' : '#CBD5E1'}
             iconBg={canOverlap ? '#ECFEFF' : '#F8FAFC'}
-            label="Citas simult\u00E1neas"
-            sublabel={canOverlap
-              ? 'Permite atender m\u00E1s de una cita al mismo tiempo'
-              : 'Solo disponible en Plan Premium'
+            label="Citas simultáneas"
+            sublabel={
+              canOverlap
+                ? 'Permite atender más de una cita al mismo tiempo'
+                : 'Solo disponible en Plan Premium'
             }
             badge={
               !canOverlap
@@ -328,16 +349,17 @@ export default function SettingsScreen() {
           />
         </SettingGroup>
 
-        {/* CAPTACI\u00D3N */}
-        <SettingGroup title="CAPTACI\u00D3N DE CLIENTES">
+        {/* CAPTACIÓN DE CLIENTES */}
+        <SettingGroup title="CAPTACIÓN DE CLIENTES">
           <SettingRow
             iconName="link" iconColor="#10B981" iconBg="#ECFDF5"
-            label="Link de cita p\u00FAblica"
-            sublabel={canUseBookingLink
-              ? (bookingLinkActive ? 'Activo \u2014 clientes pueden agendar en l\u00EDnea' : 'Inactivo \u2014 toca para configurar')
-              : 'Disponible en Plan B\u00E1sico'
+            label="Link de cita pública"
+            sublabel={
+              canUseBookingLink
+                ? (bookingLinkActive ? 'Activo — clientes pueden agendar en línea' : 'Inactivo — toca para configurar')
+                : 'Disponible en Plan Básico'
             }
-            badge={!canUseBookingLink ? <View style={s.basicoChip}><Text style={s.basicoChipText}>B\u00C1SICO</Text></View> : undefined}
+            badge={!canUseBookingLink ? <View style={s.basicoChip}><Text style={s.basicoChipText}>BÁSICO</Text></View> : undefined}
             right={
               canUseBookingLink ? (
                 <View style={[s.waBadge, { backgroundColor: bookingLinkActive ? '#ECFDF5' : '#F1F5F9' }]}>
@@ -356,8 +378,8 @@ export default function SettingsScreen() {
         <SettingGroup title="AUTOMATIZACIONES">
           <SettingRow
             iconName="cake" iconColor="#EC4899" iconBg="#FDF2F8"
-            label="Cumplea\u00F1os autom\u00E1ticos"
-            sublabel={birthdayEnabled ? 'Activado \u2014 env\u00EDa WhatsApp el d\u00EDa del cumplea\u00F1os' : 'Desactivado'}
+            label="Cumpleaños automáticos"
+            sublabel={birthdayEnabled ? 'Activado — envía WhatsApp el día del cumpleaños' : 'Desactivado'}
             badge={!isPremium ? <View style={s.premiumChip}><Text style={s.premiumChipText}>PREMIUM</Text></View> : undefined}
             right={
               <View style={s.statusRight}>
@@ -370,7 +392,7 @@ export default function SettingsScreen() {
           <SettingRow
             iconName="email" iconColor="#6366F1" iconBg="#EEF2FF"
             label="Email Marketing"
-            sublabel="Env\u00EDa campa\u00F1as y promociones a tus clientes"
+            sublabel="Envía campañas y promociones a tus clientes"
             badge={!isPremium ? <View style={s.premiumChip}><Text style={s.premiumChipText}>PREMIUM</Text></View> : undefined}
             onPress={() => isPremium ? router.push('/marketing') : router.push('/settings/subscription')}
           />
@@ -383,18 +405,20 @@ export default function SettingsScreen() {
           />
         </SettingGroup>
 
-        {/* WHATSAPP */}
+        {/* WHATSAPP BUSINESS */}
         <SettingGroup title="WHATSAPP BUSINESS">
           <SettingRow
             iconName="message" iconColor="#25D366" iconBg="#F0FDF4"
-            label="Recordatorios autom\u00E1ticos"
+            label="Recordatorios automáticos"
             sublabel={waSubLabel}
-            badge={isGratuito ? <View style={s.basicoChip}><Text style={s.basicoChipText}>B\u00C1SICO</Text></View> : undefined}
+            badge={isGratuito ? <View style={s.basicoChip}><Text style={s.basicoChipText}>BÁSICO</Text></View> : undefined}
             right={
               !isGratuito ? (
                 <View style={[s.waBadge, { backgroundColor: waActive ? '#ECFDF5' : '#FEF3C7' }]}>
                   <View style={[s.waDot, { backgroundColor: waActive ? '#10B981' : '#F59E0B' }]} />
-                  <Text style={[s.waText, { color: waActive ? '#10B981' : '#92400E' }]}>{waActive ? 'Activos' : 'Inactivos'}</Text>
+                  <Text style={[s.waText, { color: waActive ? '#10B981' : '#92400E' }]}>
+                    {waActive ? 'Activos' : 'Inactivos'}
+                  </Text>
                 </View>
               ) : undefined
             }
@@ -410,7 +434,9 @@ export default function SettingsScreen() {
             </View>
             <View style={row.textBox}>
               <Text style={[row.label, { color: tc.text }]}>Tema de la app</Text>
-              <Text style={[row.sublabel, { color: tc.textMuted }]}>{isDark ? 'Modo oscuro activado' : 'Modo claro activado'}</Text>
+              <Text style={[row.sublabel, { color: tc.textMuted }]}>
+                {isDark ? 'Modo oscuro activado' : 'Modo claro activado'}
+              </Text>
             </View>
             <View style={s.themeToggleWrap}>
               {(['light', 'dark'] as ThemeMode[]).map((m) => (
@@ -421,7 +447,9 @@ export default function SettingsScreen() {
                   activeOpacity={0.75}
                 >
                   <MaterialIcons name={m === 'light' ? 'light-mode' : 'dark-mode'} size={18} color={mode === m ? '#fff' : tc.textMuted} />
-                  <Text style={[s.themeOptionText, mode === m && { color: '#fff' }]}>{m === 'light' ? 'Claro' : 'Oscuro'}</Text>
+                  <Text style={[s.themeOptionText, mode === m && { color: '#fff' }]}>
+                    {m === 'light' ? 'Claro' : 'Oscuro'}
+                  </Text>
                 </TouchableOpacity>
               ))}
             </View>
@@ -430,15 +458,15 @@ export default function SettingsScreen() {
 
         {/* CUENTA */}
         <SettingGroup title="CUENTA">
-          <SettingRow iconName="person" iconColor="#6366F1" iconBg="#EEF2FF" label="Editar perfil" onPress={() => router.push('/settings/profile')} />
-          <SettingRow iconName="lock" iconColor="#8B5CF6" iconBg="#F5F3FF" label="Cambiar contrase\u00F1a" onPress={() => router.push('/settings/password')} />
-          <SettingRow iconName="description" iconColor="#64748B" iconBg="#F8FAFC" label="Legal y Privacidad" onPress={() => router.push('/legal')} />
+          <SettingRow iconName="person"       iconColor="#6366F1" iconBg="#EEF2FF" label="Editar perfil"      onPress={() => router.push('/settings/profile')} />
+          <SettingRow iconName="lock"         iconColor="#8B5CF6" iconBg="#F5F3FF" label="Cambiar contraseña" onPress={() => router.push('/settings/password')} />
+          <SettingRow iconName="description"  iconColor="#64748B" iconBg="#F8FAFC" label="Legal y Privacidad" onPress={() => router.push('/legal')} />
         </SettingGroup>
 
-        {/* SESI\u00D3N */}
-        <SettingGroup title="SESI\u00D3N">
-          <SettingRow iconName="logout" iconColor="#EF4444" iconBg="#FEF2F2" label="Cerrar sesi\u00F3n" danger onPress={() => setLogoutModal(true)} />
-          <SettingRow iconName="delete-forever" iconColor="#EF4444" iconBg="#FEF2F2" label="Eliminar mi cuenta" sublabel="Esta acci\u00F3n es permanente e irreversible" danger onPress={() => setDeleteModal(true)} />
+        {/* SESIÓN */}
+        <SettingGroup title="SESIÓN">
+          <SettingRow iconName="logout"         iconColor="#EF4444" iconBg="#FEF2F2" label="Cerrar sesión" danger onPress={() => setLogoutModal(true)} />
+          <SettingRow iconName="delete-forever" iconColor="#EF4444" iconBg="#FEF2F2" label="Eliminar mi cuenta" sublabel="Esta acción es permanente e irreversible" danger onPress={() => setDeleteModal(true)} />
         </SettingGroup>
 
         <View style={s.footer}>
@@ -452,46 +480,46 @@ export default function SettingsScreen() {
 }
 
 const s = StyleSheet.create({
-  container:        { flex: 1 },
-  loading:          { flex: 1, justifyContent: 'center', alignItems: 'center' },
-  header:           { paddingHorizontal: 20, paddingTop: 12, paddingBottom: 16 },
-  headerTitle:      { fontSize: 32, fontWeight: '800', letterSpacing: -0.5 },
-  scroll:           { padding: 20, paddingBottom: 100 },
-  heroCard:         { borderRadius: 20, padding: 16, flexDirection: 'row', alignItems: 'center', gap: 14, marginBottom: 14, shadowOpacity: 0.06, shadowRadius: 12, elevation: 3 },
-  heroAvatarWrap:   { position: 'relative' },
-  heroAvatar:       { width: 60, height: 60, borderRadius: 30, borderWidth: 2, borderColor: '#E2E8F0' },
+  container:          { flex: 1 },
+  loading:            { flex: 1, justifyContent: 'center', alignItems: 'center' },
+  header:             { paddingHorizontal: 20, paddingTop: 12, paddingBottom: 16 },
+  headerTitle:        { fontSize: 32, fontWeight: '800', letterSpacing: -0.5 },
+  scroll:             { padding: 20, paddingBottom: 100 },
+  heroCard:           { borderRadius: 20, padding: 16, flexDirection: 'row', alignItems: 'center', gap: 14, marginBottom: 14, shadowOpacity: 0.06, shadowRadius: 12, elevation: 3 },
+  heroAvatarWrap:     { position: 'relative' },
+  heroAvatar:         { width: 60, height: 60, borderRadius: 30, borderWidth: 2, borderColor: '#E2E8F0' },
   heroAvatarFallback: { backgroundColor: '#10B981', justifyContent: 'center', alignItems: 'center' },
-  heroAvatarText:   { fontSize: 22, fontWeight: '800', color: '#fff' },
-  heroOnline:       { position: 'absolute', bottom: 1, right: 1, width: 14, height: 14, borderRadius: 7, backgroundColor: '#10B981', borderWidth: 2 },
-  heroInfo:         { flex: 1 },
-  heroName:         { fontSize: 17, fontWeight: '700' },
-  heroEmail:        { fontSize: 12, marginTop: 2 },
-  heroBusiness:     { fontSize: 12, color: '#10B981', fontWeight: '600', marginTop: 4 },
-  planCard:         { borderRadius: 18, padding: 16, flexDirection: 'row', alignItems: 'center', gap: 14, marginBottom: 28, borderWidth: 1.5, shadowOpacity: 0.05, shadowRadius: 8, elevation: 2 },
-  planIconBox:      { width: 48, height: 48, borderRadius: 14, justifyContent: 'center', alignItems: 'center' },
-  planEmoji:        { fontSize: 24 },
-  planInfo:         { flex: 1 },
-  planRow:          { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 2 },
-  planName:         { fontSize: 16, fontWeight: '700' },
-  planBadge:        { paddingHorizontal: 7, paddingVertical: 2, borderRadius: 6 },
-  planBadgeText:    { fontSize: 10, fontWeight: '800' },
-  planPrice:        { fontSize: 13, marginBottom: 2 },
-  planUpgrade:      { fontSize: 12, color: '#6366F1', fontWeight: '600' },
-  waBadge:          { flexDirection: 'row', alignItems: 'center', gap: 5, paddingHorizontal: 10, paddingVertical: 5, borderRadius: 20 },
-  waDot:            { width: 7, height: 7, borderRadius: 4 },
-  waText:           { fontSize: 12, fontWeight: '700' },
-  premiumChip:      { backgroundColor: '#FFFBEB', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 5 },
-  premiumChipText:  { fontSize: 9, fontWeight: '800', color: '#92400E' },
-  basicoChip:       { backgroundColor: '#ECFDF5', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 5 },
-  basicoChipText:   { fontSize: 9, fontWeight: '800', color: '#065F46' },
-  statusRight:      { flexDirection: 'row', alignItems: 'center', gap: 6 },
-  statusDot:        { width: 8, height: 8, borderRadius: 4 },
-  themeToggleWrap:  { flexDirection: 'row', gap: 6 },
-  themeOption:      { flexDirection: 'row', alignItems: 'center', gap: 5, paddingHorizontal: 10, paddingVertical: 7, borderRadius: 10, borderWidth: 1 },
-  themeOptionActive:{ backgroundColor: '#10B981', borderColor: '#10B981' },
-  themeOptionText:  { fontSize: 12, fontWeight: '600', color: '#94A3B8' },
-  footer:           { alignItems: 'center', paddingTop: 8, paddingBottom: 16, gap: 4 },
-  footerBrand:      { fontSize: 16, fontWeight: '900', letterSpacing: 3 },
-  footerTagline:    { fontSize: 12, fontStyle: 'italic' },
-  footerVersion:    { fontSize: 11 },
+  heroAvatarText:     { fontSize: 22, fontWeight: '800', color: '#fff' },
+  heroOnline:         { position: 'absolute', bottom: 1, right: 1, width: 14, height: 14, borderRadius: 7, backgroundColor: '#10B981', borderWidth: 2 },
+  heroInfo:           { flex: 1 },
+  heroName:           { fontSize: 17, fontWeight: '700' },
+  heroEmail:          { fontSize: 12, marginTop: 2 },
+  heroBusiness:       { fontSize: 12, color: '#10B981', fontWeight: '600', marginTop: 4 },
+  planCard:           { borderRadius: 18, padding: 16, flexDirection: 'row', alignItems: 'center', gap: 14, marginBottom: 28, borderWidth: 1.5, shadowOpacity: 0.05, shadowRadius: 8, elevation: 2 },
+  planIconBox:        { width: 48, height: 48, borderRadius: 14, justifyContent: 'center', alignItems: 'center' },
+  planEmoji:          { fontSize: 24 },
+  planInfo:           { flex: 1 },
+  planRow:            { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 2 },
+  planName:           { fontSize: 16, fontWeight: '700' },
+  planBadge:          { paddingHorizontal: 7, paddingVertical: 2, borderRadius: 6 },
+  planBadgeText:      { fontSize: 10, fontWeight: '800' },
+  planPrice:          { fontSize: 13, marginBottom: 2 },
+  planUpgrade:        { fontSize: 12, color: '#6366F1', fontWeight: '600' },
+  waBadge:            { flexDirection: 'row', alignItems: 'center', gap: 5, paddingHorizontal: 10, paddingVertical: 5, borderRadius: 20 },
+  waDot:              { width: 7, height: 7, borderRadius: 4 },
+  waText:             { fontSize: 12, fontWeight: '700' },
+  premiumChip:        { backgroundColor: '#FFFBEB', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 5 },
+  premiumChipText:    { fontSize: 9, fontWeight: '800', color: '#92400E' },
+  basicoChip:         { backgroundColor: '#ECFDF5', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 5 },
+  basicoChipText:     { fontSize: 9, fontWeight: '800', color: '#065F46' },
+  statusRight:        { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  statusDot:          { width: 8, height: 8, borderRadius: 4 },
+  themeToggleWrap:    { flexDirection: 'row', gap: 6 },
+  themeOption:        { flexDirection: 'row', alignItems: 'center', gap: 5, paddingHorizontal: 10, paddingVertical: 7, borderRadius: 10, borderWidth: 1 },
+  themeOptionActive:  { backgroundColor: '#10B981', borderColor: '#10B981' },
+  themeOptionText:    { fontSize: 12, fontWeight: '600', color: '#94A3B8' },
+  footer:             { alignItems: 'center', paddingTop: 8, paddingBottom: 16, gap: 4 },
+  footerBrand:        { fontSize: 16, fontWeight: '900', letterSpacing: 3 },
+  footerTagline:      { fontSize: 12, fontStyle: 'italic' },
+  footerVersion:      { fontSize: 11 },
 });
