@@ -21,7 +21,26 @@ export default function FloatingTabBar({ tabs }: FloatingTabBarProps) {
   const insets = useSafeAreaInsets();
 
   const isActive = (tab: TabBarItem) => {
-    if (pathname === tab.route) return true;
+    // FIX: Home tab — el pathname puede ser '/', '/index', o contener '(home)'
+    // El problema: tab.name = 'home' pero la ruta real es '/(tabs)/(home)'
+    // pathname.includes('home') no matchea porque la ruta tiene '(home)' con paréntesis
+    if (tab.name === 'home') {
+      return (
+        pathname === '/' ||
+        pathname === '/index' ||
+        pathname.includes('(home)') ||
+        // Fallback: si ninguna otra tab está activa, Home lo está
+        (!pathname.includes('appointments') &&
+         !pathname.includes('clients') &&
+         !pathname.includes('reports') &&
+         !pathname.includes('settings') &&
+         !pathname.includes('profile') &&
+         !pathname.includes('marketing') &&
+         !pathname.includes('legal'))
+      );
+    }
+    // Resto de tabs
+    if (pathname === String(tab.route)) return true;
     if (pathname.includes(tab.name)) return true;
     return false;
   };
@@ -34,9 +53,6 @@ export default function FloatingTabBar({ tabs }: FloatingTabBarProps) {
           <TouchableOpacity
             key={index}
             style={styles.tab}
-            // FIX: usar replace en lugar de push para tabs
-            // push apila pantallas — con el tiempo el stack crece y la nav se ralentiza
-            // replace mantiene el stack limpio y la navegación instantánea
             onPress={() => {
               if (!active) router.replace(tab.route as any);
             }}
@@ -74,6 +90,6 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     paddingVertical: 4,
   },
-  label: { fontSize: 10, marginTop: 2, color: '#94A3B8' },
+  label:       { fontSize: 10, marginTop: 2, color: '#94A3B8' },
   labelActive: { color: '#10B981', fontWeight: '600' },
 });
