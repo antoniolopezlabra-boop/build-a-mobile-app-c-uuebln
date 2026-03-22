@@ -13,7 +13,6 @@ import { usePlan } from '@/contexts/PlanContext';
 import { PLAN_PRICES } from '@/services/stripe';
 import MaterialIcons from '@expo/vector-icons/MaterialIcons';
 
-// ─── Features por plan (arquitectura simplificada Mar 2026) ──────────────────
 const PLAN_FEATURES = {
   Gratuito: [
     'Link de citas público',
@@ -25,7 +24,7 @@ const PLAN_FEATURES = {
   Basico: [
     'Link de citas público ilimitado',
     'Citas ilimitadas',
-    'Hasta 3 servicios en catálogo',
+    'Servicios ilimitados en catálogo',
     'Recordatorios WhatsApp automáticos',
     'Confirmación al agendar',
     'Recordatorio 24h y 2h antes',
@@ -37,7 +36,6 @@ const PLAN_FEATURES = {
   ],
   Premium: [
     'Todo lo del Plan Básico',
-    'Servicios ilimitados en catálogo',
     'Email Marketing (campañas a clientes)',
     'Recuperación de clientes inactivos',
     'Recordatorios de cumpleaños',
@@ -83,20 +81,13 @@ export default function SubscriptionScreen() {
     const target = confirmModal.target;
     setConfirmModal({ visible: false, target: null });
     if (!target) return;
-
-    const url = target === 'Premium'
-      ? PLAN_PRICES.premium.link
-      : PLAN_PRICES.basico.link;
-
+    const url = target === 'Premium' ? PLAN_PRICES.premium.link : PLAN_PRICES.basico.link;
     try {
       const supported = await Linking.canOpenURL(url);
-      if (supported) {
-        await Linking.openURL(url);
-      } else {
-        setErrorModal({ visible: true, message: 'No se pudo abrir el navegador. Por favor intenta desde Safari o Chrome.' });
-      }
+      if (supported) await Linking.openURL(url);
+      else setErrorModal({ visible: true, message: 'No se pudo abrir el navegador.' });
     } catch {
-      setErrorModal({ visible: true, message: 'Error al abrir el link de pago. Intenta de nuevo.' });
+      setErrorModal({ visible: true, message: 'Error al abrir el link de pago.' });
     }
   };
 
@@ -113,7 +104,6 @@ export default function SubscriptionScreen() {
 
   return (
     <SafeAreaView style={s.container}>
-
       <ConfirmModal
         visible={confirmModal.visible}
         title={`Activar Plan ${targetName}`}
@@ -124,7 +114,6 @@ export default function SubscriptionScreen() {
         ]}
         onDismiss={() => setConfirmModal({ visible: false, target: null })}
       />
-
       <ConfirmModal
         visible={errorModal.visible}
         title="Error"
@@ -143,7 +132,7 @@ export default function SubscriptionScreen() {
 
       <ScrollView contentContainerStyle={s.scroll}>
 
-        {/* Card plan actual */}
+        {/* Plan actual */}
         <View style={s.currentCard}>
           <View style={s.currentRow}>
             <View style={[s.currentIconBox, {
@@ -223,9 +212,7 @@ export default function SubscriptionScreen() {
 
         {/* Plan Premium */}
         <View style={[s.planCard, s.planCardPremium, isPremium && s.planCardPremiumActive]}>
-          <View style={s.premiumBadge}>
-            <Text style={s.premiumBadgeText}>⭐ RECOMENDADO</Text>
-          </View>
+          <View style={s.premiumBadge}><Text style={s.premiumBadgeText}>⭐ RECOMENDADO</Text></View>
           <View style={s.planHeader}>
             <Text style={[s.planName, { color: '#6366F1' }]}>Premium</Text>
             {isPremium && <View style={[s.activeBadge, { backgroundColor: '#6366F1' }]}><Text style={s.activeBadgeText}>Tu plan actual</Text></View>}
@@ -248,7 +235,6 @@ export default function SubscriptionScreen() {
           )}
         </View>
 
-        {/* Nota de pago seguro */}
         <View style={s.secureNote}>
           <MaterialIcons name="lock" size={14} color="#94A3B8" />
           <Text style={s.secureNoteText}>
@@ -272,7 +258,6 @@ const s = StyleSheet.create({
   back: { padding: 4 },
   title: { fontSize: 20, fontWeight: 'bold', color: colors.text },
   scroll: { padding: 20, paddingBottom: 60 },
-
   currentCard: {
     backgroundColor: colors.card, borderRadius: 16, padding: 20,
     marginBottom: 24, shadowColor: '#000', shadowOpacity: 0.05, shadowRadius: 8, elevation: 2,
@@ -286,9 +271,7 @@ const s = StyleSheet.create({
   currentPrice: { fontSize: 14, color: colors.textSecondary, marginTop: 3, fontWeight: '500' },
   upgradeBanner: { marginTop: 14, backgroundColor: '#ECFDF5', borderRadius: 10, padding: 12, borderWidth: 1, borderColor: '#10B981' },
   upgradeBannerText: { fontSize: 13, color: '#065F46', lineHeight: 18 },
-
   sectionLabel: { fontSize: 11, fontWeight: '800', color: colors.textSecondary, marginBottom: 12, letterSpacing: 1 },
-
   planCard: {
     backgroundColor: colors.card, borderRadius: 16, padding: 20,
     marginBottom: 16, borderWidth: 1.5, borderColor: 'transparent',
@@ -308,13 +291,11 @@ const s = StyleSheet.create({
   features: { gap: 10 },
   featureRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
   featureText: { fontSize: 14, color: colors.text, flex: 1 },
-
   ctaBtn: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8,
     backgroundColor: colors.primary, borderRadius: 12, padding: 14, marginTop: 18,
   },
   ctaBtnText: { color: '#fff', fontSize: 15, fontWeight: '700' },
-
   secureNote: {
     flexDirection: 'row', alignItems: 'center', gap: 6,
     backgroundColor: colors.card, borderRadius: 10, padding: 12, marginTop: 4,
