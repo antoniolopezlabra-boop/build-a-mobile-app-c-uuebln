@@ -13,6 +13,20 @@ import { AdminProvider, useAdmin } from '@/contexts/AdminContext';
 import { ThemeProvider, useTheme } from '@/contexts/ThemeContext';
 import React from 'react';
 
+// Puente: una vez dentro de AuthProvider, sincroniza el userId con ThemeContext
+// Esto resuelve el crash "useAuth must be used within AuthProvider"
+// que ocurría cuando ThemeProvider intentaba llamar useAuth directamente
+function ThemeUserSync() {
+  const { user } = useAuth();
+  const { loadThemeForUser } = useTheme();
+
+  useEffect(() => {
+    loadThemeForUser(user?.id ?? null);
+  }, [user?.id]);
+
+  return null;
+}
+
 function NavigationGuard() {
   const { user, loading: authLoading } = useAuth();
   const { isAdmin, loading: adminLoading } = useAdmin();
@@ -97,6 +111,8 @@ export default function RootLayout() {
         <AuthProvider>
           <PlanProvider>
             <AdminProvider>
+              {/* ThemeUserSync debe estar dentro de AuthProvider para acceder a useAuth */}
+              <ThemeUserSync />
               <NavigationGuard />
               <Stack screenOptions={{ headerShown: false }} />
               <AppStatusBar />

@@ -1,6 +1,5 @@
-import React, { createContext, useContext, useState, useEffect } from 'react';
+import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { useAuth } from './AuthContext';
 
 export type ThemeMode = 'light' | 'dark';
 
@@ -67,6 +66,8 @@ interface ThemeContextType {
   isDark: boolean;
   setMode: (mode: ThemeMode) => void;
   toggleMode: () => void;
+  // Llamado desde _layout cuando cambia el usuario autenticado
+  loadThemeForUser: (userId: string | null) => Promise<void>;
 }
 
 const ThemeContext = createContext<ThemeContextType>({
@@ -75,44 +76,43 @@ const ThemeContext = createContext<ThemeContextType>({
   isDark: false,
   setMode: () => {},
   toggleMode: () => {},
+  loadThemeForUser: async () => {},
 });
 
 export function ThemeProvider({ children }: { children: React.ReactNode }) {
-  const { user } = useAuth();
   const [mode, setModeState] = useState<ThemeMode>('light');
-  // Guardamos el userId activo para saber cuándo recargarlo
-  const [loadedForUser, setLoadedForUser] = useState<string | null>(null);
+  const [currentUserId, setCurrentUserId] = useState<string | null>(null);
 
-  // Key única por usuario — FIX del bug: antes era 'vylta_theme' global
-  const themeKey = user?.id ? `vylta_theme_${user.id}` : null;
+  // Key por usuario — fix del bug donde todos compartian 'vylta_theme'
+  const themeKey = (userId: string | null) =>
+    userId ? `vylta_theme_${userId}` : null;
 
-  // Cargar preferencia cuando cambia el usuario
-  useEffect(() => {
-    if (!themeKey || loadedForUser === user?.id) return;
-    AsyncStorage.getItem(themeKey).then(saved => {
-      if (saved === 'dark' || saved === 'light') {
-        setModeState(saved);
-      } else {
-        // Si el usuario no tiene preferencia guardada, usar light por defecto
-        setModeState('light');
-      }
-      setLoadedForUser(user?.id ?? null);
-    });
-  }, [themeKey, user?.id]);
+  // Llamado desde _layout.tsx una vez que AuthProvider ya cargó el usuario
+  const loadThemeForUser = useCallback(async (userId: string | null) => {
+    if (userId === currentUserId) return; // ya cargado para este usuario
+    setCurrentUserId(userId);
 
-  // Cuando el usuario cierra sesión, volver a light
-  useEffect(() => {
-    if (!user?.id) {
+    if (!userId) {
+      // Logout: volver a light
       setModeState('light');
-      setLoadedForUser(null);
+      return;
     }
-  }, [user?.id]);
+
+    const key = themeKey(userId);
+    if (!key) return;
+    try {
+      const saved = await AsyncStorage.getItem(key);
+      setModeState(saved === 'dark' ? 'dark' : 'light');
+    } catch {
+      setModeState('light');
+    }
+  }, [currentUserId]);
 
   const setMode = async (m: ThemeMode) => {
     setModeState(m);
-    // Solo guardar si hay un usuario autenticado
-    if (themeKey) {
-      await AsyncStorage.setItem(themeKey, m);
+    const key = themeKey(currentUserId);
+    if (key) {
+      try { await AsyncStorage.setItem(key, m); } catch {}
     }
   };
 
@@ -125,6 +125,7 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
       isDark: mode === 'dark',
       setMode,
       toggleMode,
+      loadThemeForUser,
     }}>
       {children}
     </ThemeContext.Provider>
