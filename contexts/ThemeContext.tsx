@@ -1,5 +1,6 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { useAuth } from './AuthContext';
 
 export type ThemeMode = 'light' | 'dark';
 
@@ -77,17 +78,42 @@ const ThemeContext = createContext<ThemeContextType>({
 });
 
 export function ThemeProvider({ children }: { children: React.ReactNode }) {
+  const { user } = useAuth();
   const [mode, setModeState] = useState<ThemeMode>('light');
+  // Guardamos el userId activo para saber cuándo recargarlo
+  const [loadedForUser, setLoadedForUser] = useState<string | null>(null);
 
+  // Key única por usuario — FIX del bug: antes era 'vylta_theme' global
+  const themeKey = user?.id ? `vylta_theme_${user.id}` : null;
+
+  // Cargar preferencia cuando cambia el usuario
   useEffect(() => {
-    AsyncStorage.getItem('vylta_theme').then(saved => {
-      if (saved === 'dark' || saved === 'light') setModeState(saved);
+    if (!themeKey || loadedForUser === user?.id) return;
+    AsyncStorage.getItem(themeKey).then(saved => {
+      if (saved === 'dark' || saved === 'light') {
+        setModeState(saved);
+      } else {
+        // Si el usuario no tiene preferencia guardada, usar light por defecto
+        setModeState('light');
+      }
+      setLoadedForUser(user?.id ?? null);
     });
-  }, []);
+  }, [themeKey, user?.id]);
+
+  // Cuando el usuario cierra sesión, volver a light
+  useEffect(() => {
+    if (!user?.id) {
+      setModeState('light');
+      setLoadedForUser(null);
+    }
+  }, [user?.id]);
 
   const setMode = async (m: ThemeMode) => {
     setModeState(m);
-    await AsyncStorage.setItem('vylta_theme', m);
+    // Solo guardar si hay un usuario autenticado
+    if (themeKey) {
+      await AsyncStorage.setItem(themeKey, m);
+    }
   };
 
   const toggleMode = () => setMode(mode === 'dark' ? 'light' : 'dark');
