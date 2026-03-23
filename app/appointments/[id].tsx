@@ -39,7 +39,7 @@ interface Appointment {
   date: string;
   time: string;
   service: string;
-  status: 'Confirmada' | 'Pendiente' | 'Cancelada' | 'Completada' | 'No asisti\xF3' | 'Reagendada' | 'Pagado' | 'En espera' | 'Solicitud';
+  status: 'Confirmada' | 'Pendiente' | 'Cancelada' | 'Completada' | 'No asistió' | 'Reagendada' | 'Pagado' | 'En espera' | 'Solicitud';
   notes?: string | null;
   client: Client | null;
   clientId: string | null;
@@ -57,19 +57,15 @@ export default function AppointmentDetailScreen() {
   const { colors: tc } = useTheme();
   const { user } = useAuth();
 
-  const [loading, setLoading]           = useState(true);
+  const [loading, setLoading]             = useState(true);
   const [actionLoading, setActionLoading] = useState(false);
-  const [appointment, setAppointment]   = useState<Appointment | null>(null);
-  const [staffMembers, setStaffMembers] = useState<StaffMember[]>([]);
-  const [confirmModal, setConfirmModal] = useState({ visible: false, action: '', title: '', message: '' });
-  const [errorModal, setErrorModal]     = useState({ visible: false, message: '' });
-
-  // Modal guardar como cliente
+  const [appointment, setAppointment]     = useState<Appointment | null>(null);
+  const [staffMembers, setStaffMembers]   = useState<StaffMember[]>([]);
+  const [confirmModal, setConfirmModal]   = useState({ visible: false, action: '', title: '', message: '' });
+  const [errorModal, setErrorModal]       = useState({ visible: false, message: '' });
   const [saveClientModal, setSaveClientModal] = useState(false);
   const [savingClient, setSavingClient]       = useState(false);
   const [clientForm, setClientForm] = useState({ name: '', phone: '', email: '', notes: '' });
-
-  // Modal asignar colaborador
   const [assignStaffModal, setAssignStaffModal] = useState(false);
   const [assigningStaff, setAssigningStaff]     = useState(false);
 
@@ -119,7 +115,6 @@ export default function AppointmentDetailScreen() {
     }
   };
 
-  // NUEVO: asignar colaborador a una cita existente
   const handleAssignStaff = async (staffId: string | null) => {
     if (!appointment) return;
     setAssigningStaff(true);
@@ -162,32 +157,37 @@ export default function AppointmentDetailScreen() {
   const handleSaveAsClient = async () => {
     if (!appointment) return;
     if (!clientForm.name.trim() || !clientForm.phone.trim()) {
-      Alert.alert('Campos requeridos', 'El nombre y tel\xE9fono son obligatorios.');
+      Alert.alert('Campos requeridos', 'El nombre y teléfono son obligatorios.');
       return;
     }
     setSavingClient(true);
     try {
       const newClient = await apiPost<any>('/api/clients', {
-        name: clientForm.name.trim(),
-        phone: clientForm.phone.trim(),
-        email: clientForm.email.trim() || null,
-        notes: clientForm.notes.trim() || null,
+        name:     clientForm.name.trim(),
+        phone:    clientForm.phone.trim(),
+        email:    clientForm.email.trim() || null,
+        notes:    clientForm.notes.trim() || null,
         is_active: true,
       });
       const { error } = await supabase
         .from('appointments')
-        .update({ client_id: newClient.id, client_name_temp: null, client_phone_temp: null, updated_at: new Date().toISOString() })
+        .update({
+          client_id:        newClient.id,
+          client_name_temp: null,
+          client_phone_temp: null,
+          updated_at:       new Date().toISOString(),
+        })
         .eq('id', appointment.id);
       if (error) throw error;
       invalidateCache('clients_list');
       invalidateCache('appointments_list');
       setSaveClientModal(false);
       Alert.alert(
-        '\xA1Cliente guardado!',
+        '¡Cliente guardado!',
         `${clientForm.name.trim()} fue agregado a tu base de clientes.`,
         [
           { text: 'Ver cliente', onPress: () => router.push(`/clients/${newClient.id}`) },
-          { text: 'Quedarse aqu\xED', onPress: () => loadAll() },
+          { text: 'Quedarse aquí', onPress: () => loadAll() },
         ]
       );
     } catch (error: any) {
@@ -208,7 +208,7 @@ export default function AppointmentDetailScreen() {
       case 'confirm':  handleStatusChange('Confirmada'); break;
       case 'cancel':   handleStatusChange('Cancelada'); break;
       case 'complete': handleStatusChange('Completada'); break;
-      case 'noshow':   handleStatusChange('No asisti\xF3'); break;
+      case 'noshow':   handleStatusChange('No asistió'); break;
       case 'paid':     handleStatusChange('Pagado'); break;
       case 'delete':   handleDelete(); break;
       case 'approve':  handleStatusChange('Confirmada'); break;
@@ -232,19 +232,18 @@ export default function AppointmentDetailScreen() {
   const isPublicLink  = appointment.source === 'public_link';
   const hasRealClient = !!appointment.client;
   const clientName    = appointment.client?.name || appointment.clientNameTemp || 'Cliente desconocido';
-  const clientPhone   = appointment.client?.phone || appointment.clientPhone || '\u2014';
+  const clientPhone   = appointment.client?.phone || appointment.clientPhone || '—';
   const clientEmail   = appointment.client?.email;
   const clientInitial = clientName.charAt(0).toUpperCase();
   const canSaveAsClient = isPublicLink && !hasRealClient;
   const hasStaff = staffMembers.length > 0;
-
-  // Colaborador asignado actualmente
   const assignedStaff = appointment.staff_id
     ? staffMembers.find(m => m.id === appointment.staff_id)
     : null;
 
   return (
     <SafeAreaView style={[styles.container, { backgroundColor: tc.bg }]} edges={['top']}>
+
       {/* Header */}
       <View style={[styles.header, { backgroundColor: tc.surface, borderBottomColor: tc.border }]}>
         <TouchableOpacity onPress={() => router.back()} style={styles.backButton}>
@@ -252,7 +251,7 @@ export default function AppointmentDetailScreen() {
         </TouchableOpacity>
         <Text style={[styles.title, { color: tc.text }]}>Detalle de Cita</Text>
         <TouchableOpacity
-          onPress={() => showConfirmation('delete', 'Eliminar Cita', '\xBFEst\xE1s seguro de que deseas eliminar esta cita?')}
+          onPress={() => showConfirmation('delete', 'Eliminar Cita', '¿Estás seguro de que deseas eliminar esta cita?')}
           style={styles.deleteButton}
         >
           <IconSymbol ios_icon_name="trash" android_material_icon_name="delete" size={24} color="#EF4444" />
@@ -269,14 +268,14 @@ export default function AppointmentDetailScreen() {
           {isPublicLink && (
             <View style={styles.publicLinkBadge}>
               <MaterialIcons name="link" size={13} color="#3B82F6" />
-              <Text style={styles.publicLinkText}>Desde link de cita p\xFAblica</Text>
+              <Text style={styles.publicLinkText}>Desde link de cita pública</Text>
             </View>
           )}
         </View>
 
-        {/* Info de la cita */}
+        {/* Información de la cita */}
         <View style={[styles.section, { backgroundColor: tc.surface }]}>
-          <Text style={[styles.sectionTitle, { color: tc.text }]}>Informaci\xF3n de la Cita</Text>
+          <Text style={[styles.sectionTitle, { color: tc.text }]}>Información de la Cita</Text>
           <View style={styles.infoRow}>
             <IconSymbol ios_icon_name="calendar" android_material_icon_name="event" size={22} color={colors.primary} />
             <View style={styles.infoContent}>
@@ -309,24 +308,17 @@ export default function AppointmentDetailScreen() {
           )}
         </View>
 
-        {/* NUEVO: Sección colaborador asignado */}
+        {/* Colaborador */}
         {hasStaff && (
           <View style={[styles.section, { backgroundColor: tc.surface }]}>
             <View style={styles.staffSectionHeader}>
               <Text style={[styles.sectionTitle, { color: tc.text }]}>Colaborador</Text>
-              <TouchableOpacity
-                style={styles.assignBtn}
-                onPress={() => setAssignStaffModal(true)}
-              >
+              <TouchableOpacity style={styles.assignBtn} onPress={() => setAssignStaffModal(true)}>
                 <MaterialIcons name={assignedStaff ? 'swap-horiz' : 'person-add-alt'} size={15} color="#fff" />
-                <Text style={styles.assignBtnText}>
-                  {assignedStaff ? 'Cambiar' : 'Asignar'}
-                </Text>
+                <Text style={styles.assignBtnText}>{assignedStaff ? 'Cambiar' : 'Asignar'}</Text>
               </TouchableOpacity>
             </View>
-
             {assignedStaff ? (
-              // Colaborador asignado
               <View style={[styles.staffCard, { backgroundColor: tc.bg, borderColor: assignedStaff.color + '44' }]}>
                 <View style={[styles.staffAvatar, { backgroundColor: assignedStaff.color + '20', borderColor: assignedStaff.color }]}>
                   <Text style={[styles.staffAvatarText, { color: assignedStaff.color }]}>
@@ -335,14 +327,11 @@ export default function AppointmentDetailScreen() {
                 </View>
                 <View style={styles.staffInfo}>
                   <Text style={[styles.staffName, { color: tc.text }]}>{assignedStaff.name}</Text>
-                  {assignedStaff.role && (
-                    <Text style={[styles.staffRole, { color: tc.textMuted }]}>{assignedStaff.role}</Text>
-                  )}
+                  {assignedStaff.role && <Text style={[styles.staffRole, { color: tc.textMuted }]}>{assignedStaff.role}</Text>}
                 </View>
                 <View style={[styles.staffColorDot, { backgroundColor: assignedStaff.color }]} />
               </View>
             ) : (
-              // Sin asignar
               <TouchableOpacity
                 style={[styles.staffUnassigned, { backgroundColor: tc.bg, borderColor: tc.border }]}
                 onPress={() => setAssignStaffModal(true)}
@@ -389,7 +378,7 @@ export default function AppointmentDetailScreen() {
               )}
               {isPublicLink && !hasRealClient && (
                 <View style={styles.notSavedPill}>
-                  <Text style={styles.notSavedText}>No registrado como cliente a\xFAn</Text>
+                  <Text style={styles.notSavedText}>No registrado como cliente aún</Text>
                 </View>
               )}
             </View>
@@ -405,15 +394,21 @@ export default function AppointmentDetailScreen() {
               <View style={styles.solicitudBanner}>
                 <MaterialIcons name="link" size={16} color="#3B82F6" />
                 <View style={{ flex: 1 }}>
-                  <Text style={styles.solicitudTitle}>Solicitud desde link p\xFAblico</Text>
-                  <Text style={styles.solicitudSub}>{clientName} \xB7 {clientPhone}</Text>
+                  <Text style={styles.solicitudTitle}>Solicitud desde link público</Text>
+                  <Text style={styles.solicitudSub}>{clientName} · {clientPhone}</Text>
                 </View>
               </View>
-              <TouchableOpacity style={[styles.actionButton, { backgroundColor: '#10B981', marginBottom: 10 }]} onPress={() => showConfirmation('approve', 'Aceptar solicitud', `\xBFConfirmas la cita de ${clientName}?`)}>
+              <TouchableOpacity
+                style={[styles.actionButton, { backgroundColor: '#10B981', marginBottom: 10 }]}
+                onPress={() => showConfirmation('approve', 'Aceptar solicitud', `¿Confirmas la cita de ${clientName}?`)}
+              >
                 <MaterialIcons name="check-circle" size={22} color="#fff" />
                 <Text style={styles.actionButtonText}>Aceptar solicitud</Text>
               </TouchableOpacity>
-              <TouchableOpacity style={[styles.actionButton, { backgroundColor: '#EF4444' }]} onPress={() => showConfirmation('reject', 'Rechazar solicitud', '\xBFDeseas rechazar esta solicitud?')}>
+              <TouchableOpacity
+                style={[styles.actionButton, { backgroundColor: '#EF4444' }]}
+                onPress={() => showConfirmation('reject', 'Rechazar solicitud', '¿Deseas rechazar esta solicitud?')}
+              >
                 <MaterialIcons name="cancel" size={22} color="#fff" />
                 <Text style={styles.actionButtonText}>Rechazar solicitud</Text>
               </TouchableOpacity>
@@ -424,13 +419,19 @@ export default function AppointmentDetailScreen() {
             <View>
               <View style={[styles.solicitudBanner, { backgroundColor: '#F3E8FF', borderColor: '#8B5CF6' }]}>
                 <MaterialIcons name="hourglass-empty" size={16} color="#8B5CF6" />
-                <Text style={[styles.solicitudTitle, { color: '#8B5CF6' }]}>Cita en espera de confirmaci\xF3n</Text>
+                <Text style={[styles.solicitudTitle, { color: '#8B5CF6' }]}>Cita en espera de confirmación</Text>
               </View>
-              <TouchableOpacity style={[styles.actionButton, { backgroundColor: '#10B981', marginBottom: 10 }]} onPress={() => showConfirmation('approve', 'Aprobar cita', '\xBFConfirmas que puedes atender esta cita?')}>
+              <TouchableOpacity
+                style={[styles.actionButton, { backgroundColor: '#10B981', marginBottom: 10 }]}
+                onPress={() => showConfirmation('approve', 'Aprobar cita', '¿Confirmas que puedes atender esta cita?')}
+              >
                 <MaterialIcons name="check-circle" size={22} color="#fff" />
                 <Text style={styles.actionButtonText}>Aprobar cita</Text>
               </TouchableOpacity>
-              <TouchableOpacity style={[styles.actionButton, { backgroundColor: '#EF4444', marginBottom: 10 }]} onPress={() => showConfirmation('reject', 'Rechazar cita', '\xBFDeseas rechazar esta cita?')}>
+              <TouchableOpacity
+                style={[styles.actionButton, { backgroundColor: '#EF4444', marginBottom: 10 }]}
+                onPress={() => showConfirmation('reject', 'Rechazar cita', '¿Deseas rechazar esta cita?')}
+              >
                 <MaterialIcons name="cancel" size={22} color="#fff" />
                 <Text style={styles.actionButtonText}>Rechazar cita</Text>
               </TouchableOpacity>
@@ -442,14 +443,20 @@ export default function AppointmentDetailScreen() {
           )}
 
           {appointment.status === 'Pendiente' && (
-            <TouchableOpacity style={[styles.actionButton, { backgroundColor: '#10B981' }]} onPress={() => showConfirmation('confirm', 'Confirmar Cita', '\xBFDeseas confirmar esta cita?')}>
+            <TouchableOpacity
+              style={[styles.actionButton, { backgroundColor: '#10B981' }]}
+              onPress={() => showConfirmation('confirm', 'Confirmar Cita', '¿Deseas confirmar esta cita?')}
+            >
               <MaterialIcons name="check-circle" size={22} color="#fff" />
               <Text style={styles.actionButtonText}>Confirmar</Text>
             </TouchableOpacity>
           )}
 
           {appointment.status === 'Completada' && (
-            <TouchableOpacity style={[styles.actionButton, { backgroundColor: '#10B981' }]} onPress={() => showConfirmation('paid', 'Marcar como Pagado', '\xBFConfirmas que ya se cobr\xF3 este servicio?')}>
+            <TouchableOpacity
+              style={[styles.actionButton, { backgroundColor: '#10B981' }]}
+              onPress={() => showConfirmation('paid', 'Marcar como Pagado', '¿Confirmas que ya se cobró este servicio?')}
+            >
               <MaterialIcons name="attach-money" size={22} color="#fff" />
               <Text style={styles.actionButtonText}>Pagado</Text>
             </TouchableOpacity>
@@ -461,15 +468,24 @@ export default function AppointmentDetailScreen() {
                 <MaterialIcons name="event" size={22} color="#fff" />
                 <Text style={styles.actionButtonText}>Reagendar</Text>
               </TouchableOpacity>
-              <TouchableOpacity style={[styles.actionButton, { backgroundColor: '#6B7280', marginTop: 10 }]} onPress={() => showConfirmation('complete', 'Completar Cita', '\xBFMarcar esta cita como completada?')}>
+              <TouchableOpacity
+                style={[styles.actionButton, { backgroundColor: '#6B7280', marginTop: 10 }]}
+                onPress={() => showConfirmation('complete', 'Completar Cita', '¿Marcar esta cita como completada?')}
+              >
                 <MaterialIcons name="check" size={22} color="#fff" />
                 <Text style={styles.actionButtonText}>Completar</Text>
               </TouchableOpacity>
-              <TouchableOpacity style={[styles.actionButton, { backgroundColor: '#F97316', marginTop: 10 }]} onPress={() => showConfirmation('noshow', 'No asisti\xF3', '\xBFEl cliente no se present\xF3?')}>
+              <TouchableOpacity
+                style={[styles.actionButton, { backgroundColor: '#F97316', marginTop: 10 }]}
+                onPress={() => showConfirmation('noshow', 'No asistió', '¿El cliente no se presentó?')}
+              >
                 <MaterialIcons name="cancel" size={22} color="#fff" />
-                <Text style={styles.actionButtonText}>No asisti\xF3</Text>
+                <Text style={styles.actionButtonText}>No asistió</Text>
               </TouchableOpacity>
-              <TouchableOpacity style={[styles.actionButton, { backgroundColor: '#EF4444', marginTop: 10 }]} onPress={() => showConfirmation('cancel', 'Cancelar Cita', '\xBFEst\xE1s seguro de que deseas cancelar esta cita?')}>
+              <TouchableOpacity
+                style={[styles.actionButton, { backgroundColor: '#EF4444', marginTop: 10 }]}
+                onPress={() => showConfirmation('cancel', 'Cancelar Cita', '¿Estás seguro de que deseas cancelar esta cita?')}
+              >
                 <MaterialIcons name="close" size={22} color="#fff" />
                 <Text style={styles.actionButtonText}>Cancelar</Text>
               </TouchableOpacity>
@@ -478,7 +494,7 @@ export default function AppointmentDetailScreen() {
         </View>
       </ScrollView>
 
-      {/* ── MODAL: Asignar colaborador ── */}
+      {/* Modal: Asignar colaborador */}
       <Modal visible={assignStaffModal} transparent animationType="slide" onRequestClose={() => setAssignStaffModal(false)}>
         <KeyboardAvoidingView style={styles.modalOverlay} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
           <TouchableOpacity style={styles.modalBackdrop} activeOpacity={1} onPress={() => setAssignStaffModal(false)} />
@@ -490,14 +506,14 @@ export default function AppointmentDetailScreen() {
                 <MaterialIcons name="close" size={22} color={tc.textMuted} />
               </TouchableOpacity>
             </View>
-            <Text style={[styles.modalSub, { color: tc.textMuted }]}>
-              Selecciona qui\xE9n atender\xE1 esta cita.
-            </Text>
-
+            <Text style={[styles.modalSub, { color: tc.textMuted }]}>Selecciona quién atenderá esta cita.</Text>
             <ScrollView showsVerticalScrollIndicator={false}>
-              {/* Opci\xF3n sin asignar */}
               <TouchableOpacity
-                style={[styles.staffOption, { backgroundColor: tc.bg, borderColor: !appointment.staff_id ? '#10B981' : tc.border }, !appointment.staff_id && { borderColor: '#10B981', backgroundColor: '#ECFDF5' }]}
+                style={[
+                  styles.staffOption,
+                  { backgroundColor: tc.bg, borderColor: tc.border },
+                  !appointment.staff_id && { borderColor: '#10B981', backgroundColor: '#ECFDF5' },
+                ]}
                 onPress={() => handleAssignStaff(null)}
                 disabled={assigningStaff}
               >
@@ -506,22 +522,25 @@ export default function AppointmentDetailScreen() {
                 </View>
                 <View style={{ flex: 1 }}>
                   <Text style={[styles.staffOptionName, { color: tc.text }]}>Sin asignar</Text>
-                  <Text style={[styles.staffOptionRole, { color: tc.textMuted }]}>Quitar asignaci\xF3n actual</Text>
+                  <Text style={[styles.staffOptionRole, { color: tc.textMuted }]}>Quitar asignación actual</Text>
                 </View>
                 {!appointment.staff_id && <MaterialIcons name="check-circle" size={20} color="#10B981" />}
               </TouchableOpacity>
 
               {staffMembers.map(m => {
                 const isSelected = appointment.staff_id === m.id;
-                const bg = m.color + '18';
                 return (
                   <TouchableOpacity
                     key={m.id}
-                    style={[styles.staffOption, { backgroundColor: tc.bg, borderColor: tc.border }, isSelected && { borderColor: m.color, backgroundColor: m.color + '10' }]}
+                    style={[
+                      styles.staffOption,
+                      { backgroundColor: tc.bg, borderColor: tc.border },
+                      isSelected && { borderColor: m.color, backgroundColor: m.color + '10' },
+                    ]}
                     onPress={() => handleAssignStaff(m.id)}
                     disabled={assigningStaff}
                   >
-                    <View style={[styles.staffOptionAvatar, { backgroundColor: bg, borderWidth: 2, borderColor: m.color }]}>
+                    <View style={[styles.staffOptionAvatar, { backgroundColor: m.color + '18', borderWidth: 2, borderColor: m.color }]}>
                       <Text style={[styles.staffOptionInitials, { color: m.color }]}>
                         {m.name.split(' ').map((w: string) => w[0]).slice(0, 2).join('').toUpperCase()}
                       </Text>
@@ -541,7 +560,7 @@ export default function AppointmentDetailScreen() {
         </KeyboardAvoidingView>
       </Modal>
 
-      {/* ── MODAL: Guardar como cliente ── */}
+      {/* Modal: Guardar como cliente */}
       <Modal visible={saveClientModal} transparent animationType="slide" onRequestClose={() => setSaveClientModal(false)}>
         <KeyboardAvoidingView style={styles.modalOverlay} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
           <TouchableOpacity style={styles.modalBackdrop} activeOpacity={1} onPress={() => setSaveClientModal(false)} />
@@ -554,19 +573,57 @@ export default function AppointmentDetailScreen() {
               </TouchableOpacity>
             </View>
             <Text style={[styles.modalSub, { color: tc.textMuted }]}>
-              Esta informaci\xF3n se guardar\xE1 en tu base de clientes y quedar\xE1 vinculada a esta cita.
+              Esta información se guardará en tu base de clientes y quedará vinculada a esta cita.
             </Text>
             <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
               <Text style={[styles.fieldLabel, { color: tc.textMuted }]}>Nombre *</Text>
-              <TextInput style={[styles.fieldInput, { backgroundColor: tc.inputBg, borderColor: tc.inputBorder, color: tc.text }]} value={clientForm.name} onChangeText={v => setClientForm(p => ({ ...p, name: v }))} placeholder="Nombre completo" placeholderTextColor={tc.textMuted} returnKeyType="next" />
-              <Text style={[styles.fieldLabel, { color: tc.textMuted }]}>Tel\xE9fono / WhatsApp *</Text>
-              <TextInput style={[styles.fieldInput, { backgroundColor: tc.inputBg, borderColor: tc.inputBorder, color: tc.text }]} value={clientForm.phone} onChangeText={v => setClientForm(p => ({ ...p, phone: v }))} placeholder="Ej: 442 123 4567" placeholderTextColor={tc.textMuted} keyboardType="phone-pad" returnKeyType="next" />
+              <TextInput
+                style={[styles.fieldInput, { backgroundColor: tc.inputBg, borderColor: tc.inputBorder, color: tc.text }]}
+                value={clientForm.name}
+                onChangeText={v => setClientForm(p => ({ ...p, name: v }))}
+                placeholder="Nombre completo"
+                placeholderTextColor={tc.textMuted}
+                returnKeyType="next"
+              />
+              <Text style={[styles.fieldLabel, { color: tc.textMuted }]}>Teléfono / WhatsApp *</Text>
+              <TextInput
+                style={[styles.fieldInput, { backgroundColor: tc.inputBg, borderColor: tc.inputBorder, color: tc.text }]}
+                value={clientForm.phone}
+                onChangeText={v => setClientForm(p => ({ ...p, phone: v }))}
+                placeholder="Ej: 442 123 4567"
+                placeholderTextColor={tc.textMuted}
+                keyboardType="phone-pad"
+                returnKeyType="next"
+              />
               <Text style={[styles.fieldLabel, { color: tc.textMuted }]}>Email (opcional)</Text>
-              <TextInput style={[styles.fieldInput, { backgroundColor: tc.inputBg, borderColor: tc.inputBorder, color: tc.text }]} value={clientForm.email} onChangeText={v => setClientForm(p => ({ ...p, email: v }))} placeholder="correo@ejemplo.com" placeholderTextColor={tc.textMuted} keyboardType="email-address" autoCapitalize="none" returnKeyType="next" />
+              <TextInput
+                style={[styles.fieldInput, { backgroundColor: tc.inputBg, borderColor: tc.inputBorder, color: tc.text }]}
+                value={clientForm.email}
+                onChangeText={v => setClientForm(p => ({ ...p, email: v }))}
+                placeholder="correo@ejemplo.com"
+                placeholderTextColor={tc.textMuted}
+                keyboardType="email-address"
+                autoCapitalize="none"
+                returnKeyType="next"
+              />
               <Text style={[styles.fieldLabel, { color: tc.textMuted }]}>Notas (opcional)</Text>
-              <TextInput style={[styles.fieldInput, styles.fieldTextarea, { backgroundColor: tc.inputBg, borderColor: tc.inputBorder, color: tc.text }]} value={clientForm.notes} onChangeText={v => setClientForm(p => ({ ...p, notes: v }))} placeholder="Preferencias, alergias..." placeholderTextColor={tc.textMuted} multiline />
-              <TouchableOpacity style={[styles.modalSaveBtn, savingClient && { opacity: 0.6 }]} onPress={handleSaveAsClient} disabled={savingClient}>
-                {savingClient ? <ActivityIndicator color="#fff" /> : <><MaterialIcons name="person-add-alt" size={18} color="#fff" /><Text style={styles.modalSaveBtnText}>Guardar cliente</Text></>}
+              <TextInput
+                style={[styles.fieldInput, styles.fieldTextarea, { backgroundColor: tc.inputBg, borderColor: tc.inputBorder, color: tc.text }]}
+                value={clientForm.notes}
+                onChangeText={v => setClientForm(p => ({ ...p, notes: v }))}
+                placeholder="Preferencias, alergias..."
+                placeholderTextColor={tc.textMuted}
+                multiline
+              />
+              <TouchableOpacity
+                style={[styles.modalSaveBtn, savingClient && { opacity: 0.6 }]}
+                onPress={handleSaveAsClient}
+                disabled={savingClient}
+              >
+                {savingClient
+                  ? <ActivityIndicator color="#fff" />
+                  : <><MaterialIcons name="person-add-alt" size={18} color="#fff" /><Text style={styles.modalSaveBtnText}>Guardar cliente</Text></>
+                }
               </TouchableOpacity>
             </ScrollView>
           </View>
@@ -620,7 +677,6 @@ const styles = StyleSheet.create({
   infoContent:          { flex: 1 },
   infoLabel:            { fontSize: 12, marginBottom: 3 },
   infoValue:            { fontSize: 16, fontWeight: '500' },
-  // Colaborador
   staffSectionHeader:   { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14 },
   assignBtn:            { flexDirection: 'row', alignItems: 'center', gap: 5, backgroundColor: '#8B5CF6', paddingHorizontal: 12, paddingVertical: 7, borderRadius: 10 },
   assignBtnText:        { fontSize: 12, fontWeight: '700', color: '#fff' },
@@ -635,7 +691,6 @@ const styles = StyleSheet.create({
   staffAvatarEmpty:     { width: 44, height: 44, borderRadius: 12, justifyContent: 'center', alignItems: 'center' },
   staffUnassignedText:  { fontSize: 14, fontWeight: '600' },
   staffUnassignedSub:   { fontSize: 12, marginTop: 2 },
-  // Cliente
   clientSectionHeader:  { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14 },
   saveClientBtn:        { flexDirection: 'row', alignItems: 'center', gap: 5, backgroundColor: '#10B981', paddingHorizontal: 12, paddingVertical: 7, borderRadius: 10 },
   saveClientBtnText:    { fontSize: 12, fontWeight: '700', color: '#fff' },
@@ -648,7 +703,6 @@ const styles = StyleSheet.create({
   clientPhone:          { fontSize: 13 },
   notSavedPill:         { alignSelf: 'flex-start', backgroundColor: '#FEF3C7', paddingHorizontal: 8, paddingVertical: 3, borderRadius: 6, marginTop: 4 },
   notSavedText:         { fontSize: 11, color: '#92400E', fontWeight: '600' },
-  // Acciones
   actionsSection:       { padding: 20, marginBottom: 32 },
   actionButton:         { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', padding: 15, borderRadius: 12, gap: 8 },
   actionButtonText:     { fontSize: 15, fontWeight: '700', color: '#fff' },
@@ -656,7 +710,6 @@ const styles = StyleSheet.create({
   solicitudTitle:       { fontSize: 13, fontWeight: '700', color: '#3B82F6' },
   solicitudSub:         { fontSize: 12, color: '#6B7280', marginTop: 2 },
   actionLoadingOverlay: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.3)', justifyContent: 'center', alignItems: 'center' },
-  // Modals
   modalOverlay:         { flex: 1, justifyContent: 'flex-end' },
   modalBackdrop:        { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(0,0,0,0.5)' },
   modalHandle:          { width: 36, height: 4, borderRadius: 2, backgroundColor: '#D1D5DB', alignSelf: 'center', marginBottom: 12 },
@@ -664,13 +717,11 @@ const styles = StyleSheet.create({
   modalHeader:          { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 },
   modalTitle:           { fontSize: 18, fontWeight: '800' },
   modalSub:             { fontSize: 13, lineHeight: 18, marginBottom: 14 },
-  // Staff options en modal
   staffOption:          { flexDirection: 'row', alignItems: 'center', gap: 12, padding: 14, borderRadius: 14, borderWidth: 1.5, marginBottom: 8 },
   staffOptionAvatar:    { width: 44, height: 44, borderRadius: 12, justifyContent: 'center', alignItems: 'center' },
   staffOptionInitials:  { fontSize: 15, fontWeight: '800' },
   staffOptionName:      { fontSize: 15, fontWeight: '700' },
   staffOptionRole:      { fontSize: 12, marginTop: 2 },
-  // Form fields
   fieldLabel:           { fontSize: 12, fontWeight: '600', marginBottom: 5, marginTop: 8 },
   fieldInput:           { borderRadius: 12, borderWidth: 1.5, padding: 12, fontSize: 15 },
   fieldTextarea:        { height: 70, textAlignVertical: 'top' },
