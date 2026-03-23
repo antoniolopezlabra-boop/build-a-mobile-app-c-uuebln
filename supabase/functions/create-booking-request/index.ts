@@ -1,7 +1,7 @@
 import { serve } from 'https://deno.land/std@0.168.0/http/server.ts'
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
 
-const SUPABASE_URL      = Deno.env.get('SUPABASE_URL') ?? ''
+const SUPABASE_URL         = Deno.env.get('SUPABASE_URL') ?? ''
 const SUPABASE_SERVICE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
 
 const corsHeaders = {
@@ -25,14 +25,14 @@ serve(async (req) => {
       serviceName, serviceId,
       date, startTime, endTime,
       serviceCost, notes,
+      staff_id,   // FIX: extraer staff_id del body
     } = await req.json()
 
-    // ── Validaciones básicas ──────────────────────────────────────────────
+    // Validaciones básicas
     if (!slug || !clientName || !clientPhone || !serviceName || !date || !startTime || !endTime) {
       return json({ error: 'Faltan campos requeridos' }, 400)
     }
 
-    // FIX: validar teléfono mínimo — al menos 7 dígitos numéricos
     const phoneDigits = clientPhone.replace(/\D/g, '')
     if (phoneDigits.length < 7) {
       return json({ error: 'Número de teléfono inválido' }, 400)
@@ -40,7 +40,7 @@ serve(async (req) => {
 
     const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY)
 
-    // ── Verificar que el link existe y está activo ────────────────────────
+    // Verificar que el link existe y está activo
     const { data: link, error: linkError } = await supabase
       .from('booking_links')
       .select('id, user_id, require_approval, is_active, whatsapp_confirmation')
@@ -51,9 +51,9 @@ serve(async (req) => {
       return json({ error: 'Link no encontrado o inactivo' }, 404)
     }
 
-    // FIX: verificar disponibilidad del slot ANTES de insertar
-    // Evita doble-booking cuando dos clientes eligen el mismo horario simultáneamente
-    const { data: conflict } = await supabase
+    // FIX: si viene staff_id, verificar disponibilidad SOLO para ese staff
+    // Si no viene staff_id, verificar disponibilidad general del negocio
+    let conflictQuery = supabase
       .from('appointments')
       .select('id')
       .eq('user_id', link.user_id)
@@ -62,6 +62,13 @@ serve(async (req) => {
       .or(`and(start_time.lt.${endTime},end_time.gt.${startTime})`)
       .limit(1)
 
+    if (staff_id) {
+      // Solo verificar conflicto para ese colaborador específico
+      conflictQuery = conflictQuery.eq('staff_id', staff_id)
+    }
+
+    const { data: conflict } = await conflictQuery
+
     if (conflict && conflict.length > 0) {
       return json({
         error: 'Lo sentimos, ese horario acaba de ser reservado. Por favor elige otro.',
@@ -69,36 +76,32 @@ serve(async (req) => {
       }, 409)
     }
 
-    // FIX: usar whatsapp_confirmation del link, no hardcodear true
     const whatsappNotification = link.whatsapp_confirmation ?? true
-
-    // AUTO-CONFIRM: require_approval=false → cita queda Confirmada directamente
-    // Solo usa 'Solicitud' si el negocio activó aprobación manual
     const status = link.require_approval ? 'Solicitud' : 'Confirmada'
 
     const { data: appointment, error: aptError } = await supabase
       .from('appointments')
       .insert({
-        user_id:            link.user_id,
-        client_name_temp:   clientName.trim(),
-        client_phone_temp:  clientPhone.trim(),
-        service_name:       serviceName,
-        service_id:         serviceId || null,
+        user_id:               link.user_id,
+        client_name_temp:      clientName.trim(),
+        client_phone_temp:     clientPhone.trim(),
+        service_name:          serviceName,
+        service_id:            serviceId   || null,
         date,
-        start_time:         startTime,
-        end_time:           endTime,
+        start_time:            startTime,
+        end_time:              endTime,
         status,
-        notes:              notes || null,
-        service_cost:       serviceCost || 0,
-        source:             'public_link',
+        notes:                 notes       || null,
+        service_cost:          serviceCost || 0,
+        source:                'public_link',
         whatsapp_notification: whatsappNotification,
+        staff_id:              staff_id    || null,  // FIX: guardar staff_id
       })
       .select('id, status')
       .single()
 
     if (aptError) {
       console.error('[create-booking-request] Insert error:', aptError)
-      // Manejar posible race condition de unique constraint a nivel DB
       if (aptError.code === '23505') {
         return json({
           error: 'Lo sentimos, ese horario acaba de ser reservado. Por favor elige otro.',
@@ -109,9 +112,9 @@ serve(async (req) => {
     }
 
     return json({
-      success: true,
+      success:       true,
       appointmentId: appointment.id,
-      status: appointment.status,
+      status:        appointment.status,
     })
 
   } catch (error: any) {
