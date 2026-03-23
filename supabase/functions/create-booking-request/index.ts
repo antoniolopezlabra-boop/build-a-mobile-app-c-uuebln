@@ -22,10 +22,10 @@ serve(async (req) => {
   try {
     const {
       slug, clientName, clientPhone,
-      serviceName, serviceId,
+      serviceName,
       date, startTime, endTime,
       serviceCost, notes,
-      staff_id,   // FIX: extraer staff_id del body
+      staff_id,
     } = await req.json()
 
     // Validaciones básicas
@@ -51,8 +51,8 @@ serve(async (req) => {
       return json({ error: 'Link no encontrado o inactivo' }, 404)
     }
 
-    // FIX: si viene staff_id, verificar disponibilidad SOLO para ese staff
-    // Si no viene staff_id, verificar disponibilidad general del negocio
+    // Verificar disponibilidad del slot
+    // Si viene staff_id, solo verificar conflicto de ESE colaborador
     let conflictQuery = supabase
       .from('appointments')
       .select('id')
@@ -63,7 +63,6 @@ serve(async (req) => {
       .limit(1)
 
     if (staff_id) {
-      // Solo verificar conflicto para ese colaborador específico
       conflictQuery = conflictQuery.eq('staff_id', staff_id)
     }
 
@@ -79,6 +78,8 @@ serve(async (req) => {
     const whatsappNotification = link.whatsapp_confirmation ?? true
     const status = link.require_approval ? 'Solicitud' : 'Confirmada'
 
+    // FIX: removido service_id — la columna no existe en la tabla appointments.
+    // La tabla solo tiene service_name para identificar el servicio.
     const { data: appointment, error: aptError } = await supabase
       .from('appointments')
       .insert({
@@ -86,16 +87,15 @@ serve(async (req) => {
         client_name_temp:      clientName.trim(),
         client_phone_temp:     clientPhone.trim(),
         service_name:          serviceName,
-        service_id:            serviceId   || null,
         date,
         start_time:            startTime,
         end_time:              endTime,
         status,
-        notes:                 notes       || null,
+        notes:                 notes    || null,
         service_cost:          serviceCost || 0,
         source:                'public_link',
         whatsapp_notification: whatsappNotification,
-        staff_id:              staff_id    || null,  // FIX: guardar staff_id
+        staff_id:              staff_id || null,
       })
       .select('id, status')
       .single()
