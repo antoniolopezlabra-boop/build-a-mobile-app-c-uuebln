@@ -26,7 +26,6 @@ const VARIABLES = [
 export default function NewCampaignScreen() {
   const router = useRouter();
   const { user, businessProfile } = useAuth();
-  // FIX: verificar plan Premium en runtime — bloquea acceso por deeplink sin plan
   const { isPremium } = usePlan();
 
   const [subject, setSubject] = useState('');
@@ -41,7 +40,6 @@ export default function NewCampaignScreen() {
   const [errorModal, setErrorModal] = useState({ visible: false, message: '' });
   const [successModal, setSuccessModal] = useState({ visible: false, count: 0 });
 
-  // FIX: redirigir si no es Premium
   useEffect(() => {
     if (!isPremium) {
       router.replace('/settings/subscription');
@@ -76,7 +74,7 @@ export default function NewCampaignScreen() {
   const validate = () => {
     if (!subject.trim()) { setErrorModal({ visible: true, message: 'El asunto del email es requerido' }); return false; }
     if (!body.trim())    { setErrorModal({ visible: true, message: 'El contenido del email es requerido' }); return false; }
-    if (recipientCount === 0) { setErrorModal({ visible: true, message: 'No hay clientes con email registrado para este segmento' }); return false; }
+    if (recipientCount === 0) { setErrorModal({ visible: true, message: 'No hay clientes con email registrado para este segmento. Agrega emails a tus clientes desde su perfil.' }); return false; }
     return true;
   };
 
@@ -103,16 +101,18 @@ export default function NewCampaignScreen() {
     }
   };
 
-  // FIX: el INSERT en BD ahora ocurre DENTRO de la Edge Function, no antes
-  // Así no quedan registros fantasma si el usuario cancela
   const sendCampaign = async () => {
     setConfirmSend(false);
     setSending(true);
     try {
       const { supabase } = await import('@/lib/supabase');
+
+      // supabase.functions.invoke retorna { data, error }
+      // Cuando la función retorna 4xx/5xx, 'error' tiene mensaje genérico del SDK
+      // y 'data' contiene el body real con el mensaje de error de la función.
+      // Por eso siempre revisamos data?.error primero.
       const { data, error } = await supabase.functions.invoke('send-campaign', {
         body: {
-          // Pasar los datos directamente — la Edge Function crea el registro
           userId: user?.id,
           subject: subject.trim(),
           body: body.trim(),
@@ -120,8 +120,21 @@ export default function NewCampaignScreen() {
           recipientCount: recipientCount || 0,
         },
       });
+
+      // El mensaje real de error de la función está en data?.error
+      if (data?.error) {
+        throw new Error(data.error);
+      }
+
+      // Si no hay data (la función falló antes de responder JSON)
+      if (error && !data) {
+        throw new Error(
+          'No se pudo conectar con el servidor. Verifica tu conexión e inténtalo de nuevo.'
+        );
+      }
+
       if (error) throw error;
-      if (data?.error) throw new Error(data.error);
+
       setSuccessModal({ visible: true, count: data?.sent || recipientCount || 0 });
     } catch (e: any) {
       setErrorModal({ visible: true, message: e?.message || 'Error al enviar la campaña' });
@@ -133,7 +146,7 @@ export default function NewCampaignScreen() {
   const previewBody    = body.replace(/{{nombre}}/g, 'María').replace(/{{negocio}}/g, businessProfile?.businessName || 'Tu Negocio');
   const previewSubject = subject.replace(/{{nombre}}/g, 'María').replace(/{{negocio}}/g, businessProfile?.businessName || 'Tu Negocio');
 
-  if (!isPremium) return null; // no renderizar mientras redirige
+  if (!isPremium) return null;
 
   return (
     <SafeAreaView style={s.container} edges={['top']}>
