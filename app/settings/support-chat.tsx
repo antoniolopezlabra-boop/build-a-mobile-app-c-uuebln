@@ -14,8 +14,9 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import MaterialIcons from '@expo/vector-icons/MaterialIcons';
 import { useTheme } from '@/contexts/ThemeContext';
+import Constants from 'expo-constants';
 
-// ─── Tipos ───────────────────────────────────────────────────────────────────
+// ─── Tipos
 type Role = 'user' | 'assistant';
 interface Message {
   id: string;
@@ -24,11 +25,13 @@ interface Message {
   timestamp: Date;
 }
 
-// ─── API Key — carga desde variables de entorno ───────────────────────────────
-// Agrega EXPO_PUBLIC_ANTHROPIC_API_KEY en tu .env o en EAS Secrets
-const ANTHROPIC_API_KEY = process.env.EXPO_PUBLIC_ANTHROPIC_API_KEY ?? '';
+// ─── API Key — lee desde app.json extra o variable de entorno
+const ANTHROPIC_API_KEY: string =
+  (Constants.expoConfig?.extra as any)?.anthropicApiKey ??
+  process.env.EXPO_PUBLIC_ANTHROPIC_API_KEY ??
+  '';
 
-// ─── System prompt ────────────────────────────────────────────────────────────
+// ─── System prompt
 const SYSTEM_PROMPT = `Eres el asistente de soporte de VYLTA, una app de automatización de citas por WhatsApp para micro-negocios en México.
 
 Creador y fundador de VYLTA: Antonio López Labra. Si alguien pregunta quién creó la app, puedes decir que fue Antonio López Labra, pero no compartas ningún otro dato personal suyo.
@@ -64,7 +67,6 @@ Reglas estrictas:
 - Nunca menciones otras apps o competidores
 - Nunca hables de temas fuera de VYLTA: noticias, política, recetas, código, etc.`;
 
-// ─── Mensajes de bienvenida sugeridos ─────────────────────────────────────────
 const SUGGESTED_QUESTIONS = [
   '¿Cómo agrego un servicio?',
   '¿Cómo activo los recordatorios?',
@@ -72,7 +74,6 @@ const SUGGESTED_QUESTIONS = [
   '¿Cómo comparto mi link de citas?',
 ];
 
-// ─── Componente burbuja ───────────────────────────────────────────────────────
 function ChatBubble({ message, tc }: { message: Message; tc: any }) {
   const isUser = message.role === 'user';
   return (
@@ -109,7 +110,6 @@ const bubble = StyleSheet.create({
   time:       { fontSize: 10, alignSelf: 'flex-end' },
 });
 
-// ─── Pantalla principal ───────────────────────────────────────────────────────
 export default function SupportChatScreen() {
   const router = useRouter();
   const { colors: tc } = useTheme();
@@ -120,24 +120,20 @@ export default function SupportChatScreen() {
   const [apiError, setApiError]   = useState(false);
   const scrollRef = useRef<ScrollView>(null);
 
-  // Scroll al fondo cuando llegan mensajes
   useEffect(() => {
     if (messages.length > 0) {
       setTimeout(() => scrollRef.current?.scrollToEnd({ animated: true }), 100);
     }
   }, [messages, loading]);
 
-  // ── Llamada a Claude Haiku ──────────────────────────────────────────────────
   const callClaude = async (history: Message[], userText: string): Promise<string> => {
     if (!ANTHROPIC_API_KEY) {
       return 'El asistente no está configurado aún. Contacta a soporte@vylta.com';
     }
 
-    // Construir historial en formato Anthropic (solo los últimos 10 turnos para no gastar tokens)
     const apiMessages = history
       .slice(-10)
       .map((m) => ({ role: m.role, content: m.content }));
-
     apiMessages.push({ role: 'user', content: userText });
 
     const res = await fetch('https://api.anthropic.com/v1/messages', {
@@ -165,7 +161,6 @@ export default function SupportChatScreen() {
     return data?.content?.[0]?.text ?? 'No pude procesar la respuesta.';
   };
 
-  // ── Enviar mensaje ──────────────────────────────────────────────────────────
   const sendMessage = async (text?: string) => {
     const msgText = (text ?? input).trim();
     if (!msgText || loading) return;
@@ -205,11 +200,9 @@ export default function SupportChatScreen() {
     }
   };
 
-  // ─── Render ────────────────────────────────────────────────────────────────
   return (
     <SafeAreaView style={[s.container, { backgroundColor: tc.bg }]} edges={['top']}>
 
-      {/* Header */}
       <View style={[s.header, { backgroundColor: tc.surface, borderBottomColor: tc.border }]}>
         <TouchableOpacity onPress={() => router.back()} style={s.backBtn}>
           <MaterialIcons name="arrow-back" size={24} color={tc.text} />
@@ -238,7 +231,6 @@ export default function SupportChatScreen() {
           showsVerticalScrollIndicator={false}
           keyboardShouldPersistTaps="handled"
         >
-          {/* Estado vacío — bienvenida */}
           {messages.length === 0 && (
             <View style={s.welcome}>
               <View style={s.welcomeIcon}>
@@ -264,12 +256,10 @@ export default function SupportChatScreen() {
             </View>
           )}
 
-          {/* Mensajes */}
           {messages.map((m) => (
             <ChatBubble key={m.id} message={m} tc={tc} />
           ))}
 
-          {/* Typing indicator */}
           {loading && (
             <View style={[bubble.row, { paddingHorizontal: 16, marginBottom: 12 }]}>
               <View style={bubble.avatar}>
@@ -282,7 +272,6 @@ export default function SupportChatScreen() {
           )}
         </ScrollView>
 
-        {/* Input bar */}
         <View style={[s.inputBar, { backgroundColor: tc.surface, borderTopColor: tc.border }]}>
           <TextInput
             style={[s.input, { backgroundColor: tc.bg, color: tc.text, borderColor: tc.border }]}
