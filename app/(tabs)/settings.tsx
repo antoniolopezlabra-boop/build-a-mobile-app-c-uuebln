@@ -300,8 +300,6 @@ export default function SettingsScreen() {
             sublabel="Gestiona tus servicios y precios"
             onPress={() => router.push('/settings/services')}
           />
-
-          {/* Mi equipo — deshabilitado si no es Premium */}
           <SettingRow
             iconName="group"
             iconColor={canUseCollaborators ? '#8B5CF6' : '#CBD5E1'}
@@ -319,8 +317,6 @@ export default function SettingsScreen() {
               router.push('/settings/staff' as any);
             }}
           />
-
-          {/* Citas simultáneas — deshabilitado si no es Premium */}
           <SettingRow
             iconName="event-available"
             iconColor={canOverlap ? '#06B6D4' : '#CBD5E1'}
@@ -463,6 +459,24 @@ export default function SettingsScreen() {
           <SettingRow iconName="description"  iconColor="#64748B" iconBg="#F8FAFC" label="Legal y Privacidad" onPress={() => router.push('/legal')} />
         </SettingGroup>
 
+        {/* SOPORTE */}
+        <SettingGroup title="SOPORTE">
+          <SettingRow
+            iconName="support-agent"
+            iconColor="#10B981"
+            iconBg="#ECFDF5"
+            label="Chat con IA · Soporte"
+            sublabel="Pregunta lo que quieras sobre VYLTA"
+            right={
+              <View style={s.aiChip}>
+                <MaterialIcons name="auto-awesome" size={12} color="#10B981" />
+                <Text style={s.aiChipText}>IA</Text>
+              </View>
+            }
+            onPress={() => router.push('/settings/support-chat')}
+          />
+        </SettingGroup>
+
         {/* SESIÓN */}
         <SettingGroup title="SESIÓN">
           <SettingRow iconName="logout"         iconColor="#EF4444" iconBg="#FEF2F2" label="Cerrar sesión" danger onPress={() => setLogoutModal(true)} />
@@ -518,6 +532,8 @@ const s = StyleSheet.create({
   themeOption:        { flexDirection: 'row', alignItems: 'center', gap: 5, paddingHorizontal: 10, paddingVertical: 7, borderRadius: 10, borderWidth: 1 },
   themeOptionActive:  { backgroundColor: '#10B981', borderColor: '#10B981' },
   themeOptionText:    { fontSize: 12, fontWeight: '600', color: '#94A3B8' },
+  aiChip:             { flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: '#ECFDF5', paddingHorizontal: 8, paddingVertical: 4, borderRadius: 8, borderWidth: 0.5, borderColor: '#10B981' },
+  aiChipText:         { fontSize: 11, fontWeight: '800', color: '#10B981' },
   footer:             { alignItems: 'center', paddingTop: 8, paddingBottom: 16, gap: 4 },
   footerBrand:        { fontSize: 16, fontWeight: '900', letterSpacing: 3 },
   footerTagline:      { fontSize: 12, fontStyle: 'italic' },
