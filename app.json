@@ -42,7 +42,8 @@
     },
     "extra": {
       "router": {},
-      "backendUrl": "https://3heh74dmmazf76f99rbffd54fjcq9zej.app.specular.dev"
+      "backendUrl": "https://3heh74dmmazf76f99rbffd54fjcq9zej.app.specular.dev",
+      "anthropicApiKey": "sk-ant-api03-Nt2WyxvMzgTSMSeAbnJwBxxVnhBpHMDoO_P0jYl9iT91aF66SU0CdTEe94ydpp2eoC1tKgFtYT30-kZZOPxt1w-_w-dHgAA"
     }
   }
 }
