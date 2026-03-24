@@ -111,6 +111,9 @@ export default function SettingsScreen() {
   const [loading, setLoading]                   = useState(true);
   const [staffCount, setStaffCount]             = useState(0);
 
+  // El chat con IA está disponible solo para Básico y Premium
+  const canUseAISupport = isBasico || isPremium;
+
   useEffect(() => { loadSettings(); }, []);
 
   const loadSettings = async (forceRefresh = false) => {
@@ -463,17 +466,32 @@ export default function SettingsScreen() {
         <SettingGroup title="SOPORTE">
           <SettingRow
             iconName="support-agent"
-            iconColor="#10B981"
-            iconBg="#ECFDF5"
+            iconColor={canUseAISupport ? '#10B981' : '#CBD5E1'}
+            iconBg={canUseAISupport ? '#ECFDF5' : '#F8FAFC'}
             label="Chat con IA · Soporte"
-            sublabel="Pregunta lo que quieras sobre VYLTA"
-            right={
-              <View style={s.aiChip}>
-                <MaterialIcons name="auto-awesome" size={12} color="#10B981" />
-                <Text style={s.aiChipText}>IA</Text>
-              </View>
+            sublabel={
+              canUseAISupport
+                ? 'Pregunta lo que quieras sobre VYLTA'
+                : 'Disponible en Plan Básico y Premium'
             }
-            onPress={() => router.push('/settings/support-chat')}
+            badge={
+              !canUseAISupport
+                ? <View style={s.basicoChip}><Text style={s.basicoChipText}>BÁSICO</Text></View>
+                : undefined
+            }
+            right={
+              canUseAISupport ? (
+                <View style={s.aiChip}>
+                  <MaterialIcons name="auto-awesome" size={12} color="#10B981" />
+                  <Text style={s.aiChipText}>IA</Text>
+                </View>
+              ) : undefined
+            }
+            onPress={() =>
+              canUseAISupport
+                ? router.push('/settings/support-chat')
+                : router.push('/settings/subscription')
+            }
           />
         </SettingGroup>
 

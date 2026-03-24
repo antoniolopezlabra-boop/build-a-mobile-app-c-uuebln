@@ -26,6 +26,7 @@ const PLAN_FEATURES = {
     'Sin citas (requiere Plan Básico)',
     'Sin link de citas público',
     'Sin recordatorios WhatsApp',
+    'Sin soporte con IA',
     'Sin reportes',
   ],
   Basico: [
@@ -38,6 +39,7 @@ const PLAN_FEATURES = {
     'Lista de espera simple',
     'Gestión completa de clientes',
     'Reportes de citas e ingresos',
+    'Asistente IA de soporte y configuración',
     'Soporte por email',
   ],
   Premium: [
@@ -49,6 +51,7 @@ const PLAN_FEATURES = {
     'Recuperación de clientes inactivos',
     'Recordatorios de cumpleaños',
     'Reportes avanzados del equipo',
+    'Asistente IA de soporte y configuración',
     'Soporte prioritario',
   ],
 };
@@ -186,7 +189,6 @@ export default function SubscriptionScreen() {
           <Text style={s.planPeriod}>solo para explorar</Text>
           <View style={s.features}>
             {PLAN_FEATURES.Gratuito.map((f, i) => {
-              // Los ítems que empiezan con "Sin" se muestran en gris con ✕
               const isLimit = f.startsWith('Sin');
               return (
                 <View key={i} style={s.featureRow}>
@@ -211,12 +213,21 @@ export default function SubscriptionScreen() {
           <Text style={s.planPrice}>$990 MXN</Text>
           <Text style={s.planPeriod}>por mes</Text>
           <View style={s.features}>
-            {PLAN_FEATURES.Basico.map((f, i) => (
-              <View key={i} style={s.featureRow}>
-                <MaterialIcons name="check" size={16} color={colors.primary} />
-                <Text style={s.featureText}>{f}</Text>
-              </View>
-            ))}
+            {PLAN_FEATURES.Basico.map((f, i) => {
+              const isAI = f.includes('IA');
+              return (
+                <View key={i} style={s.featureRow}>
+                  <MaterialIcons name="check" size={16} color={isAI ? '#10B981' : colors.primary} />
+                  <Text style={[s.featureText, isAI && s.featureAI]}>{f}</Text>
+                  {isAI && (
+                    <View style={s.aiChip}>
+                      <MaterialIcons name="auto-awesome" size={10} color="#10B981" />
+                      <Text style={s.aiChipText}>IA</Text>
+                    </View>
+                  )}
+                </View>
+              );
+            })}
           </View>
           {isGratuito && (
             <TouchableOpacity style={s.ctaBtn} onPress={() => handleActivatePlan('Basico')}>
@@ -236,12 +247,21 @@ export default function SubscriptionScreen() {
           <Text style={[s.planPrice, { color: '#6366F1' }]}>$1,490 MXN</Text>
           <Text style={s.planPeriod}>por mes</Text>
           <View style={s.features}>
-            {PLAN_FEATURES.Premium.map((f, i) => (
-              <View key={i} style={s.featureRow}>
-                <MaterialIcons name="check" size={16} color="#6366F1" />
-                <Text style={s.featureText}>{f}</Text>
-              </View>
-            ))}
+            {PLAN_FEATURES.Premium.map((f, i) => {
+              const isAI = f.includes('IA');
+              return (
+                <View key={i} style={s.featureRow}>
+                  <MaterialIcons name="check" size={16} color={isAI ? '#6366F1' : '#6366F1'} />
+                  <Text style={[s.featureText, isAI && s.featureAIPremium]}>{f}</Text>
+                  {isAI && (
+                    <View style={[s.aiChip, { backgroundColor: '#EEF2FF', borderColor: '#6366F1' }]}>
+                      <MaterialIcons name="auto-awesome" size={10} color="#6366F1" />
+                      <Text style={[s.aiChipText, { color: '#6366F1' }]}>IA</Text>
+                    </View>
+                  )}
+                </View>
+              );
+            })}
           </View>
           {!isPremium && (
             <TouchableOpacity style={[s.ctaBtn, { backgroundColor: '#6366F1' }]} onPress={() => handleActivatePlan('Premium')}>
@@ -307,6 +327,10 @@ const s = StyleSheet.create({
   features: { gap: 10 },
   featureRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
   featureText: { fontSize: 14, color: colors.text, flex: 1 },
+  featureAI: { color: '#065F46', fontWeight: '600' },
+  featureAIPremium: { color: '#3730A3', fontWeight: '600' },
+  aiChip: { flexDirection: 'row', alignItems: 'center', gap: 3, backgroundColor: '#ECFDF5', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 6, borderWidth: 0.5, borderColor: '#10B981' },
+  aiChipText: { fontSize: 9, fontWeight: '800', color: '#10B981' },
   ctaBtn: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8,
     backgroundColor: colors.primary, borderRadius: 12, padding: 14, marginTop: 18,
