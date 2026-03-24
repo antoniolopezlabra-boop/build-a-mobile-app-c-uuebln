@@ -67,7 +67,6 @@ export default function NewAppointmentScreen() {
   const [showServicePicker, setShowServicePicker] = useState(false);
   const [serviceSearchQuery, setServiceSearchQuery] = useState('');
 
-  // FASE 3: Staff member
   const [staffMembers, setStaffMembers] = useState<StaffMember[]>([]);
   const [selectedStaff, setSelectedStaff] = useState<StaffMember | null>(null);
   const [showStaffPicker, setShowStaffPicker] = useState(false);
@@ -137,7 +136,6 @@ export default function NewAppointmentScreen() {
     loadStaffMembers();
   }, []);
 
-  // FASE 3: cuando cambia el staff seleccionado, recalcular disponibilidad con SU horario
   useEffect(() => { checkAvailability(); }, [date, selectedStaff]);
 
   const loadCatalogServices = async () => {
@@ -153,7 +151,6 @@ export default function NewAppointmentScreen() {
     } catch {}
   };
 
-  // FASE 3: cargar staff activos del negocio
   const loadStaffMembers = async () => {
     try {
       const { data } = await supabase
@@ -181,7 +178,7 @@ export default function NewAppointmentScreen() {
 
       const dayOfWeek = date.getDay();
 
-      // FASE 3: si hay staff seleccionado, usar SU horario propio
+      // Si hay staff seleccionado, usar SU horario propio
       let dayConfig: any = null;
       if (selectedStaff) {
         const { data: sh } = await supabase
@@ -214,10 +211,22 @@ export default function NewAppointmentScreen() {
       const endHour   = parseInt(dayConfig.endTime.split(':')[0]);
       const endMin    = parseInt(dayConfig.endTime.split(':')[1]);
 
-      // FASE 3: filtrar citas solo del staff seleccionado (si hay) o todas las del negocio
-      let dateAppointments = appointments as any[];
+      // FIX CRÍTICO: separar citas del staff seleccionado vs citas generales
+      // Las citas del staff seleccionado NUNCA deben mostrarse como disponibles (sin importar allowOverlapping)
+      // allowOverlapping solo aplica para citas SIN staff asignado vs la agenda general
+      const allDateAppointments = appointments as any[];
+
+      let staffAppointments: any[]    = []; // citas del staff seleccionado (BLOQUEAN siempre)
+      let generalAppointments: any[]  = []; // otras citas (bloquean solo si !allowOverlapping)
+
       if (selectedStaff) {
-        dateAppointments = dateAppointments.filter((a: any) => a.staff_id === selectedStaff.id);
+        // Con staff seleccionado: solo bloquear sus propias citas
+        staffAppointments   = allDateAppointments.filter((a: any) => a.staff_id === selectedStaff.id);
+        generalAppointments = []; // no considerar otras citas de otros staff
+      } else {
+        // Sin staff: bloquear todas las citas del negocio (respetando allowOverlapping)
+        staffAppointments   = [];
+        generalAppointments = allDateAppointments;
       }
 
       const today = new Date();
@@ -229,17 +238,41 @@ export default function NewAppointmentScreen() {
         const hour = Math.floor(totalMin/60);
         const minute = totalMin%60;
         const timeString = `${hour.toString().padStart(2,'0')}:${minute.toString().padStart(2,'0')}`;
-        const isBooked = dateAppointments.some((appt: any) => {
-          const [sh2,sm2] = (appt.time||'00:00').split(':').map(Number);
-          const [eh2,em2] = (appt.endTime||appt.end_time||'00:00').split(':').map(Number);
+
+        // Verificar si el STAFF seleccionado ya tiene cita en este slot (bloqueo absoluto)
+        const blockedByStaff = staffAppointments.some((appt: any) => {
+          const [sh2, sm2] = (appt.time || appt.startTime || '00:00').split(':').map(Number);
+          const [eh2, em2] = (appt.endTime || appt.end_time || '00:00').split(':').map(Number);
           return totalMin >= sh2*60+sm2 && totalMin < eh2*60+em2;
         });
-        const isOverlap = isBooked && allowOverlapping;
+
+        // Verificar si hay cita general que ocupe este slot (solo si !allowOverlapping)
+        const blockedByGeneral = !allowOverlapping && generalAppointments.some((appt: any) => {
+          const [sh2, sm2] = (appt.time || appt.startTime || '00:00').split(':').map(Number);
+          const [eh2, em2] = (appt.endTime || appt.end_time || '00:00').split(':').map(Number);
+          return totalMin >= sh2*60+sm2 && totalMin < eh2*60+em2;
+        });
+
+        // Overlap: hay cita general pero allowOverlapping está activo (solo para agenda sin staff)
+        const isOverlap = !selectedStaff && allowOverlapping && generalAppointments.some((appt: any) => {
+          const [sh2, sm2] = (appt.time || appt.startTime || '00:00').split(':').map(Number);
+          const [eh2, em2] = (appt.endTime || appt.end_time || '00:00').split(':').map(Number);
+          return totalMin >= sh2*60+sm2 && totalMin < eh2*60+em2;
+        });
+
+        const isBooked = blockedByStaff || blockedByGeneral;
         const isPast = isToday && (hour < today.getHours() || (hour === today.getHours() && minute <= today.getMinutes()));
-        slots.push({ time: timeString, available: (!isBooked || isOverlap) && !isPast, isOverlap });
+
+        slots.push({
+          time: timeString,
+          available: !isBooked && !isPast,
+          isOverlap: isOverlap && !isPast,
+        });
       }
       setTimeSlots(slots);
-    } catch { /* generar slots por defecto */ }
+    } catch {
+      // Si falla, generar slots por defecto sin restricciones
+    }
   };
 
   const handleSave = async () => {
@@ -260,7 +293,6 @@ export default function NewAppointmentScreen() {
     setLoading(true);
     try {
       const dateString = `${date.getFullYear()}-${String(date.getMonth()+1).padStart(2,'0')}-${String(date.getDate()).padStart(2,'0')}`;
-      // FASE 3: incluir staff_id en el payload
       await apiPost('/api/appointments', {
         clientId:   selectedClient.id,
         service:    service.trim(),
@@ -362,7 +394,7 @@ export default function NewAppointmentScreen() {
             )}
           </View>
 
-          {/* FASE 3: Selector de colaborador — solo si hay staff registrado */}
+          {/* Selector de colaborador */}
           {hasStaff && (
             <View style={styles.section}>
               <Text style={styles.label}>¿Quién atiende?</Text>
@@ -562,7 +594,7 @@ export default function NewAppointmentScreen() {
         <DateTimePicker value={date} mode="date" display="default" minimumDate={new Date()} onChange={onAndroidDateChange} />
       )}
 
-      {/* FASE 3: Modal selector de staff */}
+      {/* Modal selector de staff */}
       <Modal visible={showStaffPicker} animationType="slide" transparent onRequestClose={() => setShowStaffPicker(false)}>
         <View style={styles.modalOverlay}>
           <View style={styles.modalContent}>
@@ -573,12 +605,9 @@ export default function NewAppointmentScreen() {
               </TouchableOpacity>
             </View>
             <ScrollView style={{ padding: 16 }}>
-              {/* Opción: Sin asignar */}
+              {/* Sin asignar */}
               <TouchableOpacity
-                style={[
-                  styles.staffItem,
-                  !selectedStaff && styles.staffItemSelected,
-                ]}
+                style={[styles.staffItem, !selectedStaff && styles.staffItemSelected]}
                 onPress={() => { setSelectedStaff(null); setShowStaffPicker(false); }}
               >
                 <View style={[styles.staffItemAvatar, { backgroundColor: '#F1F5F9' }]}>
@@ -591,14 +620,10 @@ export default function NewAppointmentScreen() {
                 {!selectedStaff && <MaterialIcons name="check-circle" size={20} color="#10B981" />}
               </TouchableOpacity>
 
-              {/* Lista de staff */}
               {staffMembers.map(member => (
                 <TouchableOpacity
                   key={member.id}
-                  style={[
-                    styles.staffItem,
-                    selectedStaff?.id === member.id && styles.staffItemSelected,
-                  ]}
+                  style={[styles.staffItem, selectedStaff?.id === member.id && styles.staffItemSelected]}
                   onPress={() => { setSelectedStaff(member); setShowStaffPicker(false); }}
                 >
                   <View style={[styles.staffItemAvatar, { backgroundColor: member.color+'20', borderColor: member.color, borderWidth: 2 }]}>
@@ -619,7 +644,7 @@ export default function NewAppointmentScreen() {
         </View>
       </Modal>
 
-      {/* Modal catálogo de servicios */}
+      {/* Modal catálogo */}
       <Modal visible={showServicePicker} animationType="slide" transparent onRequestClose={() => setShowServicePicker(false)}>
         <View style={styles.modalOverlay}>
           <View style={styles.modalContent}>
@@ -785,7 +810,6 @@ const styles = StyleSheet.create({
   catalogSelectedInfo:    { flex: 1 },
   catalogSelectedName:    { fontSize: 15, fontWeight: '700', color: '#065F46' },
   catalogSelectedMeta:    { fontSize: 12, color: '#10B981', marginTop: 2, fontWeight: '500' },
-  // Staff preview en el input
   staffPreview:           { flexDirection: 'row', alignItems: 'center', gap: 8, flex: 1 },
   staffDot:               { width: 10, height: 10, borderRadius: 5 },
   staffRoleInline:        { fontSize: 13, color: colors.textSecondary },
@@ -823,7 +847,6 @@ const styles = StyleSheet.create({
   modalContent:           { backgroundColor: '#ffffff', borderTopLeftRadius: 24, borderTopRightRadius: 24, maxHeight: '85%' },
   modalHeader:            { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', padding: 20, borderBottomWidth: 0.5, borderBottomColor: '#E2E8F0' },
   modalTitle:             { fontSize: 18, fontWeight: '700', color: colors.text },
-  // Staff items en el modal
   staffItem:              { flexDirection: 'row', alignItems: 'center', gap: 14, backgroundColor: '#fff', borderRadius: 14, padding: 14, marginBottom: 8, borderWidth: 0.5, borderColor: '#E2E8F0' },
   staffItemSelected:      { borderColor: '#10B981', borderWidth: 1.5, backgroundColor: '#F0FDF4' },
   staffItemAvatar:        { width: 44, height: 44, borderRadius: 12, justifyContent: 'center', alignItems: 'center' },
