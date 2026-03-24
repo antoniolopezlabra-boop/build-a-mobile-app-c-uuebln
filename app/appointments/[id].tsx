@@ -32,12 +32,15 @@ interface StaffMember {
   name: string;
   role: string | null;
   color: string;
+  busy?: boolean; // true si ya tiene cita en el mismo horario
 }
 
 interface Appointment {
   id: string;
   date: string;
   time: string;
+  endTime?: string;
+  end_time?: string;
   service: string;
   status: 'Confirmada' | 'Pendiente' | 'Cancelada' | 'Completada' | 'No asistió' | 'Reagendada' | 'Pagado' | 'En espera' | 'Solicitud';
   notes?: string | null;
@@ -101,6 +104,46 @@ export default function AppointmentDetailScreen() {
     }
   };
 
+  // Cargar disponibilidad de staff al abrir el modal de asignar
+  const loadStaffAvailability = async () => {
+    if (!appointment) return;
+    const appt = appointment;
+    const startTime = appt.time;
+    const endTime   = appt.endTime || appt.end_time;
+    if (!startTime || !endTime) return;
+
+    // Buscar si cada staff tiene alguna cita que colisione con el horario de ESTA cita
+    const { data: busyApts } = await supabase
+      .from('appointments')
+      .select('staff_id, start_time, end_time')
+      .eq('user_id', user?.id)
+      .eq('date', appt.date)
+      .not('id', 'eq', appt.id)                             // excluir la cita actual
+      .not('status', 'in', '("Cancelada","No asistió","Rechazada")')
+      .not('staff_id', 'is', null);
+
+    if (!busyApts) return;
+
+    // Marcar qué staff ya está ocupado en ese horario
+    const [sh, sm] = startTime.split(':').map(Number);
+    const [eh, em] = endTime.split(':').map(Number);
+    const startMin = sh * 60 + sm;
+    const endMin   = eh * 60 + em;
+
+    setStaffMembers(prev => prev.map(m => {
+      const conflict = busyApts.some((a: any) => {
+        if (a.staff_id !== m.id) return false;
+        const [ash, asm] = (a.start_time || '00:00').split(':').map(Number);
+        const [aeh, aem] = (a.end_time   || '00:00').split(':').map(Number);
+        const aStart = ash * 60 + asm;
+        const aEnd   = aeh * 60 + aem;
+        // Hay conflicto si los rangos se solapan
+        return startMin < aEnd && endMin > aStart;
+      });
+      return { ...m, busy: conflict };
+    }));
+  };
+
   const handleStatusChange = async (newStatus: string) => {
     if (!appointment) return;
     setActionLoading(true);
@@ -115,8 +158,23 @@ export default function AppointmentDetailScreen() {
     }
   };
 
+  // Asignar colaborador CON verificación de conflicto de horario
   const handleAssignStaff = async (staffId: string | null) => {
     if (!appointment) return;
+
+    // Si intenta asignar un staff que ya está ocupado, bloquear
+    if (staffId) {
+      const staffMember = staffMembers.find(m => m.id === staffId);
+      if (staffMember?.busy) {
+        Alert.alert(
+          'Horario ocupado',
+          `${staffMember.name} ya tiene una cita en ese horario. Elige otro colaborador o cambia el horario de la cita.`,
+          [{ text: 'Entendido', style: 'cancel' }]
+        );
+        return;
+      }
+    }
+
     setAssigningStaff(true);
     try {
       await apiPatch(`/api/appointments/${appointment.id}`, { staff_id: staffId });
@@ -313,7 +371,13 @@ export default function AppointmentDetailScreen() {
           <View style={[styles.section, { backgroundColor: tc.surface }]}>
             <View style={styles.staffSectionHeader}>
               <Text style={[styles.sectionTitle, { color: tc.text }]}>Colaborador</Text>
-              <TouchableOpacity style={styles.assignBtn} onPress={() => setAssignStaffModal(true)}>
+              <TouchableOpacity
+                style={styles.assignBtn}
+                onPress={() => {
+                  setAssignStaffModal(true);
+                  loadStaffAvailability();
+                }}
+              >
                 <MaterialIcons name={assignedStaff ? 'swap-horiz' : 'person-add-alt'} size={15} color="#fff" />
                 <Text style={styles.assignBtnText}>{assignedStaff ? 'Cambiar' : 'Asignar'}</Text>
               </TouchableOpacity>
@@ -334,7 +398,10 @@ export default function AppointmentDetailScreen() {
             ) : (
               <TouchableOpacity
                 style={[styles.staffUnassigned, { backgroundColor: tc.bg, borderColor: tc.border }]}
-                onPress={() => setAssignStaffModal(true)}
+                onPress={() => {
+                  setAssignStaffModal(true);
+                  loadStaffAvailability();
+                }}
               >
                 <View style={[styles.staffAvatarEmpty, { backgroundColor: tc.border + '40' }]}>
                   <MaterialIcons name="person-outline" size={22} color={tc.textMuted} />
@@ -494,7 +561,7 @@ export default function AppointmentDetailScreen() {
         </View>
       </ScrollView>
 
-      {/* Modal: Asignar colaborador */}
+      {/* ── Modal: Asignar colaborador CON verificación de conflicto ── */}
       <Modal visible={assignStaffModal} transparent animationType="slide" onRequestClose={() => setAssignStaffModal(false)}>
         <KeyboardAvoidingView style={styles.modalOverlay} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
           <TouchableOpacity style={styles.modalBackdrop} activeOpacity={1} onPress={() => setAssignStaffModal(false)} />
@@ -507,7 +574,9 @@ export default function AppointmentDetailScreen() {
               </TouchableOpacity>
             </View>
             <Text style={[styles.modalSub, { color: tc.textMuted }]}>Selecciona quién atenderá esta cita.</Text>
+
             <ScrollView showsVerticalScrollIndicator={false}>
+              {/* Sin asignar */}
               <TouchableOpacity
                 style={[
                   styles.staffOption,
@@ -529,6 +598,7 @@ export default function AppointmentDetailScreen() {
 
               {staffMembers.map(m => {
                 const isSelected = appointment.staff_id === m.id;
+                const isBusy = m.busy === true;
                 return (
                   <TouchableOpacity
                     key={m.id}
@@ -536,20 +606,27 @@ export default function AppointmentDetailScreen() {
                       styles.staffOption,
                       { backgroundColor: tc.bg, borderColor: tc.border },
                       isSelected && { borderColor: m.color, backgroundColor: m.color + '10' },
+                      isBusy && { backgroundColor: '#FEF2F2', borderColor: '#FECACA', opacity: 0.7 },
                     ]}
                     onPress={() => handleAssignStaff(m.id)}
                     disabled={assigningStaff}
                   >
-                    <View style={[styles.staffOptionAvatar, { backgroundColor: m.color + '18', borderWidth: 2, borderColor: m.color }]}>
-                      <Text style={[styles.staffOptionInitials, { color: m.color }]}>
+                    <View style={[styles.staffOptionAvatar, { backgroundColor: isBusy ? '#FEE2E2' : m.color + '18', borderWidth: 2, borderColor: isBusy ? '#FCA5A5' : m.color }]}>
+                      <Text style={[styles.staffOptionInitials, { color: isBusy ? '#EF4444' : m.color }]}>
                         {m.name.split(' ').map((w: string) => w[0]).slice(0, 2).join('').toUpperCase()}
                       </Text>
                     </View>
                     <View style={{ flex: 1 }}>
-                      <Text style={[styles.staffOptionName, { color: tc.text }]}>{m.name}</Text>
-                      {m.role && <Text style={[styles.staffOptionRole, { color: tc.textMuted }]}>{m.role}</Text>}
+                      <Text style={[styles.staffOptionName, { color: isBusy ? '#EF4444' : tc.text }]}>{m.name}</Text>
+                      {isBusy
+                        ? <Text style={[styles.staffOptionRole, { color: '#EF4444' }]}>🚫 Ocupado en este horario</Text>
+                        : m.role
+                          ? <Text style={[styles.staffOptionRole, { color: tc.textMuted }]}>{m.role}</Text>
+                          : null
+                      }
                     </View>
-                    {isSelected && <MaterialIcons name="check-circle" size={20} color={m.color} />}
+                    {isSelected && !isBusy && <MaterialIcons name="check-circle" size={20} color={m.color} />}
+                    {isBusy && <MaterialIcons name="block" size={20} color="#EF4444" />}
                     {assigningStaff && isSelected && <ActivityIndicator size="small" color={m.color} />}
                   </TouchableOpacity>
                 );
@@ -560,7 +637,7 @@ export default function AppointmentDetailScreen() {
         </KeyboardAvoidingView>
       </Modal>
 
-      {/* Modal: Guardar como cliente */}
+      {/* ── Modal: Guardar como cliente ── */}
       <Modal visible={saveClientModal} transparent animationType="slide" onRequestClose={() => setSaveClientModal(false)}>
         <KeyboardAvoidingView style={styles.modalOverlay} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
           <TouchableOpacity style={styles.modalBackdrop} activeOpacity={1} onPress={() => setSaveClientModal(false)} />
