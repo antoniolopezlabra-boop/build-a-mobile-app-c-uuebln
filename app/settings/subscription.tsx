@@ -13,34 +13,42 @@ import { usePlan } from '@/contexts/PlanContext';
 import { PLAN_PRICES } from '@/services/stripe';
 import MaterialIcons from '@expo/vector-icons/MaterialIcons';
 
+// ──────────────────────────────────────────────────
+// PLAN GRATUITO: solo para explorar la app, sin funciones operativas
+// PLAN BÁSICO: operación completa para un negocio de 1 persona
+// PLAN PREMIUM: equipo, marketing y reportes avanzados
+// ──────────────────────────────────────────────────
 const PLAN_FEATURES = {
   Gratuito: [
-    'Link de citas público',
-    'Hasta 10 citas por mes',
-    '1 servicio en catálogo',
-    'Configuración de horarios',
     'Perfil del negocio',
+    'Configuración de horarios',
+    'Catálogo de servicios (visualización)',
+    'Sin citas (requiere Plan Básico)',
+    'Sin link de citas público',
+    'Sin recordatorios WhatsApp',
+    'Sin reportes',
   ],
   Basico: [
-    'Link de citas público ilimitado',
-    'Citas ilimitadas',
-    'Servicios ilimitados en catálogo',
+    'Citas ilimitadas desde la app',
+    'Link de citas público para clientes',
+    'Catálogo de servicios ilimitado',
     'Recordatorios WhatsApp automáticos',
-    'Confirmación al agendar',
+    'Confirmación al agendar (WhatsApp)',
     'Recordatorio 24h y 2h antes',
     'Lista de espera simple',
-    'Dashboard del día',
-    'Gestión de clientes',
-    'Reportes básicos',
+    'Gestión completa de clientes',
+    'Reportes de citas e ingresos',
     'Soporte por email',
   ],
   Premium: [
     'Todo lo del Plan Básico',
+    'Equipo de hasta 5 colaboradores',
+    'Asignación de citas por colaborador',
+    'Citas simultáneas (atención en paralelo)',
     'Email Marketing (campañas a clientes)',
     'Recuperación de clientes inactivos',
     'Recordatorios de cumpleaños',
-    'Empalme de citas (atención simultánea)',
-    'Reportes avanzados de ingresos',
+    'Reportes avanzados del equipo',
     'Soporte prioritario',
   ],
 };
@@ -153,14 +161,14 @@ export default function SubscriptionScreen() {
           {isGratuito && (
             <View style={s.upgradeBanner}>
               <Text style={s.upgradeBannerText}>
-                Activa el Plan Básico para agendar citas ilimitadas y enviar recordatorios automáticos por WhatsApp.
+                ⚠️ El plan Gratuito es solo para explorar la app. Activa el Plan Básico para empezar a agendar citas y usar todas las funciones.
               </Text>
             </View>
           )}
           {isBasico && (
             <View style={[s.upgradeBanner, { backgroundColor: '#EEF2FF', borderColor: '#6366F1' }]}>
               <Text style={[s.upgradeBannerText, { color: '#3730A3' }]}>
-                Mejora al Plan Premium para activar email marketing, recuperación de clientes inactivos y más.
+                Mejora al Plan Premium para activar tu equipo de colaboradores, email marketing y reportes avanzados.
               </Text>
             </View>
           )}
@@ -175,14 +183,22 @@ export default function SubscriptionScreen() {
             {isGratuito && <View style={s.activeBadge}><Text style={s.activeBadgeText}>Tu plan actual</Text></View>}
           </View>
           <Text style={s.planPrice}>Gratis</Text>
-          <Text style={s.planPeriod}>siempre</Text>
+          <Text style={s.planPeriod}>solo para explorar</Text>
           <View style={s.features}>
-            {PLAN_FEATURES.Gratuito.map((f, i) => (
-              <View key={i} style={s.featureRow}>
-                <MaterialIcons name="check" size={16} color="#94A3B8" />
-                <Text style={[s.featureText, { color: colors.textSecondary }]}>{f}</Text>
-              </View>
-            ))}
+            {PLAN_FEATURES.Gratuito.map((f, i) => {
+              // Los ítems que empiezan con "Sin" se muestran en gris con ✕
+              const isLimit = f.startsWith('Sin');
+              return (
+                <View key={i} style={s.featureRow}>
+                  <MaterialIcons
+                    name={isLimit ? 'close' : 'check'}
+                    size={16}
+                    color={isLimit ? '#EF4444' : '#94A3B8'}
+                  />
+                  <Text style={[s.featureText, { color: isLimit ? '#EF4444' : colors.textSecondary }]}>{f}</Text>
+                </View>
+              );
+            })}
           </View>
         </View>
 
@@ -277,8 +293,8 @@ const s = StyleSheet.create({
     marginBottom: 16, borderWidth: 1.5, borderColor: 'transparent',
     shadowColor: '#000', shadowOpacity: 0.04, shadowRadius: 6, elevation: 1,
   },
-  planCardActive: { borderColor: colors.primary },
-  planCardPremium: { borderColor: '#C7D2FE' },
+  planCardActive:        { borderColor: colors.primary },
+  planCardPremium:       { borderColor: '#C7D2FE' },
   planCardPremiumActive: { borderColor: '#6366F1' },
   premiumBadge: { alignSelf: 'flex-start', backgroundColor: '#EEF2FF', borderRadius: 8, paddingHorizontal: 10, paddingVertical: 4, marginBottom: 12 },
   premiumBadgeText: { fontSize: 11, fontWeight: '800', color: '#6366F1' },
