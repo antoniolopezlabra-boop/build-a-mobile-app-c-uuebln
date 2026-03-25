@@ -34,6 +34,7 @@ export default function StaffNewAppointment() {
   // Cliente
   const [clients, setClients]       = useState<Client[]>([]);
   const [clientSearch, setClientSearch] = useState('');
+  const [showClientSearch, setShowClientSearch] = useState(false);
   const [selectedClient, setSelectedClient] = useState<Client | null>(null);
   const [showClientPicker, setShowClientPicker] = useState(false);
   // Nuevo cliente
@@ -74,7 +75,6 @@ export default function StaffNewAppointment() {
       setServices((sv ?? []).map((s: any) => ({ id: s.id, name: s.name, price: s.price, durationMinutes: s.duration_minutes })));
       const list = (st ?? []) as StaffMember[];
       setStaffList(list);
-      // Seleccionar el colaborador logueado por defecto
       const me = list.find(m => m.id === myStaffId);
       if (me) setSelectedStaff(me);
     } catch (e) {
@@ -86,6 +86,12 @@ export default function StaffNewAppointment() {
     c.name.toLowerCase().includes(clientSearch.toLowerCase()) ||
     c.phone.includes(clientSearch)
   );
+
+  const closeClientPicker = () => {
+    setShowClientPicker(false);
+    setShowClientSearch(false);
+    setClientSearch('');
+  };
 
   const handleSave = async () => {
     if (!selectedClient && !showNewClientForm) {
@@ -102,7 +108,6 @@ export default function StaffNewAppointment() {
     try {
       let clientId = selectedClient?.id ?? null;
 
-      // Crear cliente nuevo si aplica
       if (showNewClientForm && newClientName.trim()) {
         const { data: newC, error: cErr } = await supabase
           .from('clients')
@@ -297,25 +302,37 @@ export default function StaffNewAppointment() {
         </ScrollView>
       </KeyboardAvoidingView>
 
-      {/* ── Modal clientes ── */}
-      <Modal visible={showClientPicker} transparent animationType="slide">
+      {/* ── Modal clientes — lista primero, teclado solo al tocar buscar ── */}
+      <Modal visible={showClientPicker} transparent animationType="slide" onRequestClose={closeClientPicker}>
         <View style={s.modalOverlay}>
           <View style={[s.modalBox, { backgroundColor: tc.surface }]}>
             <Text style={[s.modalTitle, { color: tc.text }]}>Seleccionar cliente</Text>
-            <TextInput
-              style={[s.searchInput, { backgroundColor: tc.bg, color: tc.text, borderColor: tc.border }]}
-              placeholder="Buscar por nombre o teléfono..."
-              placeholderTextColor={tc.textMuted}
-              value={clientSearch}
-              onChangeText={setClientSearch}
-              autoFocus
-            />
-            <ScrollView style={{ maxHeight: 320 }}>
+
+            {showClientSearch ? (
+              <TextInput
+                style={[s.searchInput, { backgroundColor: tc.bg, color: tc.text, borderColor: tc.border }]}
+                placeholder="Buscar por nombre o teléfono..."
+                placeholderTextColor={tc.textMuted}
+                value={clientSearch}
+                onChangeText={setClientSearch}
+                autoFocus={true}
+              />
+            ) : (
+              <TouchableOpacity
+                style={[s.searchToggleBtn, { backgroundColor: tc.bg, borderColor: tc.border }]}
+                onPress={() => setShowClientSearch(true)}
+              >
+                <MaterialIcons name="search" size={18} color={tc.textMuted} />
+                <Text style={[s.searchToggleBtnText, { color: tc.textMuted }]}>Buscar por nombre...</Text>
+              </TouchableOpacity>
+            )}
+
+            <ScrollView style={{ maxHeight: 320 }} keyboardShouldPersistTaps="handled">
               {filteredClients.map(c => (
                 <TouchableOpacity
                   key={c.id}
                   style={[s.pickerRow, { borderBottomColor: tc.border }]}
-                  onPress={() => { setSelectedClient(c); setShowClientPicker(false); setClientSearch(''); }}
+                  onPress={() => { setSelectedClient(c); closeClientPicker(); }}
                 >
                   <Text style={[s.pickerMain, { color: tc.text }]}>{c.name}</Text>
                   <Text style={[s.pickerSub, { color: tc.textMuted }]}>{c.phone}</Text>
@@ -325,7 +342,7 @@ export default function StaffNewAppointment() {
                 <Text style={[s.pickerEmpty, { color: tc.textMuted }]}>Sin resultados</Text>
               )}
             </ScrollView>
-            <TouchableOpacity style={[s.modalCancelBtn, { borderColor: tc.border }]} onPress={() => setShowClientPicker(false)}>
+            <TouchableOpacity style={[s.modalCancelBtn, { borderColor: tc.border }]} onPress={closeClientPicker}>
               <Text style={{ color: tc.textMuted, fontWeight: '600' }}>Cerrar</Text>
             </TouchableOpacity>
           </View>
@@ -333,7 +350,7 @@ export default function StaffNewAppointment() {
       </Modal>
 
       {/* ── Modal servicios ── */}
-      <Modal visible={showServicePicker} transparent animationType="slide">
+      <Modal visible={showServicePicker} transparent animationType="slide" onRequestClose={() => setShowServicePicker(false)}>
         <View style={s.modalOverlay}>
           <View style={[s.modalBox, { backgroundColor: tc.surface }]}>
             <Text style={[s.modalTitle, { color: tc.text }]}>Seleccionar servicio</Text>
@@ -357,7 +374,7 @@ export default function StaffNewAppointment() {
       </Modal>
 
       {/* ── Modal staff ── */}
-      <Modal visible={showStaffPicker} transparent animationType="slide">
+      <Modal visible={showStaffPicker} transparent animationType="slide" onRequestClose={() => setShowStaffPicker(false)}>
         <View style={s.modalOverlay}>
           <View style={[s.modalBox, { backgroundColor: tc.surface }]}>
             <Text style={[s.modalTitle, { color: tc.text }]}>Asignar colaborador</Text>
@@ -395,30 +412,32 @@ export default function StaffNewAppointment() {
 }
 
 const s = StyleSheet.create({
-  container:       { flex: 1 },
-  header:          { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, paddingVertical: 14, borderBottomWidth: 0.5 },
-  back:            { padding: 4, width: 40 },
-  headerTitle:     { flex: 1, textAlign: 'center', fontSize: 17, fontWeight: '700' },
-  saveBtn:         { minWidth: 60, alignItems: 'flex-end' },
-  saveBtnText:     { fontSize: 15, fontWeight: '700', color: '#10B981' },
-  scroll:          { padding: 16 },
-  label:           { fontSize: 11, fontWeight: '800', letterSpacing: 1.2, marginBottom: 8, marginTop: 20 },
-  field:           { flexDirection: 'row', alignItems: 'center', gap: 10, borderRadius: 14, paddingHorizontal: 14, paddingVertical: 14, shadowColor: '#000', shadowOpacity: 0.03, shadowRadius: 4, elevation: 1 },
-  fieldText:       { flex: 1, fontSize: 15 },
-  addClientLink:   { flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 8 },
-  addClientText:   { fontSize: 13, color: '#10B981', fontWeight: '600' },
-  newClientBox:    { borderRadius: 14, borderWidth: 1, padding: 14 },
-  input:           { borderRadius: 10, borderWidth: 1, paddingHorizontal: 14, paddingVertical: 11, fontSize: 15 },
-  textArea:        { borderRadius: 14, borderWidth: 1, paddingHorizontal: 14, paddingVertical: 12, fontSize: 15, minHeight: 80, textAlignVertical: 'top' },
-  staffDot:        { width: 10, height: 10, borderRadius: 5 },
-  staffPickerRow:  { flexDirection: 'row', alignItems: 'center', gap: 10 },
-  modalOverlay:    { flex: 1, backgroundColor: 'rgba(0,0,0,0.4)', justifyContent: 'flex-end' },
-  modalBox:        { borderTopLeftRadius: 24, borderTopRightRadius: 24, padding: 20 },
-  modalTitle:      { fontSize: 17, fontWeight: '700', marginBottom: 14 },
-  searchInput:     { borderRadius: 12, borderWidth: 1, paddingHorizontal: 14, paddingVertical: 11, fontSize: 15, marginBottom: 12 },
-  pickerRow:       { paddingVertical: 14, paddingHorizontal: 4, borderBottomWidth: 0.5 },
-  pickerMain:      { fontSize: 15, fontWeight: '600' },
-  pickerSub:       { fontSize: 12, marginTop: 2 },
-  pickerEmpty:     { textAlign: 'center', paddingVertical: 20, fontSize: 14 },
-  modalCancelBtn:  { borderRadius: 12, borderWidth: 1, paddingVertical: 12, alignItems: 'center', marginTop: 12 },
+  container:           { flex: 1 },
+  header:              { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, paddingVertical: 14, borderBottomWidth: 0.5 },
+  back:                { padding: 4, width: 40 },
+  headerTitle:         { flex: 1, textAlign: 'center', fontSize: 17, fontWeight: '700' },
+  saveBtn:             { minWidth: 60, alignItems: 'flex-end' },
+  saveBtnText:         { fontSize: 15, fontWeight: '700', color: '#10B981' },
+  scroll:              { padding: 16 },
+  label:               { fontSize: 11, fontWeight: '800', letterSpacing: 1.2, marginBottom: 8, marginTop: 20 },
+  field:               { flexDirection: 'row', alignItems: 'center', gap: 10, borderRadius: 14, paddingHorizontal: 14, paddingVertical: 14, shadowColor: '#000', shadowOpacity: 0.03, shadowRadius: 4, elevation: 1 },
+  fieldText:           { flex: 1, fontSize: 15 },
+  addClientLink:       { flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 8 },
+  addClientText:       { fontSize: 13, color: '#10B981', fontWeight: '600' },
+  newClientBox:        { borderRadius: 14, borderWidth: 1, padding: 14 },
+  input:               { borderRadius: 10, borderWidth: 1, paddingHorizontal: 14, paddingVertical: 11, fontSize: 15 },
+  textArea:            { borderRadius: 14, borderWidth: 1, paddingHorizontal: 14, paddingVertical: 12, fontSize: 15, minHeight: 80, textAlignVertical: 'top' },
+  staffDot:            { width: 10, height: 10, borderRadius: 5 },
+  staffPickerRow:      { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  modalOverlay:        { flex: 1, backgroundColor: 'rgba(0,0,0,0.4)', justifyContent: 'flex-end' },
+  modalBox:            { borderTopLeftRadius: 24, borderTopRightRadius: 24, padding: 20 },
+  modalTitle:          { fontSize: 17, fontWeight: '700', marginBottom: 14 },
+  searchInput:         { borderRadius: 12, borderWidth: 1, paddingHorizontal: 14, paddingVertical: 11, fontSize: 15, marginBottom: 12 },
+  searchToggleBtn:     { flexDirection: 'row', alignItems: 'center', gap: 8, borderRadius: 12, borderWidth: 1, paddingHorizontal: 14, paddingVertical: 11, marginBottom: 12 },
+  searchToggleBtnText: { fontSize: 14 },
+  pickerRow:           { paddingVertical: 14, paddingHorizontal: 4, borderBottomWidth: 0.5 },
+  pickerMain:          { fontSize: 15, fontWeight: '600' },
+  pickerSub:           { fontSize: 12, marginTop: 2 },
+  pickerEmpty:         { textAlign: 'center', paddingVertical: 20, fontSize: 14 },
+  modalCancelBtn:      { borderRadius: 12, borderWidth: 1, paddingVertical: 12, alignItems: 'center', marginTop: 12 },
 });
