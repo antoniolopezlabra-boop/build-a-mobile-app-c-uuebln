@@ -59,6 +59,7 @@ export default function NewAppointmentScreen() {
   const [clients, setClients] = useState<Client[]>([]);
   const [selectedClient, setSelectedClient] = useState<Client | null>(null);
   const [showClientPicker, setShowClientPicker] = useState(false);
+  const [showClientSearch, setShowClientSearch] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
 
   const [service, setService] = useState('');
@@ -720,25 +721,43 @@ export default function NewAppointmentScreen() {
         </View>
       </Modal>
 
-      {/* Modal clientes */}
-      <Modal visible={showClientPicker} animationType="slide" transparent onRequestClose={() => setShowClientPicker(false)}>
+      {/* Modal clientes — lista aparece arriba, teclado solo si toca "Buscar" */}
+      <Modal
+        visible={showClientPicker}
+        animationType="slide"
+        transparent
+        onRequestClose={() => { setShowClientPicker(false); setShowClientSearch(false); setSearchQuery(''); }}
+      >
         <View style={styles.modalOverlay}>
           <View style={styles.modalContent}>
             <View style={styles.modalHeader}>
               <Text style={styles.modalTitle}>Seleccionar Cliente</Text>
-              <TouchableOpacity onPress={() => setShowClientPicker(false)}>
+              <TouchableOpacity onPress={() => { setShowClientPicker(false); setShowClientSearch(false); setSearchQuery(''); }}>
                 <IconSymbol android_material_icon_name="close" size={24} color={colors.text} />
               </TouchableOpacity>
             </View>
-            <TextInput
-              style={styles.searchInput}
-              value={searchQuery}
-              onChangeText={setSearchQuery}
-              placeholder="Buscar cliente..."
-              placeholderTextColor={colors.textSecondary}
-              autoFocus={false}
-            />
-            <ScrollView style={styles.clientsList}>
+
+            {/* Búsqueda: solo se activa si el usuario lo toca explícitamente */}
+            {showClientSearch ? (
+              <TextInput
+                style={styles.searchInput}
+                value={searchQuery}
+                onChangeText={setSearchQuery}
+                placeholder="Buscar por nombre o teléfono..."
+                placeholderTextColor={colors.textSecondary}
+                autoFocus={true}
+              />
+            ) : (
+              <TouchableOpacity
+                style={styles.searchToggleBtn}
+                onPress={() => setShowClientSearch(true)}
+              >
+                <MaterialIcons name="search" size={18} color="#94A3B8" />
+                <Text style={styles.searchToggleBtnText}>Buscar por nombre...</Text>
+              </TouchableOpacity>
+            )}
+
+            <ScrollView style={styles.clientsList} keyboardShouldPersistTaps="handled">
               {filteredClients.length === 0 ? (
                 <View style={styles.emptyClientState}>
                   <Text style={styles.emptyClientText}>
@@ -755,7 +774,7 @@ export default function NewAppointmentScreen() {
                   <TouchableOpacity
                     key={client.id}
                     style={styles.clientItem}
-                    onPress={() => { setSelectedClient(client); setShowClientPicker(false); setSearchQuery(''); }}
+                    onPress={() => { setSelectedClient(client); setShowClientPicker(false); setShowClientSearch(false); setSearchQuery(''); }}
                   >
                     <View style={styles.clientAvatar}>
                       <Text style={styles.clientAvatarText}>{client.name.charAt(0).toUpperCase()}</Text>
@@ -874,6 +893,8 @@ const styles = StyleSheet.create({
   serviceItemPriceText:   { fontSize: 16, fontWeight: '800', color: '#10B981' },
   serviceItemPriceSub:    { fontSize: 10, color: '#94A3B8' },
   searchInput:            { backgroundColor: colors.background, borderRadius: 12, padding: 12, margin: 20, marginBottom: 0, fontSize: 16, color: colors.text },
+  searchToggleBtn:        { flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: '#F8FAFC', borderRadius: 12, margin: 20, marginBottom: 0, paddingHorizontal: 16, paddingVertical: 12, borderWidth: 0.5, borderColor: '#E2E8F0' },
+  searchToggleBtnText:    { fontSize: 14, color: '#94A3B8' },
   clientsList:            { padding: 20 },
   emptyClientState:       { alignItems: 'center', paddingVertical: 40 },
   emptyClientText:        { fontSize: 16, color: colors.textSecondary, marginBottom: 16 },
