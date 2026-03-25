@@ -4,7 +4,7 @@ import {
   TextInput, ActivityIndicator, Modal, Alert,
   KeyboardAvoidingView, Platform, Keyboard,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import MaterialIcons from '@expo/vector-icons/MaterialIcons';
 import DateTimePicker from '@react-native-community/datetimepicker';
@@ -30,9 +30,11 @@ export default function StaffNewAppointment() {
   const router = useRouter();
   const { staffMemberData } = useAuth();
   const { colors: tc } = useTheme();
+  // useSafeAreaInsets funciona correctamente dentro de Modal, a diferencia de SafeAreaView
+  const insets = useSafeAreaInsets();
 
-  const orgUserId   = staffMemberData?.organizationUserId ?? '';
-  const myStaffId   = staffMemberData?.id ?? '';
+  const orgUserId = staffMemberData?.organizationUserId ?? '';
+  const myStaffId = staffMemberData?.id ?? '';
 
   const [saving, setSaving] = useState(false);
 
@@ -54,12 +56,12 @@ export default function StaffNewAppointment() {
   const [selectedStaff, setSelectedStaff]   = useState<StaffMember | null>(null);
   const [showStaffPicker, setShowStaffPicker] = useState(false);
 
-  const [date, setDate]           = useState(new Date());
-  const [tempDate, setTempDate]   = useState(new Date());
+  const [date, setDate]         = useState(new Date());
+  const [tempDate, setTempDate] = useState(new Date());
   const [showDatePanel, setShowDatePanel]                 = useState(false);
   const [showDatePickerAndroid, setShowDatePickerAndroid] = useState(false);
 
-  const [time, setTime]           = useState('09:00');
+  const [time, setTime] = useState('09:00');
   const [tempTimeDate, setTempTimeDate] = useState<Date>(() => { const d = new Date(); d.setHours(9, 0, 0, 0); return d; });
   const [showTimePanel, setShowTimePanel]                 = useState(false);
   const [showTimePickerAndroid, setShowTimePickerAndroid] = useState(false);
@@ -298,12 +300,12 @@ export default function StaffNewAppointment() {
 
       {/*
         Modal clientes FULL SCREEN.
-        CLAVE: sin presentationStyle="pageSheet" — ese modo impide que
-        SafeAreaView detecte el notch/dynamic island correctamente.
-        Con edges=['top','bottom'] cubrimos notch arriba y home indicator abajo.
+        useSafeAreaInsets aplicado manualmente — SafeAreaView NO funciona dentro de Modal en iOS.
+        insets.top cubre el Dynamic Island / notch correctamente.
       */}
       <Modal visible={showClientPicker} animationType="slide" onRequestClose={closeClientPicker}>
-        <SafeAreaView style={[s.fullModal, { backgroundColor: tc.bg }]} edges={['top', 'bottom']}>
+        <View style={[s.fullModal, { backgroundColor: tc.bg, paddingTop: insets.top, paddingBottom: insets.bottom }]}>
+          {/* Header — respeta notch con insets.top ya aplicado al padre */}
           <View style={[s.fullModalHeader, { backgroundColor: tc.surface, borderBottomColor: tc.border }]}>
             <TouchableOpacity onPress={closeClientPicker} style={s.back}>
               <MaterialIcons name="close" size={24} color={tc.text} />
@@ -312,6 +314,7 @@ export default function StaffNewAppointment() {
             <View style={{ width: 40 }} />
           </View>
 
+          {/* Búsqueda */}
           <View style={[s.searchContainer, { backgroundColor: tc.surface, borderBottomColor: tc.border }]}>
             {showClientSearch ? (
               <View style={[s.searchBox, { backgroundColor: tc.bg, borderColor: '#10B981' }]}>
@@ -339,6 +342,7 @@ export default function StaffNewAppointment() {
             )}
           </View>
 
+          {/* Lista */}
           <ScrollView style={{ flex: 1 }} keyboardShouldPersistTaps="handled" keyboardDismissMode="on-drag">
             {filteredClients.length === 0 ? (
               <View style={s.emptyState}>
@@ -372,7 +376,7 @@ export default function StaffNewAppointment() {
             )}
             <View style={{ height: 40 }} />
           </ScrollView>
-        </SafeAreaView>
+        </View>
       </Modal>
 
       {/* Modal servicios */}
@@ -462,6 +466,7 @@ const s = StyleSheet.create({
   panelPreviewText:    { fontSize: 15, fontWeight: '600', color: '#10B981' },
   panelConfirmBtn:     { backgroundColor: '#10B981', marginHorizontal: 20, marginTop: 12, paddingVertical: 15, borderRadius: 14, alignItems: 'center' },
   panelConfirmBtnText: { fontSize: 16, fontWeight: '700', color: '#fff' },
+  // Modal clientes — View con insets manuales, NO SafeAreaView
   fullModal:           { flex: 1 },
   fullModalHeader:     { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, paddingVertical: 14, borderBottomWidth: 0.5 },
   searchContainer:     { paddingHorizontal: 16, paddingVertical: 12, borderBottomWidth: 0.5 },
