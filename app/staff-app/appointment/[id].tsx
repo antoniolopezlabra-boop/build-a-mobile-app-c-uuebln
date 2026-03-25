@@ -23,6 +23,7 @@ interface AppointmentDetail {
   service_name: string;
   service_cost: number | null;
   status: string;
+  paid: boolean | null;
   notes: string | null;
   staff_id: string | null;
   client: { id: string; name: string; phone: string } | null;
@@ -66,7 +67,7 @@ export default function StaffAppointmentDetail() {
     try {
       const { data, error } = await supabase
         .from('appointments')
-        .select('id, date, start_time, end_time, service_name, service_cost, status, notes, staff_id, client_name_temp, client_phone_temp, client:clients(id, name, phone), staff:staff_members(name, color)')
+        .select('id, date, start_time, end_time, service_name, service_cost, status, paid, notes, staff_id, client_name_temp, client_phone_temp, client:clients(id, name, phone), staff:staff_members(name, color)')
         .eq('id', id)
         .single();
       if (error) throw error;
@@ -91,6 +92,24 @@ export default function StaffAppointmentDetail() {
       setAppt(prev => prev ? { ...prev, status: newStatus } : prev);
     } catch (e: any) {
       Alert.alert('Error', e?.message ?? 'No se pudo actualizar la cita');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const registerPayment = async () => {
+    if (!appt) return;
+    setSaving(true);
+    try {
+      const { error } = await supabase
+        .from('appointments')
+        .update({ paid: true, updated_at: new Date().toISOString() })
+        .eq('id', appt.id);
+      if (error) throw error;
+      setAppt(prev => prev ? { ...prev, paid: true } : prev);
+      Alert.alert('✅ Pago registrado', 'El pago ha sido registrado correctamente.');
+    } catch (e: any) {
+      Alert.alert('Error', e?.message ?? 'No se pudo registrar el pago');
     } finally {
       setSaving(false);
     }
@@ -129,19 +148,14 @@ export default function StaffAppointmentDetail() {
     setShowReschedule(true);
   };
 
-  // Fecha reagenda
   const openRescheduleDatePicker = () => {
     if (Platform.OS === 'ios') { setTempRescheduleDate(rescheduleDate); setShowTimePanel(false); setShowDatePanel(true); }
     else setTimeout(() => setShowDatePickerAndroid(true), 100);
   };
   const confirmRescheduleDate = () => { setRescheduleDate(tempRescheduleDate); setShowDatePanel(false); };
   const cancelRescheduleDate  = () => setShowDatePanel(false);
-  const onAndroidRescheduleDateChange = (_: any, d?: Date) => {
-    setShowDatePickerAndroid(false);
-    if (d) setRescheduleDate(d);
-  };
+  const onAndroidRescheduleDateChange = (_: any, d?: Date) => { setShowDatePickerAndroid(false); if (d) setRescheduleDate(d); };
 
-  // Hora reagenda
   const openRescheduleTimePicker = () => {
     if (Platform.OS === 'ios') { setShowDatePanel(false); setShowTimePanel(true); }
     else setTimeout(() => setShowTimePickerAndroid(true), 100);
@@ -225,6 +239,8 @@ export default function StaffAppointmentDetail() {
   const clientName   = appt.client?.name  ?? appt.client_name_temp  ?? 'Cliente';
   const clientPhone  = appt.client?.phone ?? appt.client_phone_temp ?? null;
   const isActionable = ACTIONABLE_STATUSES.includes(appt.status);
+  const isCompleted  = appt.status === 'Completada';
+  const isPaid       = appt.paid === true;
   const staffColor   = (appt.staff as any)?.color ?? '#94A3B8';
 
   const formattedRescheduleTempDate = tempRescheduleDate.toLocaleDateString('es-MX', { weekday: 'long', day: 'numeric', month: 'long' });
@@ -246,6 +262,15 @@ export default function StaffAppointmentDetail() {
         <View style={[s.statusRow, { backgroundColor: statusColor + '18', borderColor: statusColor + '44' }]}>
           <View style={[s.statusDot, { backgroundColor: statusColor }]} />
           <Text style={[s.statusLabel, { color: statusColor }]}>{appt.status}</Text>
+          {/* Indicador de pago junto al status */}
+          {isCompleted && (
+            <View style={[s.paidBadge, { backgroundColor: isPaid ? '#ECFDF5' : '#FFF7ED', borderColor: isPaid ? '#A7F3D0' : '#FED7AA' }]}>
+              <MaterialIcons name={isPaid ? 'check-circle' : 'pending'} size={12} color={isPaid ? '#10B981' : '#F97316'} />
+              <Text style={[s.paidBadgeText, { color: isPaid ? '#10B981' : '#F97316' }]}>
+                {isPaid ? 'Pagado' : 'Sin pagar'}
+              </Text>
+            </View>
+          )}
         </View>
 
         {/* Cliente */}
@@ -342,6 +367,36 @@ export default function StaffAppointmentDetail() {
           </>
         )}
 
+        {/* ── Registrar pago — aparece cuando está Completada y aún no pagada ── */}
+        {isCompleted && !isPaid && (
+          <TouchableOpacity
+            style={[s.actionBtn, { backgroundColor: '#F0FDF4', borderColor: '#86EFAC' }]}
+            onPress={() => Alert.alert('Registrar pago', `¿Confirmar pago de $${(appt.service_cost ?? 0).toLocaleString('es-MX')} MXN?`, [
+              { text: 'Cancelar', style: 'cancel' },
+              { text: 'Confirmar', onPress: registerPayment },
+            ])}
+            disabled={saving} activeOpacity={0.7}
+          >
+            <MaterialIcons name="payments" size={20} color="#16A34A" />
+            <View style={{ flex: 1 }}>
+              <Text style={[s.actionText, { color: '#16A34A' }]}>Registrar pago</Text>
+              {appt.service_cost != null && appt.service_cost > 0 && (
+                <Text style={{ fontSize: 11, color: '#16A34A', opacity: 0.8, marginTop: 1 }}>
+                  ${appt.service_cost.toLocaleString('es-MX')} MXN
+                </Text>
+              )}
+            </View>
+          </TouchableOpacity>
+        )}
+
+        {/* Pago ya registrado — solo informativo */}
+        {isCompleted && isPaid && (
+          <View style={[s.actionBtn, { backgroundColor: '#ECFDF5', borderColor: '#A7F3D0', opacity: 0.7 }]}>
+            <MaterialIcons name="check-circle" size={20} color="#10B981" />
+            <Text style={[s.actionText, { color: '#10B981' }]}>Pago registrado ✓</Text>
+          </View>
+        )}
+
         {appt.status !== 'Cancelada' && appt.status !== 'Completada' && appt.status !== 'No asistió' && (
           <TouchableOpacity
             style={[s.actionBtn, { backgroundColor: '#EFF6FF', borderColor: '#BFDBFE' }]}
@@ -396,12 +451,8 @@ export default function StaffAppointmentDetail() {
               <MaterialIcons name="expand-more" size={18} color={tc.textMuted} />
             </TouchableOpacity>
 
-            {/* Android date picker dentro del modal */}
             {Platform.OS === 'android' && showDatePickerAndroid && (
-              <DateTimePicker
-                value={rescheduleDate} mode="date" minimumDate={new Date()}
-                onChange={onAndroidRescheduleDateChange}
-              />
+              <DateTimePicker value={rescheduleDate} mode="date" minimumDate={new Date()} onChange={onAndroidRescheduleDateChange} />
             )}
 
             <Text style={[s.rescheduleLabel, { color: tc.textMuted }]}>NUEVA HORA</Text>
@@ -415,12 +466,10 @@ export default function StaffAppointmentDetail() {
               <MaterialIcons name="expand-more" size={18} color={tc.textMuted} />
             </TouchableOpacity>
 
-            {/* Android time picker dentro del modal */}
             {Platform.OS === 'android' && showTimePickerAndroid && (
               <DateTimePicker
                 value={(() => { const d = new Date(); const [h,m] = rescheduleTime.split(':').map(Number); d.setHours(h,m,0,0); return d; })()}
-                mode="time" is24Hour
-                onChange={onAndroidRescheduleTimeChange}
+                mode="time" is24Hour onChange={onAndroidRescheduleTimeChange}
               />
             )}
 
@@ -445,7 +494,6 @@ export default function StaffAppointmentDetail() {
           </View>
         </View>
 
-        {/* iOS date panel dentro del modal de reagenda */}
         {Platform.OS === 'ios' && showDatePanel && (
           <>
             <TouchableOpacity style={s.panelOverlay} activeOpacity={1} onPress={cancelRescheduleDate} />
@@ -472,7 +520,6 @@ export default function StaffAppointmentDetail() {
           </>
         )}
 
-        {/* iOS time panel dentro del modal de reagenda */}
         {Platform.OS === 'ios' && showTimePanel && (
           <>
             <TouchableOpacity style={s.panelOverlay} activeOpacity={1} onPress={cancelRescheduleTime} />
@@ -499,12 +546,7 @@ export default function StaffAppointmentDetail() {
       </Modal>
 
       {/* ── Modal nota ── */}
-      <Modal
-        visible={showNoteModal}
-        transparent
-        animationType="slide"
-        onRequestClose={() => setShowNoteModal(false)}
-      >
+      <Modal visible={showNoteModal} transparent animationType="slide" onRequestClose={() => setShowNoteModal(false)}>
         <View style={s.sheetOverlay}>
           <View style={[s.sheet, { backgroundColor: tc.surface }]}>
             <View style={s.sheetHandle} />
@@ -553,6 +595,8 @@ const s = StyleSheet.create({
   statusRow:           { flexDirection: 'row', alignItems: 'center', gap: 8, borderRadius: 12, borderWidth: 1, paddingHorizontal: 14, paddingVertical: 10, marginBottom: 16 },
   statusDot:           { width: 8, height: 8, borderRadius: 4 },
   statusLabel:         { fontSize: 14, fontWeight: '700' },
+  paidBadge:           { flexDirection: 'row', alignItems: 'center', gap: 4, borderRadius: 8, borderWidth: 1, paddingHorizontal: 8, paddingVertical: 3, marginLeft: 'auto' },
+  paidBadgeText:       { fontSize: 11, fontWeight: '700' },
   card:                { borderRadius: 14, borderWidth: 1, padding: 16, marginBottom: 10 },
   cardLabel:           { fontSize: 10, fontWeight: '800', letterSpacing: 1.2, marginBottom: 6 },
   cardMain:            { fontSize: 16, fontWeight: '600' },
