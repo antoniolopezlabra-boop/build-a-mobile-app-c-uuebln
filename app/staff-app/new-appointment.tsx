@@ -16,6 +16,7 @@ import { invalidateCache } from '@/utils/cache';
 interface Client { id: string; name: string; phone: string; }
 interface Service { id: string; name: string; price: number; durationMinutes: number; }
 interface StaffMember { id: string; name: string; color: string; }
+interface TimeSlot { time: string; available: boolean; }
 
 function toDateStr(d: Date) {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
@@ -30,7 +31,6 @@ export default function StaffNewAppointment() {
   const router = useRouter();
   const { staffMemberData } = useAuth();
   const { colors: tc } = useTheme();
-  // useSafeAreaInsets funciona correctamente dentro de Modal, a diferencia de SafeAreaView
   const insets = useSafeAreaInsets();
 
   const orgUserId = staffMemberData?.organizationUserId ?? '';
@@ -38,37 +38,47 @@ export default function StaffNewAppointment() {
 
   const [saving, setSaving] = useState(false);
 
-  const [clients, setClients]           = useState<Client[]>([]);
-  const [clientSearch, setClientSearch] = useState('');
-  const [showClientSearch, setShowClientSearch] = useState(false);
-  const [selectedClient, setSelectedClient]     = useState<Client | null>(null);
-  const [showClientPicker, setShowClientPicker] = useState(false);
+  // ── Cliente ────────────────────────────────────────
+  const [clients, setClients]                       = useState<Client[]>([]);
+  const [clientSearch, setClientSearch]             = useState('');
+  const [showClientSearch, setShowClientSearch]     = useState(false);
+  const [selectedClient, setSelectedClient]         = useState<Client | null>(null);
+  const [showClientPicker, setShowClientPicker]     = useState(false);
+  const [newClientName, setNewClientName]           = useState('');
+  const [newClientPhone, setNewClientPhone]         = useState('');
+  const [showNewClientForm, setShowNewClientForm]   = useState(false);
 
-  const [newClientName, setNewClientName]   = useState('');
-  const [newClientPhone, setNewClientPhone] = useState('');
-  const [showNewClientForm, setShowNewClientForm] = useState(false);
+  // ── Servicio ──────────────────────────────────────
+  const [services, setServices]                     = useState<Service[]>([]);
+  const [selectedService, setSelectedService]       = useState<Service | null>(null);
+  const [showServicePicker, setShowServicePicker]   = useState(false);
 
-  const [services, setServices]               = useState<Service[]>([]);
-  const [selectedService, setSelectedService] = useState<Service | null>(null);
-  const [showServicePicker, setShowServicePicker] = useState(false);
+  // ── Staff ─────────────────────────────────────────
+  const [staffList, setStaffList]                   = useState<StaffMember[]>([]);
+  const [selectedStaff, setSelectedStaff]           = useState<StaffMember | null>(null);
+  const [showStaffPicker, setShowStaffPicker]       = useState(false);
 
-  const [staffList, setStaffList]           = useState<StaffMember[]>([]);
-  const [selectedStaff, setSelectedStaff]   = useState<StaffMember | null>(null);
-  const [showStaffPicker, setShowStaffPicker] = useState(false);
-
-  const [date, setDate]         = useState(new Date());
-  const [tempDate, setTempDate] = useState(new Date());
-  const [showDatePanel, setShowDatePanel]                 = useState(false);
+  // ── Fecha ─────────────────────────────────────────
+  const [date, setDate]                             = useState(new Date());
+  const [tempDate, setTempDate]                     = useState(new Date());
+  const [showDatePanel, setShowDatePanel]           = useState(false);
   const [showDatePickerAndroid, setShowDatePickerAndroid] = useState(false);
 
-  const [time, setTime] = useState('09:00');
-  const [tempTimeDate, setTempTimeDate] = useState<Date>(() => { const d = new Date(); d.setHours(9, 0, 0, 0); return d; });
-  const [showTimePanel, setShowTimePanel]                 = useState(false);
-  const [showTimePickerAndroid, setShowTimePickerAndroid] = useState(false);
+  // ── Horarios disponibles ───────────────────────────
+  const [timeSlots, setTimeSlots]                   = useState<TimeSlot[]>([]);
+  const [selectedBlocks, setSelectedBlocks]         = useState<string[]>([]);
+  const [time, setTime]                             = useState('09:00');
+  const [dayIsClosed, setDayIsClosed]               = useState(false);
+  const [loadingSlots, setLoadingSlots]             = useState(false);
 
   const [notes, setNotes] = useState('');
 
   useEffect(() => { loadData(); }, []);
+
+  // Recargar slots cuando cambia fecha o staff
+  useEffect(() => {
+    if (orgUserId) checkAvailability();
+  }, [date, selectedStaff, orgUserId]);
 
   const loadData = async () => {
     try {
@@ -88,6 +98,100 @@ export default function StaffNewAppointment() {
     }
   };
 
+  // ── Misma lógica de disponibilidad que app/appointments/new.tsx ──
+  const checkAvailability = async () => {
+    setLoadingSlots(true);
+    try {
+      const dateString = toDateStr(date);
+      const dayOfWeek  = date.getDay();
+
+      // 1) Citas del día de este negocio
+      const { data: appts } = await supabase
+        .from('appointments')
+        .select('start_time, end_time, staff_id, status')
+        .eq('user_id', orgUserId)
+        .eq('date', dateString)
+        .not('status', 'eq', 'Cancelada');
+
+      const allAppts = appts ?? [];
+
+      // 2) Horario del día: staff seleccionado → negocio → fallback
+      let dayConfig: { isOpen: boolean; startTime: string; endTime: string } | null = null;
+
+      if (selectedStaff) {
+        const { data: sh } = await supabase
+          .from('staff_hours')
+          .select('is_open, start_time, end_time')
+          .eq('staff_id', selectedStaff.id)
+          .eq('day_of_week', dayOfWeek)
+          .single();
+        if (sh) dayConfig = { isOpen: sh.is_open, startTime: sh.start_time, endTime: sh.end_time };
+      }
+
+      if (!dayConfig) {
+        const { data: bh } = await supabase
+          .from('business_hours')
+          .select('is_open, start_time, end_time, day_of_week')
+          .eq('user_id', orgUserId)
+          .eq('day_of_week', dayOfWeek)
+          .single();
+        if (bh) {
+          dayConfig = { isOpen: bh.is_open, startTime: bh.start_time, endTime: bh.end_time };
+        } else {
+          const isWeekday = dayOfWeek >= 1 && dayOfWeek <= 5;
+          dayConfig = { isOpen: isWeekday, startTime: '09:00', endTime: '18:00' };
+        }
+      }
+
+      if (!dayConfig || !dayConfig.isOpen) {
+        setDayIsClosed(true); setTimeSlots([]); setSelectedBlocks([]);
+        return;
+      }
+
+      setDayIsClosed(false);
+      setSelectedBlocks([]);
+
+      const [startH, startM] = dayConfig.startTime.split(':').map(Number);
+      const [endH,   endM]   = dayConfig.endTime.split(':').map(Number);
+
+      // 3) Citas del colaborador seleccionado (bloquean siempre)
+      const staffAppts = selectedStaff
+        ? allAppts.filter(a => a.staff_id === selectedStaff.id)
+        : allAppts; // sin staff: bloquear todas
+
+      // 4) Slots pasados si es hoy
+      const today    = new Date();
+      const todayStr = toDateStr(today);
+      const isToday  = dateString === todayStr;
+
+      // 5) Generar slots de 30 min
+      const slots: TimeSlot[] = [];
+      for (let total = startH * 60 + startM; total < endH * 60 + endM; total += 30) {
+        const h = Math.floor(total / 60);
+        const m = total % 60;
+        const slotTime = `${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}`;
+
+        const isBooked = staffAppts.some(appt => {
+          const [sh, sm] = (appt.start_time || '00:00').split(':').map(Number);
+          const [eh, em] = (appt.end_time   || '00:00').split(':').map(Number);
+          return total >= sh * 60 + sm && total < eh * 60 + em;
+        });
+
+        const isPast = isToday && (
+          h < today.getHours() ||
+          (h === today.getHours() && m <= today.getMinutes())
+        );
+
+        slots.push({ time: slotTime, available: !isBooked && !isPast });
+      }
+      setTimeSlots(slots);
+    } catch (e) {
+      console.warn('[StaffNewAppt] checkAvailability error:', e);
+    } finally {
+      setLoadingSlots(false);
+    }
+  };
+
   const filteredClients = clients.filter(c =>
     c.name.toLowerCase().includes(clientSearch.toLowerCase()) ||
     c.phone.includes(clientSearch)
@@ -99,6 +203,7 @@ export default function StaffNewAppointment() {
     setClientSearch('');
   };
 
+  // ── Fecha handlers ──────────────────────────────────
   const openDatePicker = () => {
     Keyboard.dismiss();
     if (Platform.OS === 'ios') { setTempDate(date); setShowDatePanel(true); }
@@ -108,26 +213,32 @@ export default function StaffNewAppointment() {
   const cancelDate  = () => { setTempDate(date); setShowDatePanel(false); };
   const onAndroidDateChange = (_: any, d?: Date) => { setShowDatePickerAndroid(false); if (d) setDate(d); };
 
-  const openTimePicker = () => {
+  // ── Selección de bloques de horario ───────────────────
+  const handleSlotPress = (slot: TimeSlot) => {
+    if (!slot.available) return;
     Keyboard.dismiss();
-    const [h, m] = time.split(':').map(Number);
-    const d = new Date(); d.setHours(h, m, 0, 0);
-    if (Platform.OS === 'ios') { setTempTimeDate(d); setShowTimePanel(true); }
-    else setTimeout(() => setShowTimePickerAndroid(true), 100);
-  };
-  const confirmTime = () => {
-    const hh = tempTimeDate.getHours().toString().padStart(2, '0');
-    const mm = tempTimeDate.getMinutes().toString().padStart(2, '0');
-    setTime(`${hh}:${mm}`);
-    setShowTimePanel(false);
-  };
-  const cancelTime = () => setShowTimePanel(false);
-  const onAndroidTimeChange = (_: any, d?: Date) => {
-    setShowTimePickerAndroid(false);
-    if (d) {
-      const hh = d.getHours().toString().padStart(2, '0');
-      const mm = d.getMinutes().toString().padStart(2, '0');
-      setTime(`${hh}:${mm}`);
+    if (selectedBlocks.length === 0) {
+      if (selectedService) {
+        const blocks   = Math.ceil(selectedService.durationMinutes / 30);
+        const thisIdx  = timeSlots.findIndex(s => s.time === slot.time);
+        const range    = timeSlots.slice(thisIdx, thisIdx + blocks);
+        if (range.length > 0 && range.every(s => s.available)) {
+          setSelectedBlocks(range.map(s => s.time));
+          setTime(slot.time);
+          return;
+        }
+      }
+      setSelectedBlocks([slot.time]);
+      setTime(slot.time);
+    } else {
+      const firstIdx = timeSlots.findIndex(s => s.time === selectedBlocks[0]);
+      const thisIdx  = timeSlots.findIndex(s => s.time === slot.time);
+      if (thisIdx < firstIdx) {
+        setSelectedBlocks([slot.time]); setTime(slot.time);
+      } else {
+        const range = timeSlots.slice(firstIdx, thisIdx + 1);
+        if (range.every(s => s.available)) setSelectedBlocks(range.map(s => s.time));
+      }
     }
   };
 
@@ -136,6 +247,11 @@ export default function StaffNewAppointment() {
     if (!selectedClient && !showNewClientForm) { Alert.alert('Campo requerido', 'Selecciona o agrega un cliente.'); return; }
     if (showNewClientForm && !newClientName.trim()) { Alert.alert('Campo requerido', 'Ingresa el nombre del cliente.'); return; }
     if (!selectedService) { Alert.alert('Campo requerido', 'Selecciona un servicio.'); return; }
+    if (selectedBlocks.length === 0) { Alert.alert('Campo requerido', 'Selecciona un horario disponible.'); return; }
+
+    const selectedSlot = timeSlots.find(s => s.time === time);
+    if (!selectedSlot?.available) { Alert.alert('No disponible', 'El horario seleccionado ya no está disponible.'); return; }
+
     setSaving(true);
     try {
       let clientId = selectedClient?.id ?? null;
@@ -147,24 +263,28 @@ export default function StaffNewAppointment() {
         if (cErr) throw cErr;
         clientId = newC.id;
       }
-      const [h, m] = time.split(':').map(Number);
-      const dur = selectedService.durationMinutes || 30;
-      const endMin = h * 60 + m + dur;
-      const endTime = `${Math.floor(endMin / 60).toString().padStart(2, '0')}:${(endMin % 60).toString().padStart(2, '0')}`;
+
+      // endTime basado en bloques seleccionados
+      const lastBlock = selectedBlocks[selectedBlocks.length - 1];
+      const [lh, lm]  = lastBlock.split(':').map(Number);
+      const endMin    = lh * 60 + lm + 30;
+      const endTime   = `${Math.floor(endMin / 60).toString().padStart(2, '0')}:${(endMin % 60).toString().padStart(2, '0')}`;
+
       const { error } = await supabase.from('appointments').insert({
-        user_id: orgUserId,
-        client_id: clientId,
-        service_name: selectedService.name,
-        date: toDateStr(date),
-        start_time: time,
-        end_time: endTime,
-        status: 'Pendiente',
-        notes: notes.trim() || null,
-        service_cost: selectedService.price ?? 0,
-        staff_id: selectedStaff?.id ?? null,
+        user_id:               orgUserId,
+        client_id:             clientId,
+        service_name:          selectedService.name,
+        date:                  toDateStr(date),
+        start_time:            time,
+        end_time:              endTime,
+        status:                'Pendiente',
+        notes:                 notes.trim() || null,
+        service_cost:          selectedService.price ?? 0,
+        staff_id:              selectedStaff?.id ?? null,
         whatsapp_notification: false,
       });
       if (error) throw error;
+
       invalidateCache('dashboard_stats');
       invalidateCache('today_appointments');
       invalidateCache('appointments_list');
@@ -177,10 +297,16 @@ export default function StaffNewAppointment() {
   };
 
   const formattedTempDate = tempDate.toLocaleDateString('es-MX', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
-  const formattedTempTime = `${tempTimeDate.getHours().toString().padStart(2,'0')}:${tempTimeDate.getMinutes().toString().padStart(2,'0')}`;
+
+  const durationLabel = selectedBlocks.length > 0 ? (() => {
+    const [h, m] = selectedBlocks[selectedBlocks.length - 1].split(':').map(Number);
+    const e = h * 60 + m + 30;
+    return `${selectedBlocks[0]} → ${Math.floor(e/60).toString().padStart(2,'0')}:${(e%60).toString().padStart(2,'0')}  ·  ${selectedBlocks.length * 30} min`;
+  })() : null;
 
   return (
     <SafeAreaView style={[s.container, { backgroundColor: tc.bg }]} edges={['top']}>
+      {/* Header */}
       <View style={[s.header, { backgroundColor: tc.surface, borderBottomColor: tc.border }]}>
         <TouchableOpacity onPress={() => router.back()} style={s.back}>
           <MaterialIcons name="arrow-back" size={24} color={tc.text} />
@@ -194,6 +320,7 @@ export default function StaffNewAppointment() {
       <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
         <ScrollView contentContainerStyle={s.scroll} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled" keyboardDismissMode="on-drag">
 
+          {/* ── Cliente ── */}
           <Text style={[s.label, { color: tc.textMuted }]}>CLIENTE *</Text>
           {!showNewClientForm ? (
             <>
@@ -219,6 +346,7 @@ export default function StaffNewAppointment() {
             </View>
           )}
 
+          {/* ── Servicio ── */}
           <Text style={[s.label, { color: tc.textMuted }]}>SERVICIO *</Text>
           <TouchableOpacity style={[s.field, { backgroundColor: tc.surface }]} onPress={() => setShowServicePicker(true)} activeOpacity={0.75}>
             <MaterialIcons name="design-services" size={18} color="#10B981" />
@@ -228,6 +356,15 @@ export default function StaffNewAppointment() {
             <MaterialIcons name="expand-more" size={18} color={tc.textMuted} />
           </TouchableOpacity>
 
+          {/* ── Colaborador ── */}
+          <Text style={[s.label, { color: tc.textMuted }]}>COLABORADOR</Text>
+          <TouchableOpacity style={[s.field, { backgroundColor: tc.surface }]} onPress={() => setShowStaffPicker(true)} activeOpacity={0.75}>
+            <View style={[s.staffDot, { backgroundColor: selectedStaff?.color ?? '#94A3B8' }]} />
+            <Text style={[s.fieldText, { color: tc.text }]}>{selectedStaff?.name ?? 'Sin asignar'}</Text>
+            <MaterialIcons name="expand-more" size={18} color={tc.textMuted} />
+          </TouchableOpacity>
+
+          {/* ── Fecha ── */}
           <Text style={[s.label, { color: tc.textMuted }]}>FECHA</Text>
           <TouchableOpacity style={[s.field, { backgroundColor: tc.surface }]} onPress={openDatePicker} activeOpacity={0.75}>
             <MaterialIcons name="calendar-today" size={18} color="#10B981" />
@@ -237,22 +374,60 @@ export default function StaffNewAppointment() {
             <DateTimePicker value={date} mode="date" minimumDate={new Date()} onChange={onAndroidDateChange} />
           )}
 
-          <Text style={[s.label, { color: tc.textMuted }]}>HORA</Text>
-          <TouchableOpacity style={[s.field, { backgroundColor: tc.surface }]} onPress={openTimePicker} activeOpacity={0.75}>
-            <MaterialIcons name="schedule" size={18} color="#10B981" />
-            <Text style={[s.fieldText, { color: tc.text }]}>{time}</Text>
-          </TouchableOpacity>
-          {Platform.OS === 'android' && showTimePickerAndroid && (
-            <DateTimePicker value={(() => { const d = new Date(); const [h, m] = time.split(':').map(Number); d.setHours(h, m, 0, 0); return d; })()} mode="time" is24Hour onChange={onAndroidTimeChange} />
+          {/* ── Hora — bloques de disponibilidad real ── */}
+          <Text style={[s.label, { color: tc.textMuted }]}>
+            HORA{selectedStaff ? `  —  ${selectedStaff.name}` : ''}
+          </Text>
+
+          {loadingSlots ? (
+            <View style={s.slotsLoading}>
+              <ActivityIndicator color="#10B981" size="small" />
+              <Text style={[s.slotsLoadingText, { color: tc.textMuted }]}>Verificando disponibilidad...</Text>
+            </View>
+          ) : dayIsClosed ? (
+            <View style={[s.dayClosed, { backgroundColor: '#FEF2F2' }]}>
+              <Text style={s.dayClosedTitle}>
+                🚫 {selectedStaff ? `${selectedStaff.name} no trabaja este día` : 'Sin atención este día'}
+              </Text>
+              <Text style={[s.dayClosedSub, { color: tc.textMuted }]}>Selecciona otra fecha o colaborador</Text>
+            </View>
+          ) : (
+            <>
+              {durationLabel && (
+                <View style={s.durationBadge}>
+                  <Text style={s.durationBadgeText}>⏱ {durationLabel}</Text>
+                  <TouchableOpacity onPress={() => { setSelectedBlocks([]); setTime('09:00'); }}>
+                    <Text style={s.durationBadgeClear}>✕ Limpiar</Text>
+                  </TouchableOpacity>
+                </View>
+              )}
+              {timeSlots.length === 0 ? (
+                <Text style={[s.noSlots, { color: tc.textMuted }]}>Sin horarios disponibles</Text>
+              ) : (
+                <ScrollView horizontal showsHorizontalScrollIndicator={false} style={s.slotsRow} keyboardShouldPersistTaps="handled">
+                  {timeSlots.map(slot => {
+                    const isSel = selectedBlocks.includes(slot.time);
+                    return (
+                      <TouchableOpacity
+                        key={slot.time}
+                        style={[s.slot, isSel && s.slotSelected, !slot.available && s.slotDisabled]}
+                        onPress={() => handleSlotPress(slot)}
+                        disabled={!slot.available}
+                        activeOpacity={0.7}
+                      >
+                        <Text style={[s.slotText, isSel && s.slotTextSelected, !slot.available && s.slotTextDisabled]}>
+                          {slot.time}
+                        </Text>
+                      </TouchableOpacity>
+                    );
+                  })}
+                </ScrollView>
+              )}
+              <Text style={[s.slotHint, { color: tc.textMuted }]}>Toca un bloque para seleccionar · Desliza para ver más</Text>
+            </>
           )}
 
-          <Text style={[s.label, { color: tc.textMuted }]}>COLABORADOR</Text>
-          <TouchableOpacity style={[s.field, { backgroundColor: tc.surface }]} onPress={() => setShowStaffPicker(true)} activeOpacity={0.75}>
-            <View style={[s.staffDot, { backgroundColor: selectedStaff?.color ?? '#94A3B8' }]} />
-            <Text style={[s.fieldText, { color: tc.text }]}>{selectedStaff?.name ?? 'Sin asignar'}</Text>
-            <MaterialIcons name="expand-more" size={18} color={tc.textMuted} />
-          </TouchableOpacity>
-
+          {/* ── Notas ── */}
           <Text style={[s.label, { color: tc.textMuted }]}>NOTAS</Text>
           <TextInput style={[s.textArea, { backgroundColor: tc.surface, color: tc.text, borderColor: tc.border }]} value={notes} onChangeText={setNotes} placeholder="Notas opcionales..." placeholderTextColor={tc.textMuted} multiline maxLength={500} returnKeyType="done" onSubmitEditing={Keyboard.dismiss} />
 
@@ -279,33 +454,9 @@ export default function StaffNewAppointment() {
         </>
       )}
 
-      {/* iOS Time Panel */}
-      {Platform.OS === 'ios' && showTimePanel && (
-        <>
-          <TouchableOpacity style={s.panelOverlay} activeOpacity={1} onPress={cancelTime} />
-          <View style={[s.panel, { backgroundColor: '#fff' }]}>
-            <View style={s.panelHeader}>
-              <TouchableOpacity onPress={cancelTime}><Text style={s.panelCancel}>Cancelar</Text></TouchableOpacity>
-              <Text style={s.panelTitle}>Seleccionar hora</Text>
-              <TouchableOpacity onPress={confirmTime}><Text style={s.panelConfirm}>Listo</Text></TouchableOpacity>
-            </View>
-            <View style={s.panelPreview}>
-              <Text style={s.panelPreviewText}>{formattedTempTime}</Text>
-            </View>
-            <DateTimePicker value={tempTimeDate} mode="time" display="spinner" is24Hour locale="es-MX" onChange={(_, d) => { if (d) setTempTimeDate(d); }} style={{ width: '100%' }} textColor="#0F172A" />
-            <TouchableOpacity style={s.panelConfirmBtn} onPress={confirmTime}><Text style={s.panelConfirmBtnText}>Confirmar hora</Text></TouchableOpacity>
-          </View>
-        </>
-      )}
-
-      {/*
-        Modal clientes FULL SCREEN.
-        useSafeAreaInsets aplicado manualmente — SafeAreaView NO funciona dentro de Modal en iOS.
-        insets.top cubre el Dynamic Island / notch correctamente.
-      */}
+      {/* Modal clientes — useSafeAreaInsets para notch */}
       <Modal visible={showClientPicker} animationType="slide" onRequestClose={closeClientPicker}>
         <View style={[s.fullModal, { backgroundColor: tc.bg, paddingTop: insets.top, paddingBottom: insets.bottom }]}>
-          {/* Header — respeta notch con insets.top ya aplicado al padre */}
           <View style={[s.fullModalHeader, { backgroundColor: tc.surface, borderBottomColor: tc.border }]}>
             <TouchableOpacity onPress={closeClientPicker} style={s.back}>
               <MaterialIcons name="close" size={24} color={tc.text} />
@@ -313,25 +464,13 @@ export default function StaffNewAppointment() {
             <Text style={[s.headerTitle, { color: tc.text }]}>Seleccionar cliente</Text>
             <View style={{ width: 40 }} />
           </View>
-
-          {/* Búsqueda */}
           <View style={[s.searchContainer, { backgroundColor: tc.surface, borderBottomColor: tc.border }]}>
             {showClientSearch ? (
               <View style={[s.searchBox, { backgroundColor: tc.bg, borderColor: '#10B981' }]}>
                 <MaterialIcons name="search" size={18} color="#10B981" />
-                <TextInput
-                  style={[s.searchInputInner, { color: tc.text }]}
-                  placeholder="Buscar por nombre o teléfono..."
-                  placeholderTextColor={tc.textMuted}
-                  value={clientSearch}
-                  onChangeText={setClientSearch}
-                  autoFocus={true}
-                  returnKeyType="search"
-                />
+                <TextInput style={[s.searchInputInner, { color: tc.text }]} placeholder="Buscar por nombre o teléfono..." placeholderTextColor={tc.textMuted} value={clientSearch} onChangeText={setClientSearch} autoFocus={true} returnKeyType="search" />
                 {clientSearch.length > 0 && (
-                  <TouchableOpacity onPress={() => setClientSearch('')}>
-                    <MaterialIcons name="close" size={16} color={tc.textMuted} />
-                  </TouchableOpacity>
+                  <TouchableOpacity onPress={() => setClientSearch('')}><MaterialIcons name="close" size={16} color={tc.textMuted} /></TouchableOpacity>
                 )}
               </View>
             ) : (
@@ -341,8 +480,6 @@ export default function StaffNewAppointment() {
               </TouchableOpacity>
             )}
           </View>
-
-          {/* Lista */}
           <ScrollView style={{ flex: 1 }} keyboardShouldPersistTaps="handled" keyboardDismissMode="on-drag">
             {filteredClients.length === 0 ? (
               <View style={s.emptyState}>
@@ -357,12 +494,7 @@ export default function StaffNewAppointment() {
               </View>
             ) : (
               filteredClients.map(c => (
-                <TouchableOpacity
-                  key={c.id}
-                  style={[s.clientRow, { borderBottomColor: tc.border }, selectedClient?.id === c.id && { backgroundColor: '#ECFDF5' }]}
-                  onPress={() => { setSelectedClient(c); closeClientPicker(); }}
-                  activeOpacity={0.7}
-                >
+                <TouchableOpacity key={c.id} style={[s.clientRow, { borderBottomColor: tc.border }, selectedClient?.id === c.id && { backgroundColor: '#ECFDF5' }]} onPress={() => { setSelectedClient(c); closeClientPicker(); }} activeOpacity={0.7}>
                   <View style={[s.clientAvatar, { backgroundColor: '#10B981' }]}>
                     <Text style={s.clientAvatarText}>{c.name.charAt(0).toUpperCase()}</Text>
                   </View>
@@ -390,7 +522,23 @@ export default function StaffNewAppointment() {
                 <Text style={[s.emptyText, { color: tc.textMuted, textAlign: 'center', paddingVertical: 30 }]}>Sin servicios configurados</Text>
               ) : (
                 services.map(sv => (
-                  <TouchableOpacity key={sv.id} style={[s.sheetRow, { borderBottomColor: tc.border }, selectedService?.id === sv.id && { backgroundColor: '#ECFDF5' }]} onPress={() => { setSelectedService(sv); setShowServicePicker(false); }} activeOpacity={0.7}>
+                  <TouchableOpacity key={sv.id}
+                    style={[s.sheetRow, { borderBottomColor: tc.border }, selectedService?.id === sv.id && { backgroundColor: '#ECFDF5' }]}
+                    onPress={() => {
+                      setSelectedService(sv);
+                      setShowServicePicker(false);
+                      // Reajustar bloques seleccionados a la duración del nuevo servicio
+                      if (selectedBlocks.length > 0 && timeSlots.length > 0) {
+                        const blocks   = Math.ceil(sv.durationMinutes / 30);
+                        const firstIdx = timeSlots.findIndex(s => s.time === selectedBlocks[0]);
+                        if (firstIdx !== -1) {
+                          const range = timeSlots.slice(firstIdx, firstIdx + blocks);
+                          if (range.every(s => s.available)) setSelectedBlocks(range.map(s => s.time));
+                        }
+                      }
+                    }}
+                    activeOpacity={0.7}
+                  >
                     <View style={{ flex: 1 }}>
                       <Text style={[s.sheetRowMain, { color: tc.text }]}>{sv.name}</Text>
                       <Text style={[s.sheetRowSub, { color: tc.textMuted }]}>{sv.durationMinutes} min  ·  ${sv.price?.toLocaleString('es-MX') ?? 0} MXN</Text>
@@ -456,6 +604,25 @@ const s = StyleSheet.create({
   input:               { borderRadius: 10, borderWidth: 1, paddingHorizontal: 14, paddingVertical: 11, fontSize: 15 },
   textArea:            { borderRadius: 14, borderWidth: 1, paddingHorizontal: 14, paddingVertical: 12, fontSize: 15, minHeight: 80, textAlignVertical: 'top' },
   staffDot:            { width: 10, height: 10, borderRadius: 5 },
+  // Bloques de horario
+  slotsLoading:        { flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 16 },
+  slotsLoadingText:    { fontSize: 13 },
+  dayClosed:           { borderRadius: 12, padding: 16, alignItems: 'center', gap: 4 },
+  dayClosedTitle:      { fontSize: 14, fontWeight: '600', color: '#EF4444', textAlign: 'center' },
+  dayClosedSub:        { fontSize: 12, textAlign: 'center' },
+  durationBadge:       { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', backgroundColor: '#ECFDF5', borderRadius: 10, paddingHorizontal: 12, paddingVertical: 8, marginBottom: 8, borderWidth: 1, borderColor: '#10B981' },
+  durationBadgeText:   { fontSize: 13, fontWeight: '700', color: '#10B981' },
+  durationBadgeClear:  { fontSize: 12, color: '#EF4444', fontWeight: '600' },
+  slotsRow:            { flexDirection: 'row' },
+  slot:                { paddingHorizontal: 16, paddingVertical: 10, borderRadius: 8, backgroundColor: '#ffffff', borderWidth: 1, borderColor: '#E5E7EB', marginRight: 8 },
+  slotSelected:        { backgroundColor: '#10B981', borderColor: '#10B981' },
+  slotDisabled:        { backgroundColor: '#F3F4F6', borderColor: '#E5E7EB' },
+  slotText:            { fontSize: 14, fontWeight: '500', color: '#0F172A' },
+  slotTextSelected:    { color: '#ffffff' },
+  slotTextDisabled:    { color: '#9CA3AF' },
+  slotHint:            { fontSize: 11, marginTop: 8 },
+  noSlots:             { fontSize: 13, paddingVertical: 12 },
+  // iOS date panel
   panelOverlay:        { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.4)' },
   panel:               { position: 'absolute', bottom: 0, left: 0, right: 0, borderTopLeftRadius: 24, borderTopRightRadius: 24, paddingBottom: 40 },
   panelHeader:         { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 20, paddingTop: 18, paddingBottom: 14, borderBottomWidth: 0.5, borderBottomColor: '#E2E8F0' },
@@ -466,7 +633,7 @@ const s = StyleSheet.create({
   panelPreviewText:    { fontSize: 15, fontWeight: '600', color: '#10B981' },
   panelConfirmBtn:     { backgroundColor: '#10B981', marginHorizontal: 20, marginTop: 12, paddingVertical: 15, borderRadius: 14, alignItems: 'center' },
   panelConfirmBtnText: { fontSize: 16, fontWeight: '700', color: '#fff' },
-  // Modal clientes — View con insets manuales, NO SafeAreaView
+  // Modal clientes full screen
   fullModal:           { flex: 1 },
   fullModalHeader:     { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, paddingVertical: 14, borderBottomWidth: 0.5 },
   searchContainer:     { paddingHorizontal: 16, paddingVertical: 12, borderBottomWidth: 0.5 },
@@ -482,6 +649,7 @@ const s = StyleSheet.create({
   emptyText:           { fontSize: 14 },
   emptyBtn:            { flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: '#10B981', paddingHorizontal: 20, paddingVertical: 12, borderRadius: 12 },
   emptyBtnText:        { color: '#fff', fontWeight: '700', fontSize: 14 },
+  // Bottom sheets
   sheetOverlay:        { flex: 1, backgroundColor: 'rgba(0,0,0,0.45)', justifyContent: 'flex-end' },
   sheet:               { borderTopLeftRadius: 24, borderTopRightRadius: 24, paddingHorizontal: 20, paddingTop: 12, paddingBottom: 36 },
   sheetHandle:         { width: 40, height: 4, borderRadius: 2, backgroundColor: '#CBD5E1', alignSelf: 'center', marginBottom: 16 },
