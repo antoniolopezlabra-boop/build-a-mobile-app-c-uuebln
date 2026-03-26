@@ -126,24 +126,36 @@ export default function ReportsScreen() {
           supabase.from('appointments').select('*', { count: 'exact', head: true }).eq('user_id', userId).in('status', ['Completada', 'Pagado']),
         ]);
 
-      // monthRevenue: citas Completada + paid=true del mes (ya cobradas)
-      const { data: revD } = await supabase.from('appointments')
-        .select('service_cost')
-        .eq('user_id', userId)
-        .eq('status', 'Completada')
-        .eq('paid', true)
-        .gte('date', monthStartStr);
+      // monthRevenue: status='Pagado' (legacy) + status='Completada' con paid=true (nuevo sistema)
+      const [{ data: revLegacy }, { data: revNew }] = await Promise.all([
+        supabase.from('appointments')
+          .select('service_cost')
+          .eq('user_id', userId)
+          .eq('status', 'Pagado')
+          .gte('date', monthStartStr),
+        supabase.from('appointments')
+          .select('service_cost')
+          .eq('user_id', userId)
+          .eq('status', 'Completada')
+          .eq('paid', true)
+          .gte('date', monthStartStr),
+      ]);
 
-      // pendingRevenue: citas Completada + sin pagar del mes
+      // pendingRevenue: status='Completada' sin pagar (nuevo sistema)
+      // Las de status='Pagado' ya están cobradas por definición
       const { data: penD } = await supabase.from('appointments')
         .select('service_cost')
         .eq('user_id', userId)
         .eq('status', 'Completada')
-        .or('paid.is.null,paid.eq.false')   // ← FIX: solo las que faltan por cobrar
+        .or('paid.is.null,paid.eq.false')
         .gte('date', monthStartStr);
 
-      const monthRevenue   = revD?.reduce((s: number, a: any) => s + (a.service_cost || 0), 0) || 0;
-      const pendingRevenue = penD?.reduce((s: number, a: any) => s + (a.service_cost || 0), 0) || 0;
+      const monthRevenue = [
+        ...(revLegacy || []),
+        ...(revNew    || []),
+      ].reduce((s: number, a: any) => s + (a.service_cost || 0), 0);
+
+      const pendingRevenue = (penD || []).reduce((s: number, a: any) => s + (a.service_cost || 0), 0);
 
       const { count: clientsThisMonth }  = await supabase.from('clients').select('*', { count: 'exact', head: true }).eq('user_id', userId).gte('created_at', monthStartStr);
       const { count: clientsLastMonth }  = await supabase.from('clients').select('*', { count: 'exact', head: true }).eq('user_id', userId).gte('created_at', lastMonthStartStr).lte('created_at', lastMonthEndStr);
@@ -551,7 +563,6 @@ export default function ReportsScreen() {
                 <MaterialIcons name="close" size={22} color={tc.textMuted} />
               </TouchableOpacity>
             </View>
-
             {aptsLoading ? (
               <View style={{ padding: 40, alignItems: 'center' }}>
                 <ActivityIndicator color="#10B981" size="large" />
@@ -607,7 +618,6 @@ export default function ReportsScreen() {
                 <MaterialIcons name="close" size={22} color={tc.textMuted} />
               </TouchableOpacity>
             </View>
-
             <View style={s.clientKpiRow}>
               <View style={[s.clientKpi, { backgroundColor: isDark ? '#0F2D1A' : '#ECFDF5' }]}>
                 <Text style={[s.clientKpiNum, { color: '#10B981' }]}>{stats?.clientsThisMonth || 0}</Text>
@@ -624,7 +634,6 @@ export default function ReportsScreen() {
                 <Text style={[s.clientKpiLabel, { color: tc.textMuted }]}>Variación</Text>
               </View>
             </View>
-
             <Text style={[s.chartTitle, { color: tc.textMuted }]}>CLIENTES NUEVOS POR SEMANA (MES ACTUAL)</Text>
             <View style={s.chartWrap}>
               {cpw.map((val, i) => {
@@ -641,7 +650,6 @@ export default function ReportsScreen() {
                 );
               })}
             </View>
-
             <TouchableOpacity
               style={s.goClientsBtn}
               onPress={() => { setClientsModal(false); router.push('/clients' as any); }}
@@ -649,7 +657,6 @@ export default function ReportsScreen() {
               <MaterialIcons name="people" size={16} color="#fff" />
               <Text style={s.goClientsBtnText}>Ver todos mis clientes</Text>
             </TouchableOpacity>
-
             <View style={{ height: 24 }} />
           </View>
         </View>
