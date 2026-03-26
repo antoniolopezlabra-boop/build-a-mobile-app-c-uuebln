@@ -87,7 +87,7 @@ export default function HomeScreen() {
   const router = useRouter();
   const { user, businessProfile, loading: authLoading } = useAuth();
   const { canSchedule, isGratuito, isBasico, isPremium } = usePlan();
-  const { colors: tc, isDark } = useTheme();
+  const { colors: tc } = useTheme();
 
   const [loading, setLoading]       = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -104,11 +104,22 @@ export default function HomeScreen() {
   const [unpaidAppointments, setUnpaidAppointments] = useState<UnpaidAppointment[]>([]);
   const [markingPaidId, setMarkingPaidId] = useState<string | null>(null);
 
-  const loadingRef  = useRef(false);
-  const isFocused   = useRef(false);
-  const pollTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const loadingRef = useRef(false);
 
-  // ── Realtime SIN filtro en el channel (filtro en el callback) ───────
+  // ── Cada vez que el dashboard toma foco: recargar adeudos SIN caché ──
+  // Esto cubre el caso del staff que pagó mientras el dueño estaba en otra pestaña
+  useFocusEffect(
+    useCallback(() => {
+      if (user?.id) {
+        loadUnpaidAppointments(user.id);
+      }
+      if (!loadingRef.current) {
+        loadDashboardData();
+      }
+    }, [user?.id])
+  );
+
+  // ── Realtime SIN filtro de columna (compatible con Free tier) ──
   useEffect(() => {
     if (!user?.id) return;
     const userId = user.id;
@@ -120,46 +131,16 @@ export default function HomeScreen() {
         { event: 'UPDATE', schema: 'public', table: 'appointments' },
         (payload) => {
           const updated = payload.new as any;
-          // Filtrar por user_id en el callback (más compatible con Free tier)
           if (updated.user_id !== userId) return;
           if (updated.paid === true) {
             setUnpaidAppointments(prev => prev.filter(a => a.id !== updated.id));
           }
         }
       )
-      .subscribe((status) => {
-        console.log('[Realtime] status:', status);
-      });
+      .subscribe();
 
     return () => { supabase.removeChannel(channel); };
   }, [user?.id]);
-
-  // ── Polling cada 15s mientras la pantalla está en foco (fallback) ──
-  const startPolling = useCallback(() => {
-    if (pollTimerRef.current) return;
-    pollTimerRef.current = setInterval(() => {
-      if (user?.id) loadUnpaidAppointments(user.id);
-    }, 15000);
-  }, [user?.id]);
-
-  const stopPolling = useCallback(() => {
-    if (pollTimerRef.current) {
-      clearInterval(pollTimerRef.current);
-      pollTimerRef.current = null;
-    }
-  }, []);
-
-  useFocusEffect(
-    useCallback(() => {
-      isFocused.current = true;
-      if (!loadingRef.current) loadDashboardData();
-      startPolling();
-      return () => {
-        isFocused.current = false;
-        stopPolling();
-      };
-    }, [user?.id])
-  );
 
   const loadDashboardData = async (forceRefresh = false, isPullRefresh = false) => {
     if (loadingRef.current && !forceRefresh) return;
@@ -180,7 +161,7 @@ export default function HomeScreen() {
         if (cachedWa)   setWaConnected(cachedWa.isConnected || false);
         setLoading(false);
         loadStaffMembers(userId);
-        loadUnpaidAppointments(userId);
+        // Adeudos ya se cargan en useFocusEffect, no hace falta aquí
         return;
       }
 
@@ -198,10 +179,7 @@ export default function HomeScreen() {
       if (results[2].status === 'fulfilled') { setWeekAppointments(results[2].value);  setCached('week_appointments',  results[2].value,  CACHE_TTL.APPOINTMENTS); }
       if (results[3].status === 'fulfilled') { const wa = results[3].value; setWaConnected(wa?.isConnected || false); setCached('settings_whatsapp', wa, CACHE_TTL.SETTINGS); }
 
-      await Promise.all([
-        loadStaffMembers(userId),
-        loadUnpaidAppointments(userId),
-      ]);
+      await loadStaffMembers(userId);
     } catch {} finally {
       setLoading(false); setRefreshing(false); loadingRef.current = false;
     }
@@ -219,6 +197,7 @@ export default function HomeScreen() {
     } catch {}
   };
 
+  // ── Siempre va directo a Supabase, nunca usa caché ──
   const loadUnpaidAppointments = async (userId: string) => {
     try {
       const { data, error } = await supabase
@@ -244,6 +223,7 @@ export default function HomeScreen() {
         .update({ paid: true, updated_at: new Date().toISOString() })
         .eq('id', apptId);
       if (error) throw error;
+      // Optimista: quitar de la lista inmediatamente
       setUnpaidAppointments(prev => prev.filter(a => a.id !== apptId));
     } catch (e: any) {
       Alert.alert('Error', e?.message ?? 'No se pudo registrar el pago');
@@ -287,7 +267,10 @@ export default function HomeScreen() {
         refreshControl={
           <RefreshControl
             refreshing={refreshing}
-            onRefresh={() => loadDashboardData(true, true)}
+            onRefresh={() => {
+              loadDashboardData(true, true);
+              if (user?.id) loadUnpaidAppointments(user.id);
+            }}
             tintColor={colors.primary}
             colors={[colors.primary]}
           />
@@ -363,7 +346,6 @@ export default function HomeScreen() {
                 </View>
               </View>
             </View>
-
             {unpaidAppointments.map(appt => {
               const clientName = appt.client?.name ?? appt.client_name_temp ?? 'Cliente';
               const staffName  = (appt.staff as any)?.name ?? null;
@@ -398,8 +380,7 @@ export default function HomeScreen() {
                   >
                     {isPaying
                       ? <ActivityIndicator size="small" color="#fff" />
-                      : <Text style={s.payBtnText}>Cobrado</Text>
-                    }
+                      : <Text style={s.payBtnText}>Cobrado</Text>}
                   </TouchableOpacity>
                 </View>
               );
