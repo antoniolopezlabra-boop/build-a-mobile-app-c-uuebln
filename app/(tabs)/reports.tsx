@@ -30,7 +30,6 @@ interface Stats {
   monthAppointments: number;
   monthRevenue: number;
   pendingRevenue: number;
-  // Clientes nuevos por semana del mes (para la gráfica)
   clientsThisMonth: number;
   clientsLastMonth: number;
   clientsPerWeek: number[];
@@ -82,12 +81,9 @@ export default function ReportsScreen() {
   const [reportTab, setReportTab]   = useState<'general' | 'equipo'>('general');
   const [staffRange, setStaffRange] = useState<'semana' | 'mes' | 'todo'>('mes');
 
-  // Modal de historial de citas (al tocar Total citas)
   const [aptsModal, setAptsModal]       = useState(false);
   const [aptsLoading, setAptsLoading]   = useState(false);
   const [aptsList, setAptsList]         = useState<AppointmentItem[]>([]);
-
-  // Modal de gráfica de clientes
   const [clientsModal, setClientsModal] = useState(false);
 
   useFocusEffect(
@@ -115,7 +111,6 @@ export default function ReportsScreen() {
       const weekStartStr  = weekStart.toISOString().split('T')[0];
       const monthStart    = new Date(); monthStart.setDate(1);
       const monthStartStr = monthStart.toISOString().split('T')[0];
-      // Mes anterior para comparar clientes
       const lastMonthStart = new Date(); lastMonthStart.setMonth(lastMonthStart.getMonth() - 1); lastMonthStart.setDate(1);
       const lastMonthEnd   = new Date(); lastMonthEnd.setDate(0);
       const lastMonthStartStr = lastMonthStart.toISOString().split('T')[0];
@@ -131,16 +126,28 @@ export default function ReportsScreen() {
           supabase.from('appointments').select('*', { count: 'exact', head: true }).eq('user_id', userId).in('status', ['Completada', 'Pagado']),
         ]);
 
-      const { data: revD } = await supabase.from('appointments').select('service_cost').eq('user_id', userId).eq('status', 'Pagado').gte('date', monthStartStr);
-      const { data: penD } = await supabase.from('appointments').select('service_cost').eq('user_id', userId).eq('status', 'Completada').gte('date', monthStartStr);
+      // monthRevenue: citas Completada + paid=true del mes (ya cobradas)
+      const { data: revD } = await supabase.from('appointments')
+        .select('service_cost')
+        .eq('user_id', userId)
+        .eq('status', 'Completada')
+        .eq('paid', true)
+        .gte('date', monthStartStr);
+
+      // pendingRevenue: citas Completada + sin pagar del mes
+      const { data: penD } = await supabase.from('appointments')
+        .select('service_cost')
+        .eq('user_id', userId)
+        .eq('status', 'Completada')
+        .or('paid.is.null,paid.eq.false')   // ← FIX: solo las que faltan por cobrar
+        .gte('date', monthStartStr);
+
       const monthRevenue   = revD?.reduce((s: number, a: any) => s + (a.service_cost || 0), 0) || 0;
       const pendingRevenue = penD?.reduce((s: number, a: any) => s + (a.service_cost || 0), 0) || 0;
 
-      // Clientes nuevos este mes vs mes pasado
       const { count: clientsThisMonth }  = await supabase.from('clients').select('*', { count: 'exact', head: true }).eq('user_id', userId).gte('created_at', monthStartStr);
       const { count: clientsLastMonth }  = await supabase.from('clients').select('*', { count: 'exact', head: true }).eq('user_id', userId).gte('created_at', lastMonthStartStr).lte('created_at', lastMonthEndStr);
 
-      // Clientes por semana del mes actual (4 semanas)
       const { data: clientsMonthData } = await supabase.from('clients').select('created_at').eq('user_id', userId).gte('created_at', monthStartStr).order('created_at');
       const clientsPerWeek = [0, 0, 0, 0];
       (clientsMonthData || []).forEach((c: any) => {
@@ -180,7 +187,6 @@ export default function ReportsScreen() {
     }
   };
 
-  // Cargar historial de citas según el tab activo
   const openAppointmentsHistory = async () => {
     setAptsModal(true);
     setAptsLoading(true);
@@ -299,7 +305,6 @@ export default function ReportsScreen() {
   const tabCanc = activeTab === 'hoy' ? stats?.cancelledToday  : activeTab === 'semana' ? stats?.cancelledWeek  : stats?.cancelledMonth;
   const maxStaffTotal = staffStats.length > 0 ? Math.max(...staffStats.map(s => s.total), 1) : 1;
 
-  // Para la gráfica de clientes por semana
   const cpw = stats?.clientsPerWeek || [0, 0, 0, 0];
   const maxCpw = Math.max(...cpw, 1);
   const clientGrowth = stats && stats.clientsLastMonth > 0
@@ -322,7 +327,7 @@ export default function ReportsScreen() {
           <Text style={[s.headerSubtitle, { color: tc.textMuted }]}>Resumen de tu negocio</Text>
         </View>
 
-        {/* Tab principal General / Mi equipo */}
+        {/* Tab General / Mi equipo */}
         {isPremium && staffStats.length > 0 && (
           <View style={[s.reportTabRow, { backgroundColor: tc.surface, borderBottomColor: tc.border }]}>
             <TouchableOpacity style={[s.reportTab, reportTab === 'general' && s.reportTabActive]} onPress={() => setReportTab('general')}>
@@ -339,7 +344,7 @@ export default function ReportsScreen() {
           </View>
         )}
 
-        {/* ====== REPORTE: MI EQUIPO ====== */}
+        {/* REPORTE: MI EQUIPO */}
         {reportTab === 'equipo' && isPremium && (
           <View>
             <View style={[s.rangePicker, { backgroundColor: tc.surface, borderBottomColor: tc.border }]}>
@@ -432,10 +437,9 @@ export default function ReportsScreen() {
           </View>
         )}
 
-        {/* ====== REPORTE: GENERAL ====== */}
+        {/* REPORTE: GENERAL */}
         {reportTab === 'general' && (
           <View>
-            {/* Tabs hoy/semana/mes */}
             <View style={[s.tabs, { backgroundColor: tc.surface, borderBottomColor: tc.border }]}>
               {(['hoy', 'semana', 'mes'] as const).map(tab => (
                 <TouchableOpacity
@@ -450,7 +454,6 @@ export default function ReportsScreen() {
               ))}
             </View>
 
-            {/* Hero */}
             <View style={[s.heroCard, { backgroundColor: isDark ? '#1E293B' : '#0F172A' }]}>
               <View style={s.heroLeft}>
                 <Text style={s.heroLabel}>Citas {tabLabel}</Text>
@@ -463,10 +466,8 @@ export default function ReportsScreen() {
               </View>
             </View>
 
-            {/* Stats cards: Clientes (clickeable) + Total citas (clickeable) */}
             <Text style={[s.sectionLabel, { color: tc.textMuted }]}>INDICADORES</Text>
             <View style={s.statsRow}>
-              {/* Clientes → abre gráfica de crecimiento */}
               <TouchableOpacity
                 style={[s.statCard, s.statCardTouchable, { backgroundColor: tc.surface, borderColor: tc.border, borderLeftColor: '#10B981' }]}
                 onPress={() => setClientsModal(true)}
@@ -481,7 +482,6 @@ export default function ReportsScreen() {
                 </View>
               </TouchableOpacity>
 
-              {/* Total citas → abre historial filtrado por tab */}
               <TouchableOpacity
                 style={[s.statCard, s.statCardTouchable, { backgroundColor: tc.surface, borderColor: tc.border, borderLeftColor: '#6366F1' }]}
                 onPress={openAppointmentsHistory}
@@ -498,14 +498,12 @@ export default function ReportsScreen() {
             </View>
 
             <View style={s.statsRow}>
-              {/* Completadas (informativo) */}
               <View style={[s.statCard, { backgroundColor: tc.surface, borderColor: tc.border, borderLeftColor: '#F59E0B' }]}>
                 <Text style={s.statEmoji}>✅</Text>
                 <Text style={[s.statValue, { color: tc.text }]}>{stats?.completedAppointments}</Text>
                 <Text style={[s.statLabel, { color: tc.textMuted }]}>Completadas</Text>
                 <Text style={[s.statSub, { color: tc.textMuted }]}>total histórico</Text>
               </View>
-              {/* Servicios dados (informativo) */}
               <View style={[s.statCard, { backgroundColor: tc.surface, borderColor: tc.border, borderLeftColor: '#94A3B8' }]}>
                 <Text style={s.statEmoji}>✂️</Text>
                 <Text style={[s.statValue, { color: tc.text }]}>{stats?.completedAppointments}</Text>
@@ -514,7 +512,6 @@ export default function ReportsScreen() {
               </View>
             </View>
 
-            {/* Finanzas del mes */}
             <Text style={[s.sectionLabel, { color: tc.textMuted }]}>FINANZAS DEL MES</Text>
             <View style={s.statsRow}>
               <View style={[s.statCard, { backgroundColor: isDark ? '#052E16' : '#ECFDF5', borderLeftColor: '#10B981', borderColor: '#10B981' }]}>
@@ -539,7 +536,7 @@ export default function ReportsScreen() {
         )}
       </ScrollView>
 
-      {/* ====== MODAL: Historial de citas ====== */}
+      {/* MODAL: Historial de citas */}
       <Modal visible={aptsModal} animationType="slide" transparent onRequestClose={() => setAptsModal(false)}>
         <View style={s.modalOverlay}>
           <TouchableOpacity style={s.modalBackdrop} activeOpacity={1} onPress={() => setAptsModal(false)} />
@@ -595,7 +592,7 @@ export default function ReportsScreen() {
         </View>
       </Modal>
 
-      {/* ====== MODAL: Gráfica de clientes ====== */}
+      {/* MODAL: Gráfica de clientes */}
       <Modal visible={clientsModal} animationType="slide" transparent onRequestClose={() => setClientsModal(false)}>
         <View style={s.modalOverlay}>
           <TouchableOpacity style={s.modalBackdrop} activeOpacity={1} onPress={() => setClientsModal(false)} />
@@ -611,7 +608,6 @@ export default function ReportsScreen() {
               </TouchableOpacity>
             </View>
 
-            {/* KPIs de clientes */}
             <View style={s.clientKpiRow}>
               <View style={[s.clientKpi, { backgroundColor: isDark ? '#0F2D1A' : '#ECFDF5' }]}>
                 <Text style={[s.clientKpiNum, { color: '#10B981' }]}>{stats?.clientsThisMonth || 0}</Text>
@@ -629,7 +625,6 @@ export default function ReportsScreen() {
               </View>
             </View>
 
-            {/* Gráfica de barras por semana del mes */}
             <Text style={[s.chartTitle, { color: tc.textMuted }]}>CLIENTES NUEVOS POR SEMANA (MES ACTUAL)</Text>
             <View style={s.chartWrap}>
               {cpw.map((val, i) => {
@@ -704,7 +699,6 @@ const s = StyleSheet.create({
   statSub:         { fontSize: 10, marginTop: 3 },
   tapHint:         { flexDirection: 'row', alignItems: 'center', gap: 3, marginTop: 6 },
   tapHintText:     { fontSize: 10, fontWeight: '600' },
-  // Modales
   modalOverlay:    { flex: 1, justifyContent: 'flex-end' },
   modalBackdrop:   { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(0,0,0,0.5)' },
   modalBox:        { borderTopLeftRadius: 24, borderTopRightRadius: 24, padding: 24, paddingBottom: 8 },
@@ -712,7 +706,6 @@ const s = StyleSheet.create({
   modalHeader:     { flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: 16 },
   modalTitle:      { fontSize: 18, fontWeight: '800' },
   modalSub:        { fontSize: 13, marginTop: 2 },
-  // Filas de citas
   aptRow:          { flexDirection: 'row', alignItems: 'center', paddingVertical: 12, borderBottomWidth: 0.5 },
   aptAccent:       { width: 3, height: '100%', borderRadius: 2, minHeight: 48 },
   aptClient:       { fontSize: 14, fontWeight: '700' },
@@ -720,7 +713,6 @@ const s = StyleSheet.create({
   aptDate:         { fontSize: 11, marginTop: 3 },
   aptStatusBadge:  { paddingHorizontal: 8, paddingVertical: 4, borderRadius: 8 },
   aptStatusText:   { fontSize: 11, fontWeight: '600' },
-  // Gráfica clientes
   clientKpiRow:    { flexDirection: 'row', gap: 8, marginBottom: 20 },
   clientKpi:       { flex: 1, borderRadius: 12, padding: 12, alignItems: 'center' },
   clientKpiNum:    { fontSize: 22, fontWeight: '800' },
@@ -734,7 +726,6 @@ const s = StyleSheet.create({
   barLabel:        { fontSize: 11, fontWeight: '600', marginTop: 2 },
   goClientsBtn:    { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, backgroundColor: '#10B981', borderRadius: 14, padding: 14, marginTop: 4 },
   goClientsBtnText:{ color: '#fff', fontWeight: '700', fontSize: 14 },
-  // Staff
   staffSectionLabel: { fontSize: 11, fontWeight: '800', letterSpacing: 1.2, marginBottom: 12, marginTop: 4 },
   staffEmptyWrap:  { alignItems: 'center', justifyContent: 'center', padding: 48, gap: 12 },
   staffEmptyTitle: { fontSize: 18, fontWeight: '700' },
