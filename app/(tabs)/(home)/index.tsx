@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity,
   ActivityIndicator, Image, RefreshControl, Alert,
@@ -114,6 +114,37 @@ export default function HomeScreen() {
 
   const loadingRef = useRef(false);
 
+  // ── Realtime: escuchar cuando el staff marca paid=true ─────────────────
+  useEffect(() => {
+    if (!user?.id) return;
+
+    const channel = supabase
+      .channel('dashboard-paid-updates')
+      .on(
+        'postgres_changes',
+        {
+          event: 'UPDATE',
+          schema: 'public',
+          table: 'appointments',
+          filter: `user_id=eq.${user.id}`,
+        },
+        (payload) => {
+          const updated = payload.new as any;
+          // Si el pago se marcó como true, quitarlo de la lista de adeudos
+          if (updated.paid === true) {
+            setUnpaidAppointments(prev => prev.filter(a => a.id !== updated.id));
+          }
+          // Si por alguna razón se desmarcó (edge case), agregarlo de vuelta
+          // no aplica por ahora — solo escuchamos el caso happy path
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [user?.id]);
+
   useFocusEffect(
     React.useCallback(() => {
       if (!loadingRef.current) loadDashboardData();
@@ -205,7 +236,7 @@ export default function HomeScreen() {
         .update({ paid: true, updated_at: new Date().toISOString() })
         .eq('id', apptId);
       if (error) throw error;
-      // Quitar de la lista local optimistamente
+      // Quitar optimistamente (Realtime también lo quitará si llega el evento)
       setUnpaidAppointments(prev => prev.filter(a => a.id !== apptId));
     } catch (e: any) {
       Alert.alert('Error', e?.message ?? 'No se pudo registrar el pago');
@@ -329,7 +360,6 @@ export default function HomeScreen() {
             {unpaidAppointments.map(appt => {
               const clientName = appt.client?.name ?? appt.client_name_temp ?? 'Cliente';
               const staffName  = (appt.staff as any)?.name ?? null;
-              const staffColor = (appt.staff as any)?.color ?? '#94A3B8';
               const isPaying   = markingPaidId === appt.id;
               const dateLabel  = new Date(appt.date + 'T12:00:00').toLocaleDateString('es-MX', { day: 'numeric', month: 'short' });
 
@@ -338,7 +368,6 @@ export default function HomeScreen() {
                   key={appt.id}
                   style={[s.unpaidCard, { backgroundColor: tc.surface, borderColor: '#FED7AA' }]}
                 >
-                  {/* Acento naranja */}
                   <View style={[s.unpaidAccent, { backgroundColor: '#F97316' }]} />
 
                   <View style={s.unpaidBody}>
@@ -383,7 +412,7 @@ export default function HomeScreen() {
           </>
         )}
 
-        {/* ── Filtro por colaborador (solo si hay staff) ── */}
+        {/* ── Filtro por colaborador ── */}
         {staffMembers.length > 0 && (
           <>
             <View style={s.sectionRow}>
@@ -411,7 +440,7 @@ export default function HomeScreen() {
           </>
         )}
 
-        {/* ── Citas de hoy (filtradas) ── */}
+        {/* ── Citas de hoy ── */}
         <View style={s.sectionRow}>
           <Text style={[s.sectionTitle, { color: tc.text }]}>
             {selectedStaffId
@@ -491,7 +520,7 @@ export default function HomeScreen() {
 
         {/* ── Banner WhatsApp ── */}
         {(isBasico || isPremium) && !waConnected && (
-          <TouchableOpacity style={[s.waBanner, { backgroundColor: tc.surface, borderColor: '#166534' }]} onPress={() => router.push('/settings/whatsapp')} activeOpacity={0.8}>
+          <TouchableOpacity style={[s.waBanner, { backgroundColor: tc.surface, borderColor: '#166834' }]} onPress={() => router.push('/settings/whatsapp')} activeOpacity={0.8}>
             <View style={s.waIconBox}><MaterialIcons name="chat" size={20} color="#25D366" /></View>
             <View style={{ flex: 1 }}>
               <Text style={[s.waTitle, { color: tc.text }]}>Conecta WhatsApp</Text>
