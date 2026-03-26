@@ -1,12 +1,11 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity,
-  ActivityIndicator, Image, RefreshControl, Alert,
+  ActivityIndicator, Image, RefreshControl, Alert, AppState,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useRouter } from 'expo-router';
+import { useRouter, usePathname } from 'expo-router';
 import { usePlan } from '@/contexts/PlanContext';
-import { useFocusEffect } from '@react-navigation/native';
 import { colors } from '@/styles/commonStyles';
 import MaterialIcons from '@expo/vector-icons/MaterialIcons';
 import { useAuth } from '@/contexts/AuthContext';
@@ -85,6 +84,7 @@ const qa = StyleSheet.create({
 
 export default function HomeScreen() {
   const router = useRouter();
+  const pathname = usePathname();
   const { user, businessProfile, loading: authLoading } = useAuth();
   const { canSchedule, isGratuito, isBasico, isPremium } = usePlan();
   const { colors: tc } = useTheme();
@@ -104,26 +104,51 @@ export default function HomeScreen() {
   const [unpaidAppointments, setUnpaidAppointments] = useState<UnpaidAppointment[]>([]);
   const [markingPaidId, setMarkingPaidId] = useState<string | null>(null);
 
-  const loadingRef = useRef(false);
+  const loadingRef   = useRef(false);
+  const prevPathRef  = useRef(pathname);
 
-  // ── Cada vez que el dashboard toma foco: recargar adeudos SIN caché ──
-  // Esto cubre el caso del staff que pagó mientras el dueño estaba en otra pestaña
-  useFocusEffect(
-    useCallback(() => {
-      if (user?.id) {
-        loadUnpaidAppointments(user.id);
-      }
-      if (!loadingRef.current) {
-        loadDashboardData();
-      }
-    }, [user?.id])
-  );
+  // ── Carga inicial ───────────────────────────────────────
+  useEffect(() => {
+    if (user?.id) {
+      loadDashboardData();
+      loadUnpaidAppointments(user.id);
+    }
+  }, [user?.id]);
 
-  // ── Realtime SIN filtro de columna (compatible con Free tier) ──
+  // ── Detectar regreso al dashboard por cambio de pathname ────────────
+  // El FloatingTabBar usa router.replace que no desmonta la pantalla,
+  // pero sí cambia el pathname. Detectamos cuando volvemos a Home.
+  useEffect(() => {
+    const isHome = pathname === '/' || pathname.includes('(home)') ||
+      (!pathname.includes('appointments') && !pathname.includes('clients') &&
+       !pathname.includes('reports') && !pathname.includes('settings') &&
+       !pathname.includes('profile') && !pathname.includes('marketing'));
+
+    const wasAway = prevPathRef.current !== pathname;
+    prevPathRef.current = pathname;
+
+    if (isHome && wasAway && user?.id) {
+      // Volvimos al tab Home desde otra pantalla — recargar adeudos
+      loadUnpaidAppointments(user.id);
+    }
+  }, [pathname, user?.id]);
+
+  // ── AppState: recargar cuando la app vuelve al frente ─────────────
   useEffect(() => {
     if (!user?.id) return;
     const userId = user.id;
+    const sub = AppState.addEventListener('change', (state) => {
+      if (state === 'active') {
+        loadUnpaidAppointments(userId);
+      }
+    });
+    return () => sub.remove();
+  }, [user?.id]);
 
+  // ── Realtime SIN filtro de columna (más compatible) ─────────────
+  useEffect(() => {
+    if (!user?.id) return;
+    const userId = user.id;
     const channel = supabase
       .channel(`paid-watch-${userId}`)
       .on(
@@ -138,7 +163,6 @@ export default function HomeScreen() {
         }
       )
       .subscribe();
-
     return () => { supabase.removeChannel(channel); };
   }, [user?.id]);
 
@@ -161,7 +185,6 @@ export default function HomeScreen() {
         if (cachedWa)   setWaConnected(cachedWa.isConnected || false);
         setLoading(false);
         loadStaffMembers(userId);
-        // Adeudos ya se cargan en useFocusEffect, no hace falta aquí
         return;
       }
 
@@ -197,7 +220,6 @@ export default function HomeScreen() {
     } catch {}
   };
 
-  // ── Siempre va directo a Supabase, nunca usa caché ──
   const loadUnpaidAppointments = async (userId: string) => {
     try {
       const { data, error } = await supabase
@@ -223,7 +245,6 @@ export default function HomeScreen() {
         .update({ paid: true, updated_at: new Date().toISOString() })
         .eq('id', apptId);
       if (error) throw error;
-      // Optimista: quitar de la lista inmediatamente
       setUnpaidAppointments(prev => prev.filter(a => a.id !== apptId));
     } catch (e: any) {
       Alert.alert('Error', e?.message ?? 'No se pudo registrar el pago');
@@ -246,7 +267,6 @@ export default function HomeScreen() {
 
   const initials  = user?.name?.split(' ').map((w:string)=>w[0]).slice(0,2).join('').toUpperCase() || 'U';
   const firstName = authLoading ? '' : (user?.name?.split(' ')[0] || 'Usuario');
-
   const filteredToday = selectedStaffId
     ? todayAppointments.filter(a => a.staff_id === selectedStaffId)
     : todayAppointments;
