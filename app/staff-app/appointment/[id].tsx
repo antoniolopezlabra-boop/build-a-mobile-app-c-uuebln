@@ -33,6 +33,8 @@ interface AppointmentDetail {
 }
 
 const ACTIONABLE_STATUSES = ['Pendiente', 'Confirmada'];
+// Statuses where cancellation makes no sense
+const NON_CANCELLABLE = ['Cancelada', 'Completada', 'No asistió'];
 
 export default function StaffAppointmentDetail() {
   const router = useRouter();
@@ -242,6 +244,10 @@ export default function StaffAppointmentDetail() {
   const isCompleted  = appt.status === 'Completada';
   const isPaid       = appt.paid === true;
   const staffColor   = (appt.staff as any)?.color ?? '#94A3B8';
+  // Reagendada también puede cancelarse, pero No asistió/Cancelada/Completada no
+  const canCancel    = !NON_CANCELLABLE.includes(appt.status);
+  // Solo puede reagendarse si no está en estado terminal
+  const canReschedule = !['Cancelada', 'Completada', 'No asistió'].includes(appt.status);
 
   const formattedRescheduleTempDate = tempRescheduleDate.toLocaleDateString('es-MX', { weekday: 'long', day: 'numeric', month: 'long' });
   const formattedRescheduleTempTime = `${tempRescheduleTimeDate.getHours().toString().padStart(2,'0')}:${tempRescheduleTimeDate.getMinutes().toString().padStart(2,'0')}`;
@@ -262,9 +268,12 @@ export default function StaffAppointmentDetail() {
         <View style={[s.statusRow, { backgroundColor: statusColor + '18', borderColor: statusColor + '44' }]}>
           <View style={[s.statusDot, { backgroundColor: statusColor }]} />
           <Text style={[s.statusLabel, { color: statusColor }]}>{appt.status}</Text>
-          {/* Indicador de pago junto al status */}
+          {/* Badge de pago junto al status — solo cuando está Completada */}
           {isCompleted && (
-            <View style={[s.paidBadge, { backgroundColor: isPaid ? '#ECFDF5' : '#FFF7ED', borderColor: isPaid ? '#A7F3D0' : '#FED7AA' }]}>
+            <View style={[
+              s.paidBadge,
+              { backgroundColor: isPaid ? '#ECFDF5' : '#FFF7ED', borderColor: isPaid ? '#A7F3D0' : '#FED7AA' },
+            ]}>
               <MaterialIcons name={isPaid ? 'check-circle' : 'pending'} size={12} color={isPaid ? '#10B981' : '#F97316'} />
               <Text style={[s.paidBadgeText, { color: isPaid ? '#10B981' : '#F97316' }]}>
                 {isPaid ? 'Pagado' : 'Sin pagar'}
@@ -336,9 +345,10 @@ export default function StaffAppointmentDetail() {
           }
         </View>
 
-        {/* Acciones */}
+        {/* ── ACCIONES ── */}
         <Text style={[s.sectionLabel, { color: tc.textMuted }]}>ACCIONES</Text>
 
+        {/* Completar / No show — solo cuando está Pendiente o Confirmada */}
         {isActionable && (
           <>
             <TouchableOpacity
@@ -367,14 +377,18 @@ export default function StaffAppointmentDetail() {
           </>
         )}
 
-        {/* ── Registrar pago — aparece cuando está Completada y aún no pagada ── */}
+        {/* ── Registrar pago — visible para el staff cuando está Completada y sin pagar ── */}
         {isCompleted && !isPaid && (
           <TouchableOpacity
             style={[s.actionBtn, { backgroundColor: '#F0FDF4', borderColor: '#86EFAC' }]}
-            onPress={() => Alert.alert('Registrar pago', `¿Confirmar pago de $${(appt.service_cost ?? 0).toLocaleString('es-MX')} MXN?`, [
-              { text: 'Cancelar', style: 'cancel' },
-              { text: 'Confirmar', onPress: registerPayment },
-            ])}
+            onPress={() => Alert.alert(
+              'Registrar pago',
+              `¿Confirmar pago${appt.service_cost ? ` de $${appt.service_cost.toLocaleString('es-MX')} MXN` : ''}?`,
+              [
+                { text: 'Cancelar', style: 'cancel' },
+                { text: 'Confirmar', onPress: registerPayment },
+              ]
+            )}
             disabled={saving} activeOpacity={0.7}
           >
             <MaterialIcons name="payments" size={20} color="#16A34A" />
@@ -389,15 +403,16 @@ export default function StaffAppointmentDetail() {
           </TouchableOpacity>
         )}
 
-        {/* Pago ya registrado — solo informativo */}
+        {/* Pago ya registrado — informativo */}
         {isCompleted && isPaid && (
-          <View style={[s.actionBtn, { backgroundColor: '#ECFDF5', borderColor: '#A7F3D0', opacity: 0.7 }]}>
+          <View style={[s.actionBtn, { backgroundColor: '#ECFDF5', borderColor: '#A7F3D0', opacity: 0.75 }]}>
             <MaterialIcons name="check-circle" size={20} color="#10B981" />
             <Text style={[s.actionText, { color: '#10B981' }]}>Pago registrado ✓</Text>
           </View>
         )}
 
-        {appt.status !== 'Cancelada' && appt.status !== 'Completada' && appt.status !== 'No asistió' && (
+        {/* Reagendar — disponible salvo estados terminales */}
+        {canReschedule && (
           <TouchableOpacity
             style={[s.actionBtn, { backgroundColor: '#EFF6FF', borderColor: '#BFDBFE' }]}
             onPress={openReschedule}
@@ -408,7 +423,8 @@ export default function StaffAppointmentDetail() {
           </TouchableOpacity>
         )}
 
-        {appt.status !== 'Cancelada' && appt.status !== 'Completada' && (
+        {/* Cancelar — no aplica para No asistió / Cancelada / Completada */}
+        {canCancel && (
           <TouchableOpacity
             style={[s.actionBtn, { backgroundColor: '#FEF2F2', borderColor: '#FECACA' }]}
             onPress={() => Alert.alert('Cancelar cita', '¿Estás seguro?', [

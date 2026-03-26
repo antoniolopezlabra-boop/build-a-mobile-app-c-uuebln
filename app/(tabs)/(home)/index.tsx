@@ -1,7 +1,7 @@
 import React, { useState, useRef } from 'react';
 import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity,
-  ActivityIndicator, Image, RefreshControl,
+  ActivityIndicator, Image, RefreshControl, Alert,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
@@ -33,6 +33,18 @@ interface TodayAppointment {
 
 interface StaffMember {
   id: string; name: string; color: string;
+}
+
+// Citas completadas sin pagar — para la sección de adeudos
+interface UnpaidAppointment {
+  id: string;
+  date: string;
+  start_time: string;
+  service_name: string;
+  service_cost: number | null;
+  client: { name: string } | null;
+  client_name_temp: string | null;
+  staff: { name: string; color: string } | null;
 }
 
 interface WhatsAppConfig { isConnected: boolean; phoneNumber?: string; }
@@ -92,9 +104,13 @@ export default function HomeScreen() {
   const [weekAppointments,  setWeekAppointments]  = useState<TodayAppointment[]>([]);
   const [waConnected, setWaConnected] = useState(false);
 
-  // FASE 3: filtro por staff en el dashboard
+  // Staff filter
   const [staffMembers,    setStaffMembers]   = useState<StaffMember[]>([]);
   const [selectedStaffId, setSelectedStaffId] = useState<string | null>(null);
+
+  // Adeudos — citas completadas sin pagar
+  const [unpaidAppointments, setUnpaidAppointments] = useState<UnpaidAppointment[]>([]);
+  const [markingPaidId, setMarkingPaidId] = useState<string | null>(null);
 
   const loadingRef = useRef(false);
 
@@ -122,8 +138,8 @@ export default function HomeScreen() {
         if (cachedWeek) setWeekAppointments(cachedWeek);
         if (cachedWa)   setWaConnected(cachedWa.isConnected || false);
         setLoading(false);
-        // Cargar staff igualmente (no se cachea)
         loadStaffMembers(userId);
+        loadUnpaidAppointments(userId);
         return;
       }
 
@@ -141,13 +157,15 @@ export default function HomeScreen() {
       if (results[2].status === 'fulfilled') { setWeekAppointments(results[2].value);  setCached('week_appointments',  results[2].value,  CACHE_TTL.APPOINTMENTS); }
       if (results[3].status === 'fulfilled') { const wa = results[3].value; setWaConnected(wa?.isConnected || false); setCached('settings_whatsapp', wa, CACHE_TTL.SETTINGS); }
 
-      await loadStaffMembers(userId);
+      await Promise.all([
+        loadStaffMembers(userId),
+        loadUnpaidAppointments(userId),
+      ]);
     } catch {} finally {
       setLoading(false); setRefreshing(false); loadingRef.current = false;
     }
   };
 
-  // FASE 3: cargar staff para el filtro
   const loadStaffMembers = async (userId: string) => {
     try {
       const { data } = await supabase
@@ -158,6 +176,42 @@ export default function HomeScreen() {
         .order('sort_order');
       setStaffMembers(data || []);
     } catch {}
+  };
+
+  // ── Cargar citas completadas sin pagar ─────────────────────────────────
+  const loadUnpaidAppointments = async (userId: string) => {
+    try {
+      const { data, error } = await supabase
+        .from('appointments')
+        .select('id, date, start_time, service_name, service_cost, client_name_temp, client:clients(name), staff:staff_members(name, color)')
+        .eq('user_id', userId)
+        .eq('status', 'Completada')
+        .or('paid.is.null,paid.eq.false')
+        .order('date', { ascending: false })
+        .limit(20);
+      if (error) throw error;
+      setUnpaidAppointments((data ?? []) as unknown as UnpaidAppointment[]);
+    } catch (e) {
+      console.warn('[Dashboard] loadUnpaidAppointments error:', e);
+    }
+  };
+
+  // ── Marcar como pagada desde el dashboard del dueño ────────────────────
+  const markAsPaid = async (apptId: string) => {
+    setMarkingPaidId(apptId);
+    try {
+      const { error } = await supabase
+        .from('appointments')
+        .update({ paid: true, updated_at: new Date().toISOString() })
+        .eq('id', apptId);
+      if (error) throw error;
+      // Quitar de la lista local optimistamente
+      setUnpaidAppointments(prev => prev.filter(a => a.id !== apptId));
+    } catch (e: any) {
+      Alert.alert('Error', e?.message ?? 'No se pudo registrar el pago');
+    } finally {
+      setMarkingPaidId(null);
+    }
   };
 
   const getGreeting = () => {
@@ -175,7 +229,6 @@ export default function HomeScreen() {
   const initials  = user?.name?.split(' ').map((w:string)=>w[0]).slice(0,2).join('').toUpperCase() || 'U';
   const firstName = authLoading ? '' : (user?.name?.split(' ')[0] || 'Usuario');
 
-  // FASE 3: filtrar citas de hoy por staff seleccionado
   const filteredToday = selectedStaffId
     ? todayAppointments.filter(a => a.staff_id === selectedStaffId)
     : todayAppointments;
@@ -260,14 +313,83 @@ export default function HomeScreen() {
           </>
         )}
 
-        {/* ── FASE 3: Filtro por colaborador (solo si hay staff) ── */}
+        {/* ── ADEUDOS: citas completadas sin pagar ── */}
+        {unpaidAppointments.length > 0 && (
+          <>
+            <View style={[s.sectionRow, { marginTop: 4 }]}>
+              <View style={s.adeudoTitleRow}>
+                <MaterialIcons name="payments" size={16} color="#F97316" />
+                <Text style={[s.sectionTitle, { color: tc.text }]}>Cobros pendientes</Text>
+                <View style={s.adeudoBadge}>
+                  <Text style={s.adeudoBadgeText}>{unpaidAppointments.length}</Text>
+                </View>
+              </View>
+            </View>
+
+            {unpaidAppointments.map(appt => {
+              const clientName = appt.client?.name ?? appt.client_name_temp ?? 'Cliente';
+              const staffName  = (appt.staff as any)?.name ?? null;
+              const staffColor = (appt.staff as any)?.color ?? '#94A3B8';
+              const isPaying   = markingPaidId === appt.id;
+              const dateLabel  = new Date(appt.date + 'T12:00:00').toLocaleDateString('es-MX', { day: 'numeric', month: 'short' });
+
+              return (
+                <View
+                  key={appt.id}
+                  style={[s.unpaidCard, { backgroundColor: tc.surface, borderColor: '#FED7AA' }]}
+                >
+                  {/* Acento naranja */}
+                  <View style={[s.unpaidAccent, { backgroundColor: '#F97316' }]} />
+
+                  <View style={s.unpaidBody}>
+                    <View style={s.unpaidTopRow}>
+                      <Text style={[s.unpaidClient, { color: tc.text }]} numberOfLines={1}>
+                        {clientName}
+                      </Text>
+                      {appt.service_cost != null && appt.service_cost > 0 && (
+                        <Text style={s.unpaidAmount}>
+                          ${appt.service_cost.toLocaleString('es-MX')}
+                        </Text>
+                      )}
+                    </View>
+                    <Text style={[s.unpaidSub, { color: tc.textMuted }]} numberOfLines={1}>
+                      {appt.service_name}
+                      {staffName ? `  ·  ${staffName}` : ''}
+                      {'  ·  '}{dateLabel}  {appt.start_time.slice(0,5)}
+                    </Text>
+                  </View>
+
+                  <TouchableOpacity
+                    style={[s.payBtn, isPaying && { opacity: 0.6 }]}
+                    onPress={() => Alert.alert(
+                      'Registrar pago',
+                      `¿Confirmar pago de ${clientName}${appt.service_cost ? ` — $${appt.service_cost.toLocaleString('es-MX')} MXN` : ''}?`,
+                      [
+                        { text: 'Cancelar', style: 'cancel' },
+                        { text: 'Confirmar', onPress: () => markAsPaid(appt.id) },
+                      ]
+                    )}
+                    disabled={isPaying}
+                    activeOpacity={0.75}
+                  >
+                    {isPaying
+                      ? <ActivityIndicator size="small" color="#fff" />
+                      : <Text style={s.payBtnText}>Cobrado</Text>
+                    }
+                  </TouchableOpacity>
+                </View>
+              );
+            })}
+          </>
+        )}
+
+        {/* ── Filtro por colaborador (solo si hay staff) ── */}
         {staffMembers.length > 0 && (
           <>
             <View style={s.sectionRow}>
               <Text style={[s.sectionTitle, { color: tc.text }]}>Ver agenda de</Text>
             </View>
             <ScrollView horizontal showsHorizontalScrollIndicator={false} style={s.staffFilterRow}>
-              {/* Chip "Todos" */}
               <TouchableOpacity
                 style={[s.staffChip, !selectedStaffId && s.staffChipActive, { backgroundColor: !selectedStaffId ? '#10B981' : tc.surface, borderColor: !selectedStaffId ? '#10B981' : tc.border }]}
                 onPress={() => setSelectedStaffId(null)}
@@ -275,7 +397,6 @@ export default function HomeScreen() {
                 <MaterialIcons name="group" size={14} color={!selectedStaffId ? '#fff' : tc.textMuted} />
                 <Text style={[s.staffChipText, { color: !selectedStaffId ? '#fff' : tc.textMuted }]}>Todos</Text>
               </TouchableOpacity>
-              {/* Chips por staff */}
               {staffMembers.map(m => (
                 <TouchableOpacity
                   key={m.id}
@@ -326,7 +447,6 @@ export default function HomeScreen() {
             {filteredToday.map((appt) => {
               const statusColor = getStatusColor(appt.status);
               const displayName = appt.client?.name || appt.clientNameTemp || 'Cliente';
-              // FASE 3: encontrar el color del staff asignado
               const staffMember = appt.staff_id ? staffMembers.find(m => m.id === appt.staff_id) : null;
               return (
                 <TouchableOpacity
@@ -335,11 +455,9 @@ export default function HomeScreen() {
                   onPress={() => router.push(`/appointments/${appt.id}`)}
                   activeOpacity={0.75}
                 >
-                  {/* Acento de color del staff (si hay) o del status */}
                   <View style={[s.apptAccent, { backgroundColor: staffMember ? staffMember.color : statusColor }]} />
                   <View style={s.apptTimeWrap}>
                     <Text style={[s.apptTime, { color: tc.text }]}>{appt.time}</Text>
-                    {/* FASE 3: dot de color del staff */}
                     {staffMember && (
                       <View style={[s.apptStaffDot, { backgroundColor: staffMember.color }]} />
                     )}
@@ -412,13 +530,26 @@ const s = StyleSheet.create({
   sectionSub:     { fontSize: 12, fontWeight: '500' },
   seeAll:         { fontSize: 13, color: '#10B981', fontWeight: '600' },
   statsRow:       { flexDirection: 'row', marginBottom: 16, marginHorizontal: -4 },
-  // FASE 3: filtro de staff
+  // ── Adeudos ──
+  adeudoTitleRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  adeudoBadge:    { backgroundColor: '#FED7AA', borderRadius: 10, paddingHorizontal: 8, paddingVertical: 2 },
+  adeudoBadgeText:{ fontSize: 11, fontWeight: '800', color: '#C2410C' },
+  unpaidCard:     { flexDirection: 'row', alignItems: 'center', borderRadius: 14, borderWidth: 1, marginBottom: 8, overflow: 'hidden', minHeight: 64 },
+  unpaidAccent:   { width: 3, alignSelf: 'stretch' },
+  unpaidBody:     { flex: 1, paddingHorizontal: 12, paddingVertical: 12 },
+  unpaidTopRow:   { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 8 },
+  unpaidClient:   { fontSize: 15, fontWeight: '600', flex: 1 },
+  unpaidAmount:   { fontSize: 14, fontWeight: '800', color: '#16A34A' },
+  unpaidSub:      { fontSize: 11, marginTop: 2 },
+  payBtn:         { backgroundColor: '#10B981', borderRadius: 10, paddingHorizontal: 14, paddingVertical: 10, marginRight: 10, minWidth: 72, alignItems: 'center' },
+  payBtnText:     { fontSize: 13, fontWeight: '700', color: '#fff' },
+  // Staff filter
   staffFilterRow: { marginBottom: 16 },
   staffChip:      { flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 14, paddingVertical: 8, borderRadius: 20, borderWidth: 1, marginRight: 8 },
   staffChipActive:{},
   staffChipDot:   { width: 8, height: 8, borderRadius: 4 },
   staffChipText:  { fontSize: 13, fontWeight: '600' },
-  // Citas
+  // Citas hoy
   emptyCard:      { borderRadius: 18, padding: 28, alignItems: 'center', borderWidth: 1, marginBottom: 20 },
   emptyIconWrap:  { width: 56, height: 56, borderRadius: 16, justifyContent: 'center', alignItems: 'center', marginBottom: 12 },
   emptyTitle:     { fontSize: 16, fontWeight: '700', marginBottom: 4 },
