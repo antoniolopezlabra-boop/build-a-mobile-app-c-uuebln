@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useCallback } from 'react';
 import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity,
   ActivityIndicator, Image, RefreshControl, Alert,
@@ -35,7 +35,6 @@ interface StaffMember {
   id: string; name: string; color: string;
 }
 
-// Citas completadas sin pagar — para la sección de adeudos
 interface UnpaidAppointment {
   id: string;
   date: string;
@@ -49,7 +48,6 @@ interface UnpaidAppointment {
 
 interface WhatsAppConfig { isConnected: boolean; phoneNumber?: string; }
 
-// ─── Stat card ────────────────────────────────────────────────────────────
 function StatCard({ value, label, accent, surface, border }: {
   value: number; label: string; accent: string; surface: string; border: string;
 }) {
@@ -66,7 +64,6 @@ const sc = StyleSheet.create({
   label: { fontSize: 11, color: '#94A3B8', marginTop: 4, fontWeight: '500' },
 });
 
-// ─── Acción rápida ─────────────────────────────────────────────────────────
 function QuickAction({ icon, label, onPress, accent='#10B981', surface, border, textColor }: {
   icon: string; label: string; onPress: () => void; accent?: string;
   surface: string; border: string; textColor: string;
@@ -86,7 +83,6 @@ const qa = StyleSheet.create({
   label:    { fontSize: 13, fontWeight: '600', flex: 1 },
 });
 
-// ─── Pantalla principal ────────────────────────────────────────────────────
 export default function HomeScreen() {
   const router = useRouter();
   const { user, businessProfile, loading: authLoading } = useAuth();
@@ -103,51 +99,65 @@ export default function HomeScreen() {
   const [todayAppointments, setTodayAppointments] = useState<TodayAppointment[]>([]);
   const [weekAppointments,  setWeekAppointments]  = useState<TodayAppointment[]>([]);
   const [waConnected, setWaConnected] = useState(false);
-
-  // Staff filter
   const [staffMembers,    setStaffMembers]   = useState<StaffMember[]>([]);
   const [selectedStaffId, setSelectedStaffId] = useState<string | null>(null);
-
-  // Adeudos — citas completadas sin pagar
   const [unpaidAppointments, setUnpaidAppointments] = useState<UnpaidAppointment[]>([]);
   const [markingPaidId, setMarkingPaidId] = useState<string | null>(null);
 
-  const loadingRef = useRef(false);
+  const loadingRef  = useRef(false);
+  const isFocused   = useRef(false);
+  const pollTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
-  // ── Realtime: escuchar cuando el staff marca paid=true ─────────────────
+  // ── Realtime SIN filtro en el channel (filtro en el callback) ───────
   useEffect(() => {
     if (!user?.id) return;
+    const userId = user.id;
 
     const channel = supabase
-      .channel('dashboard-paid-updates')
+      .channel(`paid-watch-${userId}`)
       .on(
         'postgres_changes',
-        {
-          event: 'UPDATE',
-          schema: 'public',
-          table: 'appointments',
-          filter: `user_id=eq.${user.id}`,
-        },
+        { event: 'UPDATE', schema: 'public', table: 'appointments' },
         (payload) => {
           const updated = payload.new as any;
-          // Si el pago se marcó como true, quitarlo de la lista de adeudos
+          // Filtrar por user_id en el callback (más compatible con Free tier)
+          if (updated.user_id !== userId) return;
           if (updated.paid === true) {
             setUnpaidAppointments(prev => prev.filter(a => a.id !== updated.id));
           }
-          // Si por alguna razón se desmarcó (edge case), agregarlo de vuelta
-          // no aplica por ahora — solo escuchamos el caso happy path
         }
       )
-      .subscribe();
+      .subscribe((status) => {
+        console.log('[Realtime] status:', status);
+      });
 
-    return () => {
-      supabase.removeChannel(channel);
-    };
+    return () => { supabase.removeChannel(channel); };
   }, [user?.id]);
 
+  // ── Polling cada 15s mientras la pantalla está en foco (fallback) ──
+  const startPolling = useCallback(() => {
+    if (pollTimerRef.current) return;
+    pollTimerRef.current = setInterval(() => {
+      if (user?.id) loadUnpaidAppointments(user.id);
+    }, 15000);
+  }, [user?.id]);
+
+  const stopPolling = useCallback(() => {
+    if (pollTimerRef.current) {
+      clearInterval(pollTimerRef.current);
+      pollTimerRef.current = null;
+    }
+  }, []);
+
   useFocusEffect(
-    React.useCallback(() => {
+    useCallback(() => {
+      isFocused.current = true;
       if (!loadingRef.current) loadDashboardData();
+      startPolling();
+      return () => {
+        isFocused.current = false;
+        stopPolling();
+      };
     }, [user?.id])
   );
 
@@ -209,7 +219,6 @@ export default function HomeScreen() {
     } catch {}
   };
 
-  // ── Cargar citas completadas sin pagar ─────────────────────────────────
   const loadUnpaidAppointments = async (userId: string) => {
     try {
       const { data, error } = await supabase
@@ -227,7 +236,6 @@ export default function HomeScreen() {
     }
   };
 
-  // ── Marcar como pagada desde el dashboard del dueño ────────────────────
   const markAsPaid = async (apptId: string) => {
     setMarkingPaidId(apptId);
     try {
@@ -236,7 +244,6 @@ export default function HomeScreen() {
         .update({ paid: true, updated_at: new Date().toISOString() })
         .eq('id', apptId);
       if (error) throw error;
-      // Quitar optimistamente (Realtime también lo quitará si llega el evento)
       setUnpaidAppointments(prev => prev.filter(a => a.id !== apptId));
     } catch (e: any) {
       Alert.alert('Error', e?.message ?? 'No se pudo registrar el pago');
@@ -286,7 +293,7 @@ export default function HomeScreen() {
           />
         }
       >
-        {/* ── Header ── */}
+        {/* Header */}
         <View style={s.header}>
           <View style={{ flex: 1 }}>
             <Text style={[s.greeting, { color: tc.textMuted }]}>{getGreeting()}</Text>
@@ -308,7 +315,7 @@ export default function HomeScreen() {
           </TouchableOpacity>
         </View>
 
-        {/* ── Upgrade banner ── */}
+        {/* Upgrade banner */}
         {isGratuito && (
           <TouchableOpacity style={s.upgradeCard} onPress={() => router.push('/settings/subscription')} activeOpacity={0.85}>
             <View style={s.upgradeLeft}>
@@ -319,7 +326,7 @@ export default function HomeScreen() {
           </TouchableOpacity>
         )}
 
-        {/* ── Stats ── */}
+        {/* Stats */}
         {!isGratuito && (
           <>
             <View style={s.sectionRow}>
@@ -344,7 +351,7 @@ export default function HomeScreen() {
           </>
         )}
 
-        {/* ── ADEUDOS: citas completadas sin pagar ── */}
+        {/* Cobros pendientes */}
         {unpaidAppointments.length > 0 && (
           <>
             <View style={[s.sectionRow, { marginTop: 4 }]}>
@@ -362,32 +369,20 @@ export default function HomeScreen() {
               const staffName  = (appt.staff as any)?.name ?? null;
               const isPaying   = markingPaidId === appt.id;
               const dateLabel  = new Date(appt.date + 'T12:00:00').toLocaleDateString('es-MX', { day: 'numeric', month: 'short' });
-
               return (
-                <View
-                  key={appt.id}
-                  style={[s.unpaidCard, { backgroundColor: tc.surface, borderColor: '#FED7AA' }]}
-                >
+                <View key={appt.id} style={[s.unpaidCard, { backgroundColor: tc.surface, borderColor: '#FED7AA' }]}>
                   <View style={[s.unpaidAccent, { backgroundColor: '#F97316' }]} />
-
                   <View style={s.unpaidBody}>
                     <View style={s.unpaidTopRow}>
-                      <Text style={[s.unpaidClient, { color: tc.text }]} numberOfLines={1}>
-                        {clientName}
-                      </Text>
+                      <Text style={[s.unpaidClient, { color: tc.text }]} numberOfLines={1}>{clientName}</Text>
                       {appt.service_cost != null && appt.service_cost > 0 && (
-                        <Text style={s.unpaidAmount}>
-                          ${appt.service_cost.toLocaleString('es-MX')}
-                        </Text>
+                        <Text style={s.unpaidAmount}>${appt.service_cost.toLocaleString('es-MX')}</Text>
                       )}
                     </View>
                     <Text style={[s.unpaidSub, { color: tc.textMuted }]} numberOfLines={1}>
-                      {appt.service_name}
-                      {staffName ? `  ·  ${staffName}` : ''}
-                      {'  ·  '}{dateLabel}  {appt.start_time.slice(0,5)}
+                      {appt.service_name}{staffName ? `  ·  ${staffName}` : ''}{'  ·  '}{dateLabel}  {appt.start_time.slice(0,5)}
                     </Text>
                   </View>
-
                   <TouchableOpacity
                     style={[s.payBtn, isPaying && { opacity: 0.6 }]}
                     onPress={() => Alert.alert(
@@ -412,7 +407,7 @@ export default function HomeScreen() {
           </>
         )}
 
-        {/* ── Filtro por colaborador ── */}
+        {/* Filtro staff */}
         {staffMembers.length > 0 && (
           <>
             <View style={s.sectionRow}>
@@ -440,13 +435,10 @@ export default function HomeScreen() {
           </>
         )}
 
-        {/* ── Citas de hoy ── */}
+        {/* Citas de hoy */}
         <View style={s.sectionRow}>
           <Text style={[s.sectionTitle, { color: tc.text }]}>
-            {selectedStaffId
-              ? `Citas de ${staffMembers.find(m=>m.id===selectedStaffId)?.name}`
-              : 'Citas de hoy'
-            }
+            {selectedStaffId ? `Citas de ${staffMembers.find(m=>m.id===selectedStaffId)?.name}` : 'Citas de hoy'}
           </Text>
           {filteredToday.length > 0 && (
             <TouchableOpacity onPress={() => router.push('/(tabs)/appointments')}>
@@ -487,9 +479,7 @@ export default function HomeScreen() {
                   <View style={[s.apptAccent, { backgroundColor: staffMember ? staffMember.color : statusColor }]} />
                   <View style={s.apptTimeWrap}>
                     <Text style={[s.apptTime, { color: tc.text }]}>{appt.time}</Text>
-                    {staffMember && (
-                      <View style={[s.apptStaffDot, { backgroundColor: staffMember.color }]} />
-                    )}
+                    {staffMember && <View style={[s.apptStaffDot, { backgroundColor: staffMember.color }]} />}
                   </View>
                   <View style={s.apptBody}>
                     <Text style={[s.apptClient, { color: tc.text }]} numberOfLines={1}>{displayName}</Text>
@@ -507,7 +497,7 @@ export default function HomeScreen() {
           </View>
         )}
 
-        {/* ── Acciones rápidas ── */}
+        {/* Acciones rápidas */}
         <View style={s.sectionRow}>
           <Text style={[s.sectionTitle, { color: tc.text }]}>Acciones rápidas</Text>
         </View>
@@ -518,7 +508,7 @@ export default function HomeScreen() {
           <QuickAction icon="person-search"      label="Clientes inactivos" accent="#F59E0B" surface={tc.surface} border={tc.border} textColor={tc.text} onPress={() => router.push('/clients/inactive')} />
         </View>
 
-        {/* ── Banner WhatsApp ── */}
+        {/* Banner WhatsApp */}
         {(isBasico || isPremium) && !waConnected && (
           <TouchableOpacity style={[s.waBanner, { backgroundColor: tc.surface, borderColor: '#166834' }]} onPress={() => router.push('/settings/whatsapp')} activeOpacity={0.8}>
             <View style={s.waIconBox}><MaterialIcons name="chat" size={20} color="#25D366" /></View>
@@ -559,7 +549,6 @@ const s = StyleSheet.create({
   sectionSub:     { fontSize: 12, fontWeight: '500' },
   seeAll:         { fontSize: 13, color: '#10B981', fontWeight: '600' },
   statsRow:       { flexDirection: 'row', marginBottom: 16, marginHorizontal: -4 },
-  // ── Adeudos ──
   adeudoTitleRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
   adeudoBadge:    { backgroundColor: '#FED7AA', borderRadius: 10, paddingHorizontal: 8, paddingVertical: 2 },
   adeudoBadgeText:{ fontSize: 11, fontWeight: '800', color: '#C2410C' },
@@ -572,13 +561,11 @@ const s = StyleSheet.create({
   unpaidSub:      { fontSize: 11, marginTop: 2 },
   payBtn:         { backgroundColor: '#10B981', borderRadius: 10, paddingHorizontal: 14, paddingVertical: 10, marginRight: 10, minWidth: 72, alignItems: 'center' },
   payBtnText:     { fontSize: 13, fontWeight: '700', color: '#fff' },
-  // Staff filter
   staffFilterRow: { marginBottom: 16 },
   staffChip:      { flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 14, paddingVertical: 8, borderRadius: 20, borderWidth: 1, marginRight: 8 },
   staffChipActive:{},
   staffChipDot:   { width: 8, height: 8, borderRadius: 4 },
   staffChipText:  { fontSize: 13, fontWeight: '600' },
-  // Citas hoy
   emptyCard:      { borderRadius: 18, padding: 28, alignItems: 'center', borderWidth: 1, marginBottom: 20 },
   emptyIconWrap:  { width: 56, height: 56, borderRadius: 16, justifyContent: 'center', alignItems: 'center', marginBottom: 12 },
   emptyTitle:     { fontSize: 16, fontWeight: '700', marginBottom: 4 },
