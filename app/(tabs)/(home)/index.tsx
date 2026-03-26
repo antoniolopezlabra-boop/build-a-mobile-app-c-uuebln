@@ -104,55 +104,52 @@ export default function HomeScreen() {
   const [unpaidAppointments, setUnpaidAppointments] = useState<UnpaidAppointment[]>([]);
   const [markingPaidId, setMarkingPaidId] = useState<string | null>(null);
 
-  const loadingRef   = useRef(false);
-  const prevPathRef  = useRef(pathname);
+  const loadingRef  = useRef(false);
+  const userIdRef   = useRef<string | undefined>(undefined);
+  const prevPathRef = useRef(pathname);
 
-  // ── Carga inicial ───────────────────────────────────────
+  // Mantener userIdRef siempre actualizado
+  useEffect(() => {
+    userIdRef.current = user?.id;
+  }, [user?.id]);
+
+  // ── Carga inicial cuando user está listo ──
   useEffect(() => {
     if (user?.id) {
-      loadDashboardData();
-      loadUnpaidAppointments(user.id);
+      loadDashboardData(user.id);
     }
   }, [user?.id]);
 
-  // ── Detectar regreso al dashboard por cambio de pathname ────────────
-  // El FloatingTabBar usa router.replace que no desmonta la pantalla,
-  // pero sí cambia el pathname. Detectamos cuando volvemos a Home.
+  // ── Detectar regreso a Home por cambio de pathname ──
   useEffect(() => {
     const isHome = pathname === '/' || pathname.includes('(home)') ||
       (!pathname.includes('appointments') && !pathname.includes('clients') &&
        !pathname.includes('reports') && !pathname.includes('settings') &&
        !pathname.includes('profile') && !pathname.includes('marketing'));
-
     const wasAway = prevPathRef.current !== pathname;
     prevPathRef.current = pathname;
-
-    if (isHome && wasAway && user?.id) {
-      // Volvimos al tab Home desde otra pantalla — recargar adeudos
-      loadUnpaidAppointments(user.id);
+    if (isHome && wasAway && userIdRef.current) {
+      loadUnpaidAppointments(userIdRef.current);
     }
-  }, [pathname, user?.id]);
+  }, [pathname]);
 
-  // ── AppState: recargar cuando la app vuelve al frente ─────────────
+  // ── AppState: recargar al volver al frente ──
   useEffect(() => {
-    if (!user?.id) return;
-    const userId = user.id;
     const sub = AppState.addEventListener('change', (state) => {
-      if (state === 'active') {
-        loadUnpaidAppointments(userId);
+      if (state === 'active' && userIdRef.current) {
+        loadUnpaidAppointments(userIdRef.current);
       }
     });
     return () => sub.remove();
-  }, [user?.id]);
+  }, []);
 
-  // ── Realtime SIN filtro de columna (más compatible) ─────────────
+  // ── Realtime ──
   useEffect(() => {
     if (!user?.id) return;
     const userId = user.id;
     const channel = supabase
       .channel(`paid-watch-${userId}`)
-      .on(
-        'postgres_changes',
+      .on('postgres_changes',
         { event: 'UPDATE', schema: 'public', table: 'appointments' },
         (payload) => {
           const updated = payload.new as any;
@@ -161,17 +158,17 @@ export default function HomeScreen() {
             setUnpaidAppointments(prev => prev.filter(a => a.id !== updated.id));
           }
         }
-      )
-      .subscribe();
+      ).subscribe();
     return () => { supabase.removeChannel(channel); };
   }, [user?.id]);
 
-  const loadDashboardData = async (forceRefresh = false, isPullRefresh = false) => {
+  // ── loadDashboardData recibe userId explícito, nunca depende del closure ──
+  const loadDashboardData = async (userId: string, forceRefresh = false, isPullRefresh = false) => {
     if (loadingRef.current && !forceRefresh) return;
     loadingRef.current = true;
     try {
-      const userId = user?.id;
-      if (!userId) return;
+      // Adeudos: SIEMPRE frescos, sin caché, sin condición
+      loadUnpaidAppointments(userId);
 
       const cachedStats = getCached<DashboardStats>('dashboard_stats');
       const cachedApts  = getCached<TodayAppointment[]>('today_appointments');
@@ -253,6 +250,11 @@ export default function HomeScreen() {
     }
   };
 
+  const handleRefresh = () => {
+    const uid = userIdRef.current;
+    if (uid) loadDashboardData(uid, true, true);
+  };
+
   const getGreeting = () => {
     const h = new Date().getHours();
     if (h < 12) return 'Buenos días';
@@ -287,10 +289,7 @@ export default function HomeScreen() {
         refreshControl={
           <RefreshControl
             refreshing={refreshing}
-            onRefresh={() => {
-              loadDashboardData(true, true);
-              if (user?.id) loadUnpaidAppointments(user.id);
-            }}
+            onRefresh={handleRefresh}
             tintColor={colors.primary}
             colors={[colors.primary]}
           />
