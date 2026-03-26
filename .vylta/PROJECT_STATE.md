@@ -27,28 +27,50 @@
 - `app/staff-app/new-appointment.tsx` — Crear nueva cita desde staff.
 - `app/staff-app/profile.tsx` — Perfil del colaborador.
 
-## Flujo de pagos (implementado 2026-03-25)
-- Cita completada → `paid = false` en DB.
-- **Staff puede registrar el pago** desde `staff-app/appointment/[id].tsx` → botón "Registrar pago" → `paid = true`.
-- **Dueño ve adeudos** en `(home)/index.tsx` sección "Cobros pendientes" — query: `status = Completada AND (paid IS NULL OR paid = false)`.
-- **Dueño también ve adeudos** en `reports.tsx` → widget "Por cobrar" en FINANZAS DEL MES.
-- `reports.tsx` tiene DOS queries financieras:
-  - `monthRevenue`: `status = Completada AND paid = true` (cobrado)
-  - `pendingRevenue`: `status = Completada AND (paid IS NULL OR paid = false)` (por cobrar)
-  - **BUG CORREGIDO 2026-03-25**: antes `pendingRevenue` no filtraba `paid`, sumaba TODO lo Completado.
-- Estados de cita: `Pendiente`, `Confirmada`, `Completada`, `Cancelada`, `No asistió`, `Reagendada`.
+## Sistema de pagos dual (CRÍTICO — leer antes de tocar reports.tsx o queries de finanzas)
+La DB tiene DOS sistemas de pago coexistiendo:
+
+### Sistema legacy (citas anteriores a 2026-03-25)
+- `status = 'Pagado'` — ya cobradas por definición, NO tienen campo `paid`.
+- En la DB hay ~16 citas con este status, $8,100 en total.
+
+### Sistema nuevo (citas desde 2026-03-25)
+- `status = 'Completada'` + campo `paid` booleano.
+- `paid = false` o `NULL` → pendiente de cobro.
+- `paid = true` → cobrada.
+- Staff registra el pago desde `staff-app/appointment/[id].tsx`.
+
+### Queries correctas en reports.tsx
+- `monthRevenue` (Cobrado) = citas `status='Pagado'` DEL MES + citas `status='Completada' AND paid=true` DEL MES.
+- `pendingRevenue` (Por cobrar) = citas `status='Completada' AND (paid IS NULL OR paid=false)` DEL MES.
+- Las citas `status='Pagado'` NUNCA van en pendingRevenue — ya están cobradas.
+
+### Queries correctas en (home)/index.tsx
+- Sección "Cobros pendientes": `status='Completada' AND (paid IS NULL OR paid=false)` — NO incluir 'Pagado'.
+
+## Flujo de pagos completo
+- Cita completada → staff marca "Completar" → `status='Completada'`, `paid=false`.
+- Staff opcionalmente registra pago → `paid=true`.
+- Dueño ve "Cobros pendientes" en Inicio → puede marcar "Cobrado" → `paid=true`.
+- Dueño ve finanzas en Reportes → "Cobrado" suma legacy+nuevo, "Por cobrar" solo nuevo sin pagar.
+
+## Estados de cita válidos
+`Pendiente`, `Confirmada`, `Completada`, `Cancelada`, `No asistió`, `Reagendada`, `Pagado` (legacy).
 - `NON_CANCELLABLE = ['Cancelada', 'Completada', 'No asistió']` — no mostrar botón cancelar en estos.
+- Reagendada SÍ puede cancelarse.
 
 ## Caché en memoria
 - `utils/cache.ts` — caché en memoria con TTL. NO usa AsyncStorage.
 - Claves principales: `dashboard_stats` (30s), `today_appointments` (30s), `reports_stats` (60s).
 - `loadUnpaidAppointments` NO usa caché — siempre va directo a Supabase.
-- El pull-to-refresh llama `handleRefresh` que usa `userIdRef.current` (no closure).
+- `loadDashboardData(userId)` recibe userId explícito como parámetro (no del closure).
+- El pull-to-refresh usa `userIdRef.current` para evitar closures stale.
 
 ## Supabase
 - Tabla `appointments` ya tiene Realtime habilitado en publicación `supabase_realtime`.
 - El channel de Realtime NO usa filtro de columna (incompatible con Free tier) — filtra `user_id` en el callback.
 - RLS activo. Edge Functions: deshabilitar "Verify JWT with legacy secret" cuando usan service role key.
+- `supabase.functions.invoke` devuelve errores reales en `data?.error`, no en `error`.
 
 ## Bugs conocidos pendientes
 - `book.html`: sin validación de teléfono, doble-submit posible, sin meta tags OG, sin límite plan Gratuito.
