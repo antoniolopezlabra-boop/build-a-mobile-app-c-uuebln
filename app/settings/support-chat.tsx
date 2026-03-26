@@ -129,7 +129,7 @@ export default function SupportChatScreen() {
         'anthropic-version': '2023-06-01',
       },
       body: JSON.stringify({
-        model: 'claude-haiku-4-5',
+        model: 'claude-haiku-4-5-20251001',
         max_tokens: 512,
         system: SYSTEM_PROMPT,
         messages: apiMessages,
@@ -168,7 +168,7 @@ export default function SupportChatScreen() {
       setMessages((prev) => [...prev, {
         id: (Date.now() + 1).toString(),
         role: 'assistant',
-        content: 'Hubo un problema al conectar. Intenta de nuevo o escríbenos a soporte@vylta.com',
+        content: 'Hubo un problema al conectar. Intenta de nuevo o escíbenos a soporte@vylta.com',
         timestamp: new Date(),
       }]);
     } finally {
