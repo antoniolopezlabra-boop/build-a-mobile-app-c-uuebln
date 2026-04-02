@@ -9,13 +9,12 @@ import { useFocusEffect } from '@react-navigation/native';
 import { useAdmin } from '@/contexts/AdminContext';
 import { useAuth } from '@/contexts/AuthContext';
 import { supabase } from '@/lib/supabase';
-import Svg, { Path, Defs, LinearGradient, Stop, Text as SvgText, Line, Circle, Rect } from 'react-native-svg';
+import Svg, { Path, Defs, LinearGradient, Stop, Text as SvgText, Line, Circle } from 'react-native-svg';
 
 const W = Dimensions.get('window').width;
 const CHART_W = W - 64;
 const CHART_H = 110;
 
-// ── Paleta mission control ──
 const C = {
   bg:      '#03080F',
   surface: '#070F1C',
@@ -24,7 +23,6 @@ const C = {
   green:   '#10B981',
   blue:    '#3B82F6',
   purple:  '#818CF8',
-  red:     '#EF4444',
   text:    '#E2E8F0',
   muted:   '#334155',
   soft:    '#64748B',
@@ -46,7 +44,6 @@ function LineChart({
   const pad = 16;
   const step = (w - pad * 2) / Math.max(data.length - 1, 1);
 
-  // Puntos x,y para cada dato
   const pts = data.map((d, i) => ({
     x: pad + i * step,
     y: h - pad - (d.value / max) * (h - pad * 2),
@@ -54,20 +51,16 @@ function LineChart({
     label: d.label,
   }));
 
-  // Construir path bezier suave
   let linePath = `M ${pts[0].x} ${pts[0].y}`;
   for (let i = 0; i < pts.length - 1; i++) {
     const cx = (pts[i].x + pts[i + 1].x) / 2;
     linePath += ` C ${cx} ${pts[i].y}, ${cx} ${pts[i + 1].y}, ${pts[i + 1].x} ${pts[i + 1].y}`;
   }
 
-  // Área rellena: baja al fondo y vuelve al inicio
   const areaPath = linePath +
     ` L ${pts[pts.length - 1].x} ${h} L ${pts[0].x} ${h} Z`;
 
-  // Puntos de datos con valor > 0
   const activePts = pts.filter(p => p.v > 0);
-  // Etiquetas: mostrar solo cada 2 para no saturar
   const labelPts = pts.filter((_, i) => i % 2 === 0);
 
   return (
@@ -79,85 +72,18 @@ function LineChart({
           <Stop offset="100%" stopColor={color} stopOpacity={0} />
         </LinearGradient>
       </Defs>
-
-      {/* Área degradada */}
       <Path d={areaPath} fill={`url(#${gradientId})`} />
-
-      {/* Línea base */}
       <Line x1={pad} y1={h} x2={w} y2={h} stroke={C.muted} strokeWidth={0.5} />
-
-      {/* Línea principal */}
       <Path d={linePath} stroke={color} strokeWidth={2} fill="none" strokeLinecap="round" strokeLinejoin="round" />
-
-      {/* Puntos activos */}
       {activePts.map((p, i) => (
         <React.Fragment key={i}>
           <Circle cx={p.x} cy={p.y} r={4} fill={C.bg} stroke={color} strokeWidth={1.5} />
           <SvgText x={p.x} y={p.y - 10} fontSize={8} fill={color} textAnchor="middle" fontWeight="bold">{p.v}</SvgText>
         </React.Fragment>
       ))}
-
-      {/* Etiquetas eje X */}
       {labelPts.map((p, i) => (
         <SvgText key={i} x={p.x} y={h + 14} fontSize={7} fill={C.soft} textAnchor="middle">{p.label}</SvgText>
       ))}
-    </Svg>
-  );
-}
-
-// ── Bar chart ejecutivo con glow ──
-function BarChart({
-  data, color, gradientId, height = CHART_H,
-}: {
-  data: { label: string; value: number }[];
-  color: string;
-  gradientId: string;
-  height?: number;
-}) {
-  if (!data.length) return null;
-  const max = Math.max(...data.map(d => d.value), 1);
-  const w = CHART_W - 8;
-  const h = height;
-  const barW = Math.max(Math.floor((w - 16) / data.length) - 3, 4);
-  const labelEvery = Math.ceil(data.length / 7);
-
-  return (
-    <Svg width={CHART_W} height={h + 20}>
-      <Defs>
-        <LinearGradient id={gradientId} x1="0" y1="0" x2="0" y2="1">
-          <Stop offset="0%" stopColor={color} stopOpacity={0.9} />
-          <Stop offset="100%" stopColor={color} stopOpacity={0.25} />
-        </LinearGradient>
-      </Defs>
-
-      {data.map((d, i) => {
-        const barH = Math.max((d.value / max) * h, d.value > 0 ? 3 : 1);
-        const x = 8 + i * (barW + 3);
-        const y = h - barH;
-        return (
-          <React.Fragment key={i}>
-            {/* Barra de fondo sutil */}
-            <Rect x={x} y={0} width={barW} height={h} fill={C.border} rx={3} opacity={0.4} />
-            {/* Barra principal con gradiente */}
-            {d.value > 0 && (
-              <Rect x={x} y={y} width={barW} height={barH} fill={`url(#${gradientId})`} rx={3} />
-            )}
-            {/* Línea brillante en el top */}
-            {d.value > 0 && (
-              <Rect x={x} y={y} width={barW} height={2} fill={color} rx={1} opacity={1} />
-            )}
-            {/* Valor */}
-            {d.value > 0 && (
-              <SvgText x={x + barW / 2} y={y - 5} fontSize={8} fill={color} textAnchor="middle" fontWeight="bold">{d.value}</SvgText>
-            )}
-            {/* Etiqueta X cada N */}
-            {i % labelEvery === 0 && (
-              <SvgText x={x + barW / 2} y={h + 14} fontSize={7} fill={C.soft} textAnchor="middle">{d.label}</SvgText>
-            )}
-          </React.Fragment>
-        );
-      })}
-      <Line x1={0} y1={h} x2={CHART_W} y2={h} stroke={C.muted} strokeWidth={0.5} />
     </Svg>
   );
 }
@@ -281,13 +207,8 @@ export default function AdminDashboard() {
   return (
     <View style={s.container}>
       <SafeAreaView style={{ flex: 1 }} edges={['top']}>
-
-        {/* HEADER */}
         <View style={s.header}>
-          <TouchableOpacity
-            onPress={async () => { await signOut(); router.replace('/auth/onboarding'); }}
-            style={s.exitBtn}
-          >
+          <TouchableOpacity onPress={async () => { await signOut(); router.replace('/auth/onboarding'); }} style={s.exitBtn}>
             <Text style={s.exitText}>EXIT</Text>
           </TouchableOpacity>
           <View style={s.headerCenter}>
@@ -369,7 +290,7 @@ export default function AdminDashboard() {
             </View>
           </View>
 
-          {/* LINE CHART — Citas */}
+          {/* LINE CHART — Citas (púrpura) */}
           <View style={s.chartHeader}>
             <View style={s.chartTitleRow}>
               <View style={[s.chartAccent, { backgroundColor: C.purple }]} />
@@ -378,14 +299,10 @@ export default function AdminDashboard() {
             <Text style={s.chartSubtitle}>{data?.totalAppointments} citas totales</Text>
           </View>
           <View style={s.chartCard}>
-            <LineChart
-              data={data?.dailyCitas||[]}
-              color={C.purple}
-              gradientId="citasGrad"
-            />
+            <LineChart data={data?.dailyCitas||[]} color={C.purple} gradientId="citasGrad" />
           </View>
 
-          {/* BAR CHART — Negocios */}
+          {/* LINE CHART — Negocios (verde) */}
           <View style={s.chartHeader}>
             <View style={s.chartTitleRow}>
               <View style={[s.chartAccent, { backgroundColor: C.green }]} />
@@ -394,11 +311,7 @@ export default function AdminDashboard() {
             <Text style={s.chartSubtitle}>{data?.totalTenants} total</Text>
           </View>
           <View style={s.chartCard}>
-            <BarChart
-              data={data?.weeklyNegocios||[]}
-              color={C.green}
-              gradientId="negociosGrad"
-            />
+            <LineChart data={data?.weeklyNegocios||[]} color={C.green} gradientId="negociosGrad" />
           </View>
 
           {/* ACCIONES */}
@@ -434,8 +347,7 @@ const s = StyleSheet.create({
   header:        { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
                    paddingHorizontal: 20, paddingVertical: 14,
                    borderBottomWidth: 1, borderBottomColor: C.border },
-  exitBtn:       { paddingHorizontal: 12, paddingVertical: 6, borderRadius: 8,
-                   borderWidth: 1, borderColor: C.muted },
+  exitBtn:       { paddingHorizontal: 12, paddingVertical: 6, borderRadius: 8, borderWidth: 1, borderColor: C.muted },
   exitText:      { fontSize: 11, fontWeight: '800', color: C.soft, letterSpacing: 1.5 },
   headerCenter:  { alignItems: 'center' },
   headerTitle:   { fontSize: 17, fontWeight: '900', color: C.gold, letterSpacing: 3 },
@@ -444,10 +356,7 @@ const s = StyleSheet.create({
   headerTime:    { fontSize: 13, fontWeight: '700', color: C.text },
   roleBadge:     { paddingHorizontal: 8, paddingVertical: 2, borderRadius: 6, borderWidth: 1 },
   roleText:      { fontSize: 9, fontWeight: '900', letterSpacing: 1.5 },
-
   scroll:        { paddingHorizontal: 20, paddingTop: 20, paddingBottom: 100 },
-
-  // MRR
   mrrHero:       { backgroundColor: C.surface, borderRadius: 22, padding: 24, marginBottom: 24,
                    borderWidth: 1, borderColor: C.gold + '33' },
   mrrTopRow:     { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 },
@@ -456,16 +365,12 @@ const s = StyleSheet.create({
   mrrDate:       { fontSize: 10, color: C.muted },
   mrrAmount:     { fontSize: 52, fontWeight: '900', color: C.gold, letterSpacing: -2, lineHeight: 56 },
   mrrCurrency:   { fontSize: 13, color: C.soft, fontWeight: '600', marginTop: 2, marginBottom: 20 },
-  mrrSubRow:     { flexDirection: 'row', alignItems: 'center', paddingTop: 16,
-                   borderTopWidth: 1, borderTopColor: C.border },
+  mrrSubRow:     { flexDirection: 'row', alignItems: 'center', paddingTop: 16, borderTopWidth: 1, borderTopColor: C.border },
   mrrSubItem:    { flex: 1, alignItems: 'center' },
   mrrSubVal:     { fontSize: 26, fontWeight: '900', letterSpacing: -1 },
   mrrSubLabel:   { fontSize: 9, color: C.muted, fontWeight: '700', letterSpacing: 1.5, marginTop: 2 },
   mrrDivider:    { width: 1, height: 36, backgroundColor: C.border },
-
   sectionLabel:  { fontSize: 10, fontWeight: '800', color: C.muted, letterSpacing: 2, marginBottom: 12 },
-
-  // KPI
   kpiGrid:       { flexDirection: 'row', flexWrap: 'wrap', gap: 10, marginBottom: 24 },
   kpiCard:       { width: '47%', backgroundColor: C.surface, borderRadius: 16, padding: 16,
                    borderTopWidth: 2, borderWidth: 1, borderColor: C.border },
@@ -473,21 +378,16 @@ const s = StyleSheet.create({
   kpiNum:        { fontSize: 34, fontWeight: '900', letterSpacing: -1, lineHeight: 38 },
   kpiLabel:      { fontSize: 12, color: C.soft, marginTop: 6, fontWeight: '500' },
   kpiHint:       { fontSize: 10, color: C.muted, marginTop: 4 },
-
-  // Charts
   chartHeader:   { marginBottom: 10 },
   chartTitleRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   chartAccent:   { width: 3, height: 12, borderRadius: 2 },
   chartSubtitle: { fontSize: 10, color: C.muted, marginTop: 3, marginLeft: 11 },
   chartCard:     { backgroundColor: C.surface, borderRadius: 16, padding: 16, marginBottom: 24,
                    alignItems: 'center', borderWidth: 1, borderColor: C.border },
-
-  // Acciones
   actionsRow:    { flexDirection: 'row', gap: 10, marginBottom: 24 },
   actionCard:    { flex: 1, backgroundColor: C.surface, borderRadius: 16, padding: 18,
                    alignItems: 'center', gap: 8, borderWidth: 1, borderColor: C.border },
   actionIcon:    { fontSize: 26 },
   actionLabel:   { fontSize: 11, fontWeight: '700', color: C.text, letterSpacing: 0.5 },
-
   footer:        { textAlign: 'center', fontSize: 10, color: C.muted, letterSpacing: 1, marginTop: 8 },
 });
