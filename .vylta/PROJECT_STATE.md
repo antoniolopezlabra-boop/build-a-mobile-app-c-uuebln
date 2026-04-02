@@ -1,5 +1,21 @@
 # VYLTA — Estado técnico del proyecto
-> Actualizado: 2026-03-25. Leer SIEMPRE al inicio de una nueva conversación antes de tocar código.
+> Actualizado: 2026-04-01. Leer SIEMPRE al inicio de una nueva conversación antes de tocar código.
+
+## Identidad y dominio
+- Dominio: `vylta.lat` (Namecheap, auto-renew activo)
+- Booking: `book.vylta.lat` → GitHub Pages (`vylta-planes` repo)
+- **Email corporativo: `hola@vylta.lat`** → reenvía a `antonio.lopez.labra@hotmail.com` (Cloudflare Email Routing, activo desde 1-abr-2026)
+- DNS: Cloudflare (nameservers: `guy.ns.cloudflare.com` / `simone.ns.cloudflare.com`)
+
+## WhatsApp / Meta — Estado actual
+- **Cuenta "Marketing Nuova" RESTRINGIDA** — no usar, está ligada a proyecto anterior.
+- **Plan:** Crear todo desde cero con `hola@vylta.lat`:
+  1. Cuenta Facebook nueva con `hola@vylta.lat` ← SIGUIENTE PASO
+  2. Meta Business Manager nuevo solo para VYLTA
+  3. WhatsApp Business Account nueva
+  4. Registrar número AT&T (ya disponible)
+  5. Crear plantillas UTILITY en español México
+  6. Conectar credencial en n8n Cloud
 
 ## Stack
 - React Native + Expo Router v3 + TypeScript
