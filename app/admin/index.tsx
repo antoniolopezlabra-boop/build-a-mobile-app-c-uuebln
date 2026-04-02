@@ -9,84 +9,175 @@ import { useFocusEffect } from '@react-navigation/native';
 import { useAdmin } from '@/contexts/AdminContext';
 import { useAuth } from '@/contexts/AuthContext';
 import { supabase } from '@/lib/supabase';
-import Svg, { Rect, Text as SvgText, Line, Circle, Defs, RadialGradient, Stop } from 'react-native-svg';
+import Svg, { Path, Defs, LinearGradient, Stop, Text as SvgText, Line, Circle, Rect } from 'react-native-svg';
 
 const W = Dimensions.get('window').width;
 const CHART_W = W - 64;
+const CHART_H = 110;
 
 // ── Paleta mission control ──
 const C = {
-  bg:       '#03080F',
-  surface:  '#070F1C',
-  surface2: '#0C1829',
-  border:   '#0F2040',
-  gold:     '#F59E0B',
-  goldDim:  '#F59E0B18',
-  green:    '#10B981',
-  greenDim: '#10B98115',
-  blue:     '#3B82F6',
-  purple:   '#818CF8',
-  red:      '#EF4444',
-  text:     '#E2E8F0',
-  muted:    '#334155',
-  soft:     '#64748B',
+  bg:      '#03080F',
+  surface: '#070F1C',
+  border:  '#0F2040',
+  gold:    '#F59E0B',
+  green:   '#10B981',
+  blue:    '#3B82F6',
+  purple:  '#818CF8',
+  red:     '#EF4444',
+  text:    '#E2E8F0',
+  muted:   '#334155',
+  soft:    '#64748B',
 };
 
-// ── Gráfica de barras premium ──
-function BarChart({ data, color, height = 100 }: { data: { label: string; value: number }[], color: string, height?: number }) {
+// ── Smooth bezier line chart con área degradada ──
+function LineChart({
+  data, color, gradientId, height = CHART_H,
+}: {
+  data: { label: string; value: number }[];
+  color: string;
+  gradientId: string;
+  height?: number;
+}) {
   if (!data.length) return null;
   const max = Math.max(...data.map(d => d.value), 1);
-  const barW = Math.max(Math.floor((CHART_W - 16) / data.length) - 3, 4);
+  const w = CHART_W - 8;
+  const h = height;
+  const pad = 16;
+  const step = (w - pad * 2) / Math.max(data.length - 1, 1);
+
+  // Puntos x,y para cada dato
+  const pts = data.map((d, i) => ({
+    x: pad + i * step,
+    y: h - pad - (d.value / max) * (h - pad * 2),
+    v: d.value,
+    label: d.label,
+  }));
+
+  // Construir path bezier suave
+  let linePath = `M ${pts[0].x} ${pts[0].y}`;
+  for (let i = 0; i < pts.length - 1; i++) {
+    const cx = (pts[i].x + pts[i + 1].x) / 2;
+    linePath += ` C ${cx} ${pts[i].y}, ${cx} ${pts[i + 1].y}, ${pts[i + 1].x} ${pts[i + 1].y}`;
+  }
+
+  // Área rellena: baja al fondo y vuelve al inicio
+  const areaPath = linePath +
+    ` L ${pts[pts.length - 1].x} ${h} L ${pts[0].x} ${h} Z`;
+
+  // Puntos de datos con valor > 0
+  const activePts = pts.filter(p => p.v > 0);
+  // Etiquetas: mostrar solo cada 2 para no saturar
+  const labelPts = pts.filter((_, i) => i % 2 === 0);
+
   return (
-    <Svg width={CHART_W} height={height + 24}>
+    <Svg width={CHART_W} height={h + 20}>
       <Defs>
-        <RadialGradient id="glow" cx="50%" cy="0%" r="80%">
-          <Stop offset="0%" stopColor={color} stopOpacity={0.15} />
+        <LinearGradient id={gradientId} x1="0" y1="0" x2="0" y2="1">
+          <Stop offset="0%" stopColor={color} stopOpacity={0.35} />
+          <Stop offset="70%" stopColor={color} stopOpacity={0.05} />
           <Stop offset="100%" stopColor={color} stopOpacity={0} />
-        </RadialGradient>
+        </LinearGradient>
       </Defs>
-      {data.map((d, i) => {
-        const barH = Math.max((d.value / max) * height, 2);
-        const x = i * (barW + 3) + 2;
-        const y = height - barH;
-        const opacity = 0.5 + (d.value / max) * 0.5;
-        return (
-          <React.Fragment key={i}>
-            <Rect x={x} y={height} width={barW} height={0.5} fill={C.muted} />
-            <Rect x={x} y={y} width={barW} height={barH} fill={color} rx={2} opacity={opacity} />
-            {d.value > 0 && (
-              <Rect x={x} y={y} width={barW} height={2} fill={color} rx={1} opacity={1} />
-            )}
-            <SvgText x={x + barW / 2} y={height + 16} fontSize={7} fill={C.soft} textAnchor="middle">{d.label}</SvgText>
-            {d.value > 0 && (
-              <SvgText x={x + barW / 2} y={y - 5} fontSize={8} fill={color} textAnchor="middle" fontWeight="bold">{d.value}</SvgText>
-            )}
-          </React.Fragment>
-        );
-      })}
-      <Line x1={0} y1={height} x2={CHART_W} y2={height} stroke={C.muted} strokeWidth={0.5} />
+
+      {/* Área degradada */}
+      <Path d={areaPath} fill={`url(#${gradientId})`} />
+
+      {/* Línea base */}
+      <Line x1={pad} y1={h} x2={w} y2={h} stroke={C.muted} strokeWidth={0.5} />
+
+      {/* Línea principal */}
+      <Path d={linePath} stroke={color} strokeWidth={2} fill="none" strokeLinecap="round" strokeLinejoin="round" />
+
+      {/* Puntos activos */}
+      {activePts.map((p, i) => (
+        <React.Fragment key={i}>
+          <Circle cx={p.x} cy={p.y} r={4} fill={C.bg} stroke={color} strokeWidth={1.5} />
+          <SvgText x={p.x} y={p.y - 10} fontSize={8} fill={color} textAnchor="middle" fontWeight="bold">{p.v}</SvgText>
+        </React.Fragment>
+      ))}
+
+      {/* Etiquetas eje X */}
+      {labelPts.map((p, i) => (
+        <SvgText key={i} x={p.x} y={h + 14} fontSize={7} fill={C.soft} textAnchor="middle">{p.label}</SvgText>
+      ))}
     </Svg>
   );
 }
 
-// ── Punto pulsante de estado activo ──
+// ── Bar chart ejecutivo con glow ──
+function BarChart({
+  data, color, gradientId, height = CHART_H,
+}: {
+  data: { label: string; value: number }[];
+  color: string;
+  gradientId: string;
+  height?: number;
+}) {
+  if (!data.length) return null;
+  const max = Math.max(...data.map(d => d.value), 1);
+  const w = CHART_W - 8;
+  const h = height;
+  const barW = Math.max(Math.floor((w - 16) / data.length) - 3, 4);
+  const labelEvery = Math.ceil(data.length / 7);
+
+  return (
+    <Svg width={CHART_W} height={h + 20}>
+      <Defs>
+        <LinearGradient id={gradientId} x1="0" y1="0" x2="0" y2="1">
+          <Stop offset="0%" stopColor={color} stopOpacity={0.9} />
+          <Stop offset="100%" stopColor={color} stopOpacity={0.25} />
+        </LinearGradient>
+      </Defs>
+
+      {data.map((d, i) => {
+        const barH = Math.max((d.value / max) * h, d.value > 0 ? 3 : 1);
+        const x = 8 + i * (barW + 3);
+        const y = h - barH;
+        return (
+          <React.Fragment key={i}>
+            {/* Barra de fondo sutil */}
+            <Rect x={x} y={0} width={barW} height={h} fill={C.border} rx={3} opacity={0.4} />
+            {/* Barra principal con gradiente */}
+            {d.value > 0 && (
+              <Rect x={x} y={y} width={barW} height={barH} fill={`url(#${gradientId})`} rx={3} />
+            )}
+            {/* Línea brillante en el top */}
+            {d.value > 0 && (
+              <Rect x={x} y={y} width={barW} height={2} fill={color} rx={1} opacity={1} />
+            )}
+            {/* Valor */}
+            {d.value > 0 && (
+              <SvgText x={x + barW / 2} y={y - 5} fontSize={8} fill={color} textAnchor="middle" fontWeight="bold">{d.value}</SvgText>
+            )}
+            {/* Etiqueta X cada N */}
+            {i % labelEvery === 0 && (
+              <SvgText x={x + barW / 2} y={h + 14} fontSize={7} fill={C.soft} textAnchor="middle">{d.label}</SvgText>
+            )}
+          </React.Fragment>
+        );
+      })}
+      <Line x1={0} y1={h} x2={CHART_W} y2={h} stroke={C.muted} strokeWidth={0.5} />
+    </Svg>
+  );
+}
+
+// ── Punto pulsante ──
 function PulseDot({ color }: { color: string }) {
   const anim = useRef(new Animated.Value(1)).current;
   useEffect(() => {
     Animated.loop(
       Animated.sequence([
-        Animated.timing(anim, { toValue: 1.8, duration: 800, useNativeDriver: true }),
-        Animated.timing(anim, { toValue: 1, duration: 800, useNativeDriver: true }),
+        Animated.timing(anim, { toValue: 1.9, duration: 900, useNativeDriver: true }),
+        Animated.timing(anim, { toValue: 1, duration: 900, useNativeDriver: true }),
       ])
     ).start();
   }, []);
   return (
     <View style={{ width: 14, height: 14, justifyContent: 'center', alignItems: 'center' }}>
       <Animated.View style={{
-        position: 'absolute',
-        width: 10, height: 10, borderRadius: 5,
-        backgroundColor: color, opacity: 0.3,
-        transform: [{ scale: anim }],
+        position: 'absolute', width: 10, height: 10, borderRadius: 5,
+        backgroundColor: color, opacity: 0.25, transform: [{ scale: anim }],
       }} />
       <View style={{ width: 7, height: 7, borderRadius: 4, backgroundColor: color }} />
     </View>
@@ -138,12 +229,13 @@ export default function AdminDashboard() {
         supabase.rpc('get_all_subscription_plans'),
       ]);
       if (plansError) console.error('[Admin] Plans RPC error:', plansError);
-      const basicCount   = plans?.filter((p: any) => ['basico','básico'].includes((p.plan_type||'').toLowerCase().trim())).length || 0;
-      const premiumCount = plans?.filter((p: any) => (p.plan_type||'').toLowerCase().trim() === 'premium').length || 0;
-      const gratuitoCount= plans?.filter((p: any) => (p.plan_type||'').toLowerCase().trim() === 'gratuito').length || 0;
+      const basicCount    = plans?.filter((p: any) => ['basico','básico'].includes((p.plan_type||'').toLowerCase().trim())).length || 0;
+      const premiumCount  = plans?.filter((p: any) => (p.plan_type||'').toLowerCase().trim() === 'premium').length || 0;
+      const gratuitoCount = plans?.filter((p: any) => (p.plan_type||'').toLowerCase().trim() === 'gratuito').length || 0;
       const mrr = basicCount * 990 + premiumCount * 1490;
       const activeTenants = sessions?.length || 0;
-      const retentionRate = totalTenants ? Math.round((activeTenants / (totalTenants || 1)) * 100) : 0;
+      const retentionRate = totalTenants ? Math.round((activeTenants / (totalTenants||1)) * 100) : 0;
+
       const days: Record<string, number> = {};
       for (let i = 13; i >= 0; i--) {
         const d = new Date(); d.setDate(d.getDate() - i);
@@ -154,6 +246,7 @@ export default function AdminDashboard() {
         const key = `${d.getDate()}/${d.getMonth()+1}`;
         if (days[key] !== undefined) days[key]++;
       });
+
       const weeks: Record<string, number> = {};
       for (let i = 7; i >= 0; i--) weeks[`S${8-i}`] = 0;
       weeklyRegs?.forEach((p: any) => {
@@ -161,36 +254,40 @@ export default function AdminDashboard() {
         const key = `S${8-weeksAgo}`;
         if (weeks[key] !== undefined) weeks[key]++;
       });
+
       setData({
         totalTenants: totalTenants||0, activeTenants,
         monthAppointments: monthAppointments||0, totalAppointments: totalAppointments||0,
         retentionRate, basicCount, premiumCount, gratuitoCount, mrr,
-        dailyCitas: Object.entries(days).map(([label,value])=>({label,value})),
-        weeklyNegocios: Object.entries(weeks).map(([label,value])=>({label,value})),
+        dailyCitas: Object.entries(days).map(([label, value]) => ({ label, value })),
+        weeklyNegocios: Object.entries(weeks).map(([label, value]) => ({ label, value })),
       });
-    } catch (e) { console.error('[Admin] Failed to load:', e); }
+    } catch (e) { console.error('[Admin]', e); }
     finally { setLoading(false); setRefreshing(false); }
   };
 
   if (adminLoading || loading) {
     return (
       <View style={s.container}>
-        <ActivityIndicator size="large" color={C.gold} style={{ flex:1 }} />
+        <ActivityIndicator size="large" color={C.gold} style={{ flex: 1 }} />
       </View>
     );
   }
 
   const now = new Date();
-  const timeStr = now.toLocaleTimeString('es-MX', { hour:'2-digit', minute:'2-digit' });
-  const dateStr = now.toLocaleDateString('es-MX', { weekday:'long', day:'numeric', month:'long' });
+  const timeStr = now.toLocaleTimeString('es-MX', { hour: '2-digit', minute: '2-digit' });
+  const dateStr = now.toLocaleDateString('es-MX', { weekday: 'short', day: 'numeric', month: 'short' });
 
   return (
     <View style={s.container}>
-      <SafeAreaView style={{ flex:1 }} edges={['top']}>
+      <SafeAreaView style={{ flex: 1 }} edges={['top']}>
 
-        {/* ── HEADER ── */}
+        {/* HEADER */}
         <View style={s.header}>
-          <TouchableOpacity onPress={async () => { await signOut(); router.replace('/auth/onboarding'); }} style={s.exitBtn}>
+          <TouchableOpacity
+            onPress={async () => { await signOut(); router.replace('/auth/onboarding'); }}
+            style={s.exitBtn}
+          >
             <Text style={s.exitText}>EXIT</Text>
           </TouchableOpacity>
           <View style={s.headerCenter}>
@@ -210,14 +307,16 @@ export default function AdminDashboard() {
         <ScrollView
           contentContainerStyle={s.scroll}
           showsVerticalScrollIndicator={false}
-          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => loadData(true)} tintColor={C.gold} colors={[C.gold]} progressBackgroundColor={C.surface} />}
+          refreshControl={
+            <RefreshControl refreshing={refreshing} onRefresh={() => loadData(true)}
+              tintColor={C.gold} colors={[C.gold]} progressBackgroundColor={C.surface} />
+          }
         >
-
-          {/* ── MRR HERO ── */}
+          {/* MRR HERO */}
           <View style={s.mrrHero}>
             <View style={s.mrrTopRow}>
               <View style={s.mrrBadge}>
-                <View style={[s.mrrDot, { backgroundColor: C.gold }]} />
+                <PulseDot color={C.gold} />
                 <Text style={s.mrrBadgeText}>MRR EN VIVO</Text>
               </View>
               <Text style={s.mrrDate}>{dateStr}</Text>
@@ -242,16 +341,14 @@ export default function AdminDashboard() {
             </View>
           </View>
 
-          {/* ── KPI GRID ── */}
-          <Text style={s.sectionLabel}>INDICADORES GLOBALES</Text>
+          {/* KPI GRID */}
+          <Text style={s.sectionLabel}>INDICADORES</Text>
           <View style={s.kpiGrid}>
-            {/* Negocios totales */}
             <TouchableOpacity style={[s.kpiCard, { borderTopColor: C.green }]} onPress={() => router.push('/admin/tenants')} activeOpacity={0.75}>
               <Text style={[s.kpiNum, { color: C.green }]}>{data?.totalTenants}</Text>
               <Text style={s.kpiLabel}>Negocios</Text>
               <Text style={s.kpiHint}>Ver lista →</Text>
             </TouchableOpacity>
-            {/* Activos */}
             <View style={[s.kpiCard, { borderTopColor: C.blue }]}>
               <View style={s.kpiActiveRow}>
                 <Text style={[s.kpiNum, { color: C.blue }]}>{data?.activeTenants}</Text>
@@ -260,13 +357,11 @@ export default function AdminDashboard() {
               <Text style={s.kpiLabel}>Activos 30d</Text>
               <Text style={s.kpiHint}>Con sesión</Text>
             </View>
-            {/* Retención */}
             <View style={[s.kpiCard, { borderTopColor: C.gold }]}>
               <Text style={[s.kpiNum, { color: C.gold }]}>{data?.retentionRate}%</Text>
               <Text style={s.kpiLabel}>Retención</Text>
               <Text style={s.kpiHint}>Activos / Total</Text>
             </View>
-            {/* Citas mes */}
             <View style={[s.kpiCard, { borderTopColor: C.purple }]}>
               <Text style={[s.kpiNum, { color: C.purple }]}>{data?.monthAppointments}</Text>
               <Text style={s.kpiLabel}>Citas mes</Text>
@@ -274,25 +369,39 @@ export default function AdminDashboard() {
             </View>
           </View>
 
-          {/* ── CHART CITAS ── */}
+          {/* LINE CHART — Citas */}
           <View style={s.chartHeader}>
-            <Text style={s.sectionLabel}>ACTIVIDAD — Últimos 14 días</Text>
-            <View style={[s.chartDot, { backgroundColor: C.purple }]} />
+            <View style={s.chartTitleRow}>
+              <View style={[s.chartAccent, { backgroundColor: C.purple }]} />
+              <Text style={s.sectionLabel}>ACTIVIDAD — 14 días</Text>
+            </View>
+            <Text style={s.chartSubtitle}>{data?.totalAppointments} citas totales</Text>
           </View>
           <View style={s.chartCard}>
-            <BarChart data={data?.dailyCitas||[]} color={C.purple} height={90} />
+            <LineChart
+              data={data?.dailyCitas||[]}
+              color={C.purple}
+              gradientId="citasGrad"
+            />
           </View>
 
-          {/* ── CHART NEGOCIOS ── */}
+          {/* BAR CHART — Negocios */}
           <View style={s.chartHeader}>
-            <Text style={s.sectionLabel}>NUEVOS NEGOCIOS — 8 semanas</Text>
-            <View style={[s.chartDot, { backgroundColor: C.green }]} />
+            <View style={s.chartTitleRow}>
+              <View style={[s.chartAccent, { backgroundColor: C.green }]} />
+              <Text style={s.sectionLabel}>NUEVOS NEGOCIOS — 8 semanas</Text>
+            </View>
+            <Text style={s.chartSubtitle}>{data?.totalTenants} total</Text>
           </View>
           <View style={s.chartCard}>
-            <BarChart data={data?.weeklyNegocios||[]} color={C.green} height={90} />
+            <BarChart
+              data={data?.weeklyNegocios||[]}
+              color={C.green}
+              gradientId="negociosGrad"
+            />
           </View>
 
-          {/* ── ACCIONES SUPERADMIN ── */}
+          {/* ACCIONES */}
           {isSuperAdmin && (
             <>
               <Text style={s.sectionLabel}>ACCIONES</Text>
@@ -313,9 +422,7 @@ export default function AdminDashboard() {
             </>
           )}
 
-          {/* Footer */}
           <Text style={s.footer}>VYLTA · {adminUser?.name} · {isSuperAdmin ? 'SuperAdmin' : 'Admin'}</Text>
-
         </ScrollView>
       </SafeAreaView>
     </View>
@@ -323,66 +430,64 @@ export default function AdminDashboard() {
 }
 
 const s = StyleSheet.create({
-  container:      { flex:1, backgroundColor: C.bg },
-  // Header
-  header:         { flexDirection:'row', alignItems:'center', justifyContent:'space-between',
-                    paddingHorizontal:20, paddingVertical:14,
-                    borderBottomWidth:1, borderBottomColor: C.border },
-  exitBtn:        { paddingHorizontal:12, paddingVertical:6, borderRadius:8,
-                    borderWidth:1, borderColor: C.muted },
-  exitText:       { fontSize:11, fontWeight:'800', color: C.soft, letterSpacing:1.5 },
-  headerCenter:   { alignItems:'center' },
-  headerTitle:    { fontSize:17, fontWeight:'900', color: C.gold, letterSpacing:3 },
-  headerSub:      { fontSize:8, color: C.muted, letterSpacing:2, marginTop:1 },
-  headerRight:    { alignItems:'flex-end', gap:4 },
-  headerTime:     { fontSize:13, fontWeight:'700', color: C.text, fontVariant:['tabular-nums'] },
-  roleBadge:      { paddingHorizontal:8, paddingVertical:2, borderRadius:6, borderWidth:1 },
-  roleText:       { fontSize:9, fontWeight:'900', letterSpacing:1.5 },
+  container:     { flex: 1, backgroundColor: C.bg },
+  header:        { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+                   paddingHorizontal: 20, paddingVertical: 14,
+                   borderBottomWidth: 1, borderBottomColor: C.border },
+  exitBtn:       { paddingHorizontal: 12, paddingVertical: 6, borderRadius: 8,
+                   borderWidth: 1, borderColor: C.muted },
+  exitText:      { fontSize: 11, fontWeight: '800', color: C.soft, letterSpacing: 1.5 },
+  headerCenter:  { alignItems: 'center' },
+  headerTitle:   { fontSize: 17, fontWeight: '900', color: C.gold, letterSpacing: 3 },
+  headerSub:     { fontSize: 8, color: C.muted, letterSpacing: 2, marginTop: 1 },
+  headerRight:   { alignItems: 'flex-end', gap: 4 },
+  headerTime:    { fontSize: 13, fontWeight: '700', color: C.text },
+  roleBadge:     { paddingHorizontal: 8, paddingVertical: 2, borderRadius: 6, borderWidth: 1 },
+  roleText:      { fontSize: 9, fontWeight: '900', letterSpacing: 1.5 },
 
-  scroll:         { paddingHorizontal:20, paddingTop:20, paddingBottom:100 },
+  scroll:        { paddingHorizontal: 20, paddingTop: 20, paddingBottom: 100 },
 
-  // MRR Hero
-  mrrHero:        { backgroundColor: C.surface, borderRadius:22, padding:24, marginBottom:24,
-                    borderWidth:1, borderColor: C.gold+'33' },
-  mrrTopRow:      { flexDirection:'row', alignItems:'center', justifyContent:'space-between', marginBottom:12 },
-  mrrBadge:       { flexDirection:'row', alignItems:'center', gap:6 },
-  mrrDot:         { width:7, height:7, borderRadius:4 },
-  mrrBadgeText:   { fontSize:10, fontWeight:'800', color: C.gold, letterSpacing:2 },
-  mrrDate:        { fontSize:10, color: C.muted },
-  mrrAmount:      { fontSize:52, fontWeight:'900', color: C.gold, letterSpacing:-2, lineHeight:56 },
-  mrrCurrency:    { fontSize:13, color: C.soft, fontWeight:'600', marginTop:2, marginBottom:20 },
-  mrrSubRow:      { flexDirection:'row', alignItems:'center', paddingTop:16,
-                    borderTopWidth:1, borderTopColor: C.border },
-  mrrSubItem:     { flex:1, alignItems:'center' },
-  mrrSubVal:      { fontSize:26, fontWeight:'900', letterSpacing:-1 },
-  mrrSubLabel:    { fontSize:9, color: C.muted, fontWeight:'700', letterSpacing:1.5, marginTop:2 },
-  mrrDivider:     { width:1, height:36, backgroundColor: C.border },
+  // MRR
+  mrrHero:       { backgroundColor: C.surface, borderRadius: 22, padding: 24, marginBottom: 24,
+                   borderWidth: 1, borderColor: C.gold + '33' },
+  mrrTopRow:     { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 },
+  mrrBadge:      { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  mrrBadgeText:  { fontSize: 10, fontWeight: '800', color: C.gold, letterSpacing: 2 },
+  mrrDate:       { fontSize: 10, color: C.muted },
+  mrrAmount:     { fontSize: 52, fontWeight: '900', color: C.gold, letterSpacing: -2, lineHeight: 56 },
+  mrrCurrency:   { fontSize: 13, color: C.soft, fontWeight: '600', marginTop: 2, marginBottom: 20 },
+  mrrSubRow:     { flexDirection: 'row', alignItems: 'center', paddingTop: 16,
+                   borderTopWidth: 1, borderTopColor: C.border },
+  mrrSubItem:    { flex: 1, alignItems: 'center' },
+  mrrSubVal:     { fontSize: 26, fontWeight: '900', letterSpacing: -1 },
+  mrrSubLabel:   { fontSize: 9, color: C.muted, fontWeight: '700', letterSpacing: 1.5, marginTop: 2 },
+  mrrDivider:    { width: 1, height: 36, backgroundColor: C.border },
 
-  // Sección
-  sectionLabel:   { fontSize:10, fontWeight:'800', color: C.muted, letterSpacing:2, marginBottom:12 },
+  sectionLabel:  { fontSize: 10, fontWeight: '800', color: C.muted, letterSpacing: 2, marginBottom: 12 },
 
-  // KPI Grid
-  kpiGrid:        { flexDirection:'row', flexWrap:'wrap', gap:10, marginBottom:24 },
-  kpiCard:        { width:'47%', backgroundColor: C.surface, borderRadius:16, padding:16,
-                    borderTopWidth:2, borderWidth:1, borderColor: C.border },
-  kpiActiveRow:   { flexDirection:'row', alignItems:'center', gap:8 },
-  kpiNum:         { fontSize:34, fontWeight:'900', letterSpacing:-1, lineHeight:38 },
-  kpiLabel:       { fontSize:12, color: C.soft, marginTop:6, fontWeight:'500' },
-  kpiHint:        { fontSize:10, color: C.muted, marginTop:4 },
+  // KPI
+  kpiGrid:       { flexDirection: 'row', flexWrap: 'wrap', gap: 10, marginBottom: 24 },
+  kpiCard:       { width: '47%', backgroundColor: C.surface, borderRadius: 16, padding: 16,
+                   borderTopWidth: 2, borderWidth: 1, borderColor: C.border },
+  kpiActiveRow:  { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  kpiNum:        { fontSize: 34, fontWeight: '900', letterSpacing: -1, lineHeight: 38 },
+  kpiLabel:      { fontSize: 12, color: C.soft, marginTop: 6, fontWeight: '500' },
+  kpiHint:       { fontSize: 10, color: C.muted, marginTop: 4 },
 
   // Charts
-  chartHeader:    { flexDirection:'row', alignItems:'center', justifyContent:'space-between', marginBottom:10 },
-  chartDot:       { width:6, height:6, borderRadius:3 },
-  chartCard:      { backgroundColor: C.surface, borderRadius:16, padding:16, marginBottom:24,
-                    alignItems:'center', borderWidth:1, borderColor: C.border },
+  chartHeader:   { marginBottom: 10 },
+  chartTitleRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  chartAccent:   { width: 3, height: 12, borderRadius: 2 },
+  chartSubtitle: { fontSize: 10, color: C.muted, marginTop: 3, marginLeft: 11 },
+  chartCard:     { backgroundColor: C.surface, borderRadius: 16, padding: 16, marginBottom: 24,
+                   alignItems: 'center', borderWidth: 1, borderColor: C.border },
 
   // Acciones
-  actionsRow:     { flexDirection:'row', gap:10, marginBottom:24 },
-  actionCard:     { flex:1, backgroundColor: C.surface, borderRadius:16, padding:18,
-                    alignItems:'center', gap:8, borderWidth:1, borderColor: C.border },
-  actionIcon:     { fontSize:26 },
-  actionLabel:    { fontSize:11, fontWeight:'700', color: C.text, letterSpacing:0.5 },
+  actionsRow:    { flexDirection: 'row', gap: 10, marginBottom: 24 },
+  actionCard:    { flex: 1, backgroundColor: C.surface, borderRadius: 16, padding: 18,
+                   alignItems: 'center', gap: 8, borderWidth: 1, borderColor: C.border },
+  actionIcon:    { fontSize: 26 },
+  actionLabel:   { fontSize: 11, fontWeight: '700', color: C.text, letterSpacing: 0.5 },
 
-  // Footer
-  footer:         { textAlign:'center', fontSize:10, color: C.muted, letterSpacing:1, marginTop:8 },
+  footer:        { textAlign: 'center', fontSize: 10, color: C.muted, letterSpacing: 1, marginTop: 8 },
 });
