@@ -2,6 +2,7 @@ import React, { useState, useCallback } from 'react';
 import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity,
   TextInput, Switch, ActivityIndicator, Share, Linking, Alert,
+  Clipboard,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
@@ -11,7 +12,6 @@ import { useAuth } from '@/contexts/AuthContext';
 import { supabase } from '@/lib/supabase';
 import MaterialIcons from '@expo/vector-icons/MaterialIcons';
 
-// FIX: nueva URL base con dominio propio vylta.lat
 const BASE_URL = 'https://book.vylta.lat';
 
 interface BookingLink {
@@ -95,9 +95,14 @@ export default function BookingLinkScreen() {
     } finally { setSaving(false); }
   };
 
+  // FIX: Copia al clipboard directamente — un tap, sin sheet de compartir
   const handleCopy = async () => {
     const url = `${BASE_URL}/${slug}`;
-    try { await Share.share({ message: url }); setCopied(true); setTimeout(() => setCopied(false), 2500); } catch {}
+    try {
+      Clipboard.setString(url);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2500);
+    } catch {}
   };
 
   const handleShare = async () => {
@@ -170,7 +175,6 @@ export default function BookingLinkScreen() {
     );
   }
 
-  // FIX: URL limpia con dominio propio — book.vylta.lat/slug
   const publicUrl = `${BASE_URL}/${slug}`;
   const hasLink = !!linkData;
 
@@ -189,7 +193,7 @@ export default function BookingLinkScreen() {
 
       <ScrollView contentContainerStyle={st.scroll} showsVerticalScrollIndicator={false}>
 
-        {/* Hero card */}
+        {/* Hero card con link y acciones */}
         <View style={st.heroCard}>
           <View style={st.heroRow}>
             <View style={st.heroIconWrap}>
@@ -204,20 +208,36 @@ export default function BookingLinkScreen() {
               <Text style={[st.activeText, { color: isActive ? '#10B981' : '#64748B' }]}>{isActive ? 'Activo' : 'Inactivo'}</Text>
             </View>
           </View>
+
+          {/* FIX: Botón Copiar usa Clipboard — un tap y ya está en el portapapeles */}
           <View style={st.actionRow}>
-            <TouchableOpacity style={[st.actionBtn, copied && st.actionBtnSuccess]} onPress={handleCopy}>
+            <TouchableOpacity
+              style={[st.actionBtn, copied && st.actionBtnSuccess]}
+              onPress={handleCopy}
+              activeOpacity={0.75}
+            >
               <MaterialIcons name={copied ? 'check' : 'content-copy'} size={16} color={copied ? '#10B981' : '#F8FAFC'} />
-              <Text style={[st.actionBtnText, copied && { color: '#10B981' }]}>{copied ? 'Listo' : 'Copiar'}</Text>
+              <Text style={[st.actionBtnText, copied && { color: '#10B981' }]}>
+                {copied ? '¡Copiado!' : 'Copiar'}
+              </Text>
             </TouchableOpacity>
-            <TouchableOpacity style={st.actionBtn} onPress={handleShare}>
+            <TouchableOpacity style={st.actionBtn} onPress={handleShare} activeOpacity={0.75}>
               <MaterialIcons name="share" size={16} color="#F8FAFC" />
               <Text style={st.actionBtnText}>Compartir</Text>
             </TouchableOpacity>
-            <TouchableOpacity style={st.actionBtn} onPress={handleOpenLink}>
+            <TouchableOpacity style={st.actionBtn} onPress={handleOpenLink} activeOpacity={0.75}>
               <MaterialIcons name="open-in-browser" size={16} color="#F8FAFC" />
               <Text style={st.actionBtnText}>Ver página</Text>
             </TouchableOpacity>
           </View>
+
+          {/* Hint de copiado */}
+          {copied && (
+            <View style={st.copiedHint}>
+              <MaterialIcons name="check-circle" size={13} color="#10B981" />
+              <Text style={st.copiedHintText}>Link copiado al portapapeles — pégalo donde quieras</Text>
+            </View>
+          )}
         </View>
 
         {/* Solicitudes pendientes */}
@@ -327,69 +347,71 @@ export default function BookingLinkScreen() {
 }
 
 const st = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#0F172A' },
-  centered: { flex: 1, justifyContent: 'center', alignItems: 'center' },
-  header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, paddingVertical: 14, borderBottomWidth: 1, borderBottomColor: '#1E293B' },
-  backBtn: { flexDirection: 'row', alignItems: 'center', gap: 2, minWidth: 80 },
-  backText: { fontSize: 15, color: '#64748B' },
-  title: { fontSize: 17, fontWeight: '700', color: '#F8FAFC' },
-  saveHeaderBtn: { minWidth: 80, alignItems: 'flex-end' },
-  saveHeaderText: { fontSize: 15, fontWeight: '700', color: '#10B981' },
-  scroll: { padding: 16, paddingBottom: 60, gap: 16 },
-  heroCard: { backgroundColor: '#1E293B', borderRadius: 18, padding: 16, borderWidth: 1, borderColor: '#334155' },
-  heroRow: { flexDirection: 'row', alignItems: 'center', gap: 12, marginBottom: 14 },
-  heroIconWrap: { width: 40, height: 40, borderRadius: 12, backgroundColor: '#0F3D2E', justifyContent: 'center', alignItems: 'center' },
-  heroLabel: { fontSize: 11, fontWeight: '700', color: '#475569', textTransform: 'uppercase', letterSpacing: 0.8, marginBottom: 2 },
-  heroUrl: { fontSize: 12, color: '#10B981', fontFamily: 'monospace' },
-  activePill: { flexDirection: 'row', alignItems: 'center', gap: 5, paddingHorizontal: 10, paddingVertical: 5, borderRadius: 20 },
-  activeDot: { width: 6, height: 6, borderRadius: 3 },
-  activeText: { fontSize: 11, fontWeight: '700' },
-  actionRow: { flexDirection: 'row', gap: 8 },
-  actionBtn: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 5, backgroundColor: '#0F172A', paddingVertical: 10, borderRadius: 10, borderWidth: 1, borderColor: '#334155' },
+  container:        { flex: 1, backgroundColor: '#0F172A' },
+  centered:         { flex: 1, justifyContent: 'center', alignItems: 'center' },
+  header:           { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, paddingVertical: 14, borderBottomWidth: 1, borderBottomColor: '#1E293B' },
+  backBtn:          { flexDirection: 'row', alignItems: 'center', gap: 2, minWidth: 80 },
+  backText:         { fontSize: 15, color: '#64748B' },
+  title:            { fontSize: 17, fontWeight: '700', color: '#F8FAFC' },
+  saveHeaderBtn:    { minWidth: 80, alignItems: 'flex-end' },
+  saveHeaderText:   { fontSize: 15, fontWeight: '700', color: '#10B981' },
+  scroll:           { padding: 16, paddingBottom: 60, gap: 16 },
+  heroCard:         { backgroundColor: '#1E293B', borderRadius: 18, padding: 16, borderWidth: 1, borderColor: '#334155' },
+  heroRow:          { flexDirection: 'row', alignItems: 'center', gap: 12, marginBottom: 14 },
+  heroIconWrap:     { width: 40, height: 40, borderRadius: 12, backgroundColor: '#0F3D2E', justifyContent: 'center', alignItems: 'center' },
+  heroLabel:        { fontSize: 11, fontWeight: '700', color: '#475569', textTransform: 'uppercase', letterSpacing: 0.8, marginBottom: 2 },
+  heroUrl:          { fontSize: 12, color: '#10B981', fontFamily: 'monospace' },
+  activePill:       { flexDirection: 'row', alignItems: 'center', gap: 5, paddingHorizontal: 10, paddingVertical: 5, borderRadius: 20 },
+  activeDot:        { width: 6, height: 6, borderRadius: 3 },
+  activeText:       { fontSize: 11, fontWeight: '700' },
+  actionRow:        { flexDirection: 'row', gap: 8 },
+  actionBtn:        { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 5, backgroundColor: '#0F172A', paddingVertical: 10, borderRadius: 10, borderWidth: 1, borderColor: '#334155' },
   actionBtnSuccess: { borderColor: '#065F46', backgroundColor: '#022C22' },
-  actionBtnText: { fontSize: 12, fontWeight: '600', color: '#F8FAFC' },
-  section: { gap: 10 },
-  sectionTitleRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  sectionTitle: { fontSize: 13, fontWeight: '700', color: '#64748B', textTransform: 'uppercase', letterSpacing: 0.6 },
-  countBadge: { backgroundColor: '#EF4444', borderRadius: 20, paddingHorizontal: 8, paddingVertical: 2 },
-  countBadgeText: { fontSize: 12, fontWeight: '800', color: '#fff' },
-  requestCard: { backgroundColor: '#1E293B', borderRadius: 14, padding: 14, borderWidth: 1, borderColor: '#450A0A' },
-  requestInfo: { marginBottom: 12 },
-  requestName: { fontSize: 15, fontWeight: '700', color: '#F8FAFC', marginBottom: 2 },
-  requestService: { fontSize: 13, color: '#94A3B8' },
-  requestDate: { fontSize: 12, color: '#64748B', marginTop: 4 },
-  requestNotes: { fontSize: 12, color: '#94A3B8', marginTop: 4, fontStyle: 'italic' },
-  requestBtns: { flexDirection: 'row', gap: 10 },
-  approveBtn: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, backgroundColor: '#10B981', borderRadius: 10, paddingVertical: 10 },
-  approveBtnText: { color: '#fff', fontWeight: '700', fontSize: 13 },
-  rejectBtn: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, backgroundColor: 'transparent', borderRadius: 10, paddingVertical: 10, borderWidth: 1, borderColor: '#450A0A' },
-  rejectBtnText: { color: '#EF4444', fontWeight: '700', fontSize: 13 },
-  configCard: { backgroundColor: '#1E293B', borderRadius: 14, padding: 14, borderWidth: 1, borderColor: '#334155' },
+  actionBtnText:    { fontSize: 12, fontWeight: '600', color: '#F8FAFC' },
+  copiedHint:       { flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 10, paddingHorizontal: 4 },
+  copiedHintText:   { fontSize: 11, color: '#10B981', fontWeight: '500' },
+  section:          { gap: 10 },
+  sectionTitleRow:  { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  sectionTitle:     { fontSize: 13, fontWeight: '700', color: '#64748B', textTransform: 'uppercase', letterSpacing: 0.6 },
+  countBadge:       { backgroundColor: '#EF4444', borderRadius: 20, paddingHorizontal: 8, paddingVertical: 2 },
+  countBadgeText:   { fontSize: 12, fontWeight: '800', color: '#fff' },
+  requestCard:      { backgroundColor: '#1E293B', borderRadius: 14, padding: 14, borderWidth: 1, borderColor: '#450A0A' },
+  requestInfo:      { marginBottom: 12 },
+  requestName:      { fontSize: 15, fontWeight: '700', color: '#F8FAFC', marginBottom: 2 },
+  requestService:   { fontSize: 13, color: '#94A3B8' },
+  requestDate:      { fontSize: 12, color: '#64748B', marginTop: 4 },
+  requestNotes:     { fontSize: 12, color: '#94A3B8', marginTop: 4, fontStyle: 'italic' },
+  requestBtns:      { flexDirection: 'row', gap: 10 },
+  approveBtn:       { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, backgroundColor: '#10B981', borderRadius: 10, paddingVertical: 10 },
+  approveBtnText:   { color: '#fff', fontWeight: '700', fontSize: 13 },
+  rejectBtn:        { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, backgroundColor: 'transparent', borderRadius: 10, paddingVertical: 10, borderWidth: 1, borderColor: '#450A0A' },
+  rejectBtnText:    { color: '#EF4444', fontWeight: '700', fontSize: 13 },
+  configCard:       { backgroundColor: '#1E293B', borderRadius: 14, padding: 14, borderWidth: 1, borderColor: '#334155' },
   configCardHeader: { flexDirection: 'row', alignItems: 'flex-start', gap: 10, marginBottom: 12 },
-  configLabel: { fontSize: 14, fontWeight: '600', color: '#F8FAFC' },
-  configSub: { fontSize: 12, color: '#475569', marginTop: 2 },
-  slugInput: { backgroundColor: '#0F172A', borderWidth: 1.5, borderColor: '#334155', borderRadius: 10, padding: 12, fontSize: 14, color: '#10B981', fontFamily: 'monospace', marginBottom: 8 },
-  errorRow: { flexDirection: 'row', alignItems: 'center', gap: 5, marginBottom: 6 },
-  slugError: { fontSize: 12, color: '#EF4444' },
-  urlPreviewRow: { flexDirection: 'row', alignItems: 'center', gap: 5 },
-  urlPreview: { fontSize: 11, color: '#334155', fontFamily: 'monospace', flex: 1 },
-  togglesCard: { backgroundColor: '#1E293B', borderRadius: 14, overflow: 'hidden', borderWidth: 1, borderColor: '#334155' },
-  toggleRow: { flexDirection: 'row', alignItems: 'center', padding: 14, gap: 12 },
-  toggleIcon: { width: 36, height: 36, borderRadius: 10, backgroundColor: '#0F172A', justifyContent: 'center', alignItems: 'center' },
-  toggleLabel: { fontSize: 14, fontWeight: '600', color: '#F8FAFC', marginBottom: 2 },
-  toggleSub: { fontSize: 12, color: '#475569', lineHeight: 16 },
-  divider: { height: 1, backgroundColor: '#0F172A', marginHorizontal: 14 },
-  tipsCard: { backgroundColor: '#1E293B', borderRadius: 14, padding: 14, borderWidth: 1, borderColor: '#334155' },
-  tipsHeader: { flexDirection: 'row', alignItems: 'center', gap: 7, marginBottom: 12 },
-  tipsTitle: { fontSize: 13, fontWeight: '700', color: '#94A3B8' },
-  tipRow: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 8 },
-  tipText: { fontSize: 13, color: '#64748B' },
-  saveBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, backgroundColor: '#10B981', borderRadius: 14, padding: 16 },
-  saveBtnText: { color: '#fff', fontWeight: '800', fontSize: 16 },
-  paywall: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 36, gap: 16 },
-  paywallIconWrap: { width: 72, height: 72, borderRadius: 22, backgroundColor: '#0F3D2E', justifyContent: 'center', alignItems: 'center' },
-  paywallTitle: { fontSize: 22, fontWeight: '800', color: '#F8FAFC', textAlign: 'center' },
-  paywallDesc: { fontSize: 15, color: '#64748B', textAlign: 'center', lineHeight: 24 },
-  paywallBtn: { flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: '#10B981', paddingHorizontal: 28, paddingVertical: 14, borderRadius: 14 },
-  paywallBtnText: { color: '#fff', fontWeight: '700', fontSize: 15 },
+  configLabel:      { fontSize: 14, fontWeight: '600', color: '#F8FAFC' },
+  configSub:        { fontSize: 12, color: '#475569', marginTop: 2 },
+  slugInput:        { backgroundColor: '#0F172A', borderWidth: 1.5, borderColor: '#334155', borderRadius: 10, padding: 12, fontSize: 14, color: '#10B981', fontFamily: 'monospace', marginBottom: 8 },
+  errorRow:         { flexDirection: 'row', alignItems: 'center', gap: 5, marginBottom: 6 },
+  slugError:        { fontSize: 12, color: '#EF4444' },
+  urlPreviewRow:    { flexDirection: 'row', alignItems: 'center', gap: 5 },
+  urlPreview:       { fontSize: 11, color: '#334155', fontFamily: 'monospace', flex: 1 },
+  togglesCard:      { backgroundColor: '#1E293B', borderRadius: 14, overflow: 'hidden', borderWidth: 1, borderColor: '#334155' },
+  toggleRow:        { flexDirection: 'row', alignItems: 'center', padding: 14, gap: 12 },
+  toggleIcon:       { width: 36, height: 36, borderRadius: 10, backgroundColor: '#0F172A', justifyContent: 'center', alignItems: 'center' },
+  toggleLabel:      { fontSize: 14, fontWeight: '600', color: '#F8FAFC', marginBottom: 2 },
+  toggleSub:        { fontSize: 12, color: '#475569', lineHeight: 16 },
+  divider:          { height: 1, backgroundColor: '#0F172A', marginHorizontal: 14 },
+  tipsCard:         { backgroundColor: '#1E293B', borderRadius: 14, padding: 14, borderWidth: 1, borderColor: '#334155' },
+  tipsHeader:       { flexDirection: 'row', alignItems: 'center', gap: 7, marginBottom: 12 },
+  tipsTitle:        { fontSize: 13, fontWeight: '700', color: '#94A3B8' },
+  tipRow:           { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 8 },
+  tipText:          { fontSize: 13, color: '#64748B' },
+  saveBtn:          { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, backgroundColor: '#10B981', borderRadius: 14, padding: 16 },
+  saveBtnText:      { color: '#fff', fontWeight: '800', fontSize: 16 },
+  paywall:          { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 36, gap: 16 },
+  paywallIconWrap:  { width: 72, height: 72, borderRadius: 22, backgroundColor: '#0F3D2E', justifyContent: 'center', alignItems: 'center' },
+  paywallTitle:     { fontSize: 22, fontWeight: '800', color: '#F8FAFC', textAlign: 'center' },
+  paywallDesc:      { fontSize: 15, color: '#64748B', textAlign: 'center', lineHeight: 24 },
+  paywallBtn:       { flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: '#10B981', paddingHorizontal: 28, paddingVertical: 14, borderRadius: 14 },
+  paywallBtnText:   { color: '#fff', fontWeight: '700', fontSize: 15 },
 });
