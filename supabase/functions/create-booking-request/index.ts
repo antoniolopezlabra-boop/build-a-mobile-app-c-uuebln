@@ -54,29 +54,29 @@ serve(async (req) => {
     }
 
     // ── Verificar límite del plan Gratuito ──────────────────────────────
-    // Consultar el plan activo del negocio
+    // La tabla del plan es subscription_plans con columna plan_type
     const { data: sub } = await supabase
-      .from('subscriptions')
-      .select('plan_type')
+      .from('subscription_plans')
+      .select('plan_type, status')
       .eq('user_id', link.user_id)
-      .eq('is_active', true)
       .single()
 
-    const planType = sub?.plan_type ?? 'Gratuito'
+    // Si no tiene plan o es Gratuito, aplicar límite de 10 citas/mes
+    const planType = sub?.plan_type?.toLowerCase() ?? 'gratuito'
+    const isGratuito = planType === 'gratuito'
 
-    if (planType === 'Gratuito') {
-      // Contar citas del mes actual (excluir canceladas y no asistió)
-      const now       = new Date()
+    if (isGratuito) {
+      const now        = new Date()
       const monthStart = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-01`
-      const monthEnd   = new Date(now.getFullYear(), now.getMonth() + 1, 0)
-      const monthEndStr = `${monthEnd.getFullYear()}-${String(monthEnd.getMonth() + 1).padStart(2, '0')}-${String(monthEnd.getDate()).padStart(2, '0')}`
+      const lastDay    = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate()
+      const monthEnd   = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(lastDay).padStart(2, '0')}`
 
       const { count } = await supabase
         .from('appointments')
         .select('id', { count: 'exact', head: true })
         .eq('user_id', link.user_id)
         .gte('date', monthStart)
-        .lte('date', monthEndStr)
+        .lte('date', monthEnd)
         .not('status', 'in', '("Cancelada","No asistió","Rechazada")')
 
       if ((count ?? 0) >= GRATUITO_MONTHLY_LIMIT) {
