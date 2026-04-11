@@ -56,6 +56,8 @@ export default function NewAppointmentScreen() {
   const { user } = useAuth();
   const { canSchedule, isGratuito } = usePlan();
   const [loading, setLoading] = useState(false);
+  const saveLockRef = useRef(false); // FIX: guard contra doble-submit
+
   const [clients, setClients] = useState<Client[]>([]);
   const [selectedClient, setSelectedClient] = useState<Client | null>(null);
   const [showClientPicker, setShowClientPicker] = useState(false);
@@ -179,7 +181,6 @@ export default function NewAppointmentScreen() {
 
       const dayOfWeek = date.getDay();
 
-      // Si hay staff seleccionado, usar SU horario propio
       let dayConfig: any = null;
       if (selectedStaff) {
         const { data: sh } = await supabase
@@ -193,7 +194,6 @@ export default function NewAppointmentScreen() {
         }
       }
 
-      // Si no hay staff o no tiene horario propio, usar el del negocio
       if (!dayConfig) {
         const defaultHours = [0,1,2,3,4,5,6].map(d => ({
           dayOfWeek: d, isOpen: d >= 1 && d <= 5, startTime: '09:00', endTime: '18:00',
@@ -212,20 +212,15 @@ export default function NewAppointmentScreen() {
       const endHour   = parseInt(dayConfig.endTime.split(':')[0]);
       const endMin    = parseInt(dayConfig.endTime.split(':')[1]);
 
-      // FIX CRÍTICO: separar citas del staff seleccionado vs citas generales
-      // Las citas del staff seleccionado NUNCA deben mostrarse como disponibles (sin importar allowOverlapping)
-      // allowOverlapping solo aplica para citas SIN staff asignado vs la agenda general
       const allDateAppointments = appointments as any[];
 
-      let staffAppointments: any[]    = []; // citas del staff seleccionado (BLOQUEAN siempre)
-      let generalAppointments: any[]  = []; // otras citas (bloquean solo si !allowOverlapping)
+      let staffAppointments: any[]    = [];
+      let generalAppointments: any[]  = [];
 
       if (selectedStaff) {
-        // Con staff seleccionado: solo bloquear sus propias citas
         staffAppointments   = allDateAppointments.filter((a: any) => a.staff_id === selectedStaff.id);
-        generalAppointments = []; // no considerar otras citas de otros staff
+        generalAppointments = [];
       } else {
-        // Sin staff: bloquear todas las citas del negocio (respetando allowOverlapping)
         staffAppointments   = [];
         generalAppointments = allDateAppointments;
       }
@@ -240,21 +235,18 @@ export default function NewAppointmentScreen() {
         const minute = totalMin%60;
         const timeString = `${hour.toString().padStart(2,'0')}:${minute.toString().padStart(2,'0')}`;
 
-        // Verificar si el STAFF seleccionado ya tiene cita en este slot (bloqueo absoluto)
         const blockedByStaff = staffAppointments.some((appt: any) => {
           const [sh2, sm2] = (appt.time || appt.startTime || '00:00').split(':').map(Number);
           const [eh2, em2] = (appt.endTime || appt.end_time || '00:00').split(':').map(Number);
           return totalMin >= sh2*60+sm2 && totalMin < eh2*60+em2;
         });
 
-        // Verificar si hay cita general que ocupe este slot (solo si !allowOverlapping)
         const blockedByGeneral = !allowOverlapping && generalAppointments.some((appt: any) => {
           const [sh2, sm2] = (appt.time || appt.startTime || '00:00').split(':').map(Number);
           const [eh2, em2] = (appt.endTime || appt.end_time || '00:00').split(':').map(Number);
           return totalMin >= sh2*60+sm2 && totalMin < eh2*60+em2;
         });
 
-        // Overlap: hay cita general pero allowOverlapping está activo (solo para agenda sin staff)
         const isOverlap = !selectedStaff && allowOverlapping && generalAppointments.some((appt: any) => {
           const [sh2, sm2] = (appt.time || appt.startTime || '00:00').split(':').map(Number);
           const [eh2, em2] = (appt.endTime || appt.end_time || '00:00').split(':').map(Number);
@@ -272,11 +264,14 @@ export default function NewAppointmentScreen() {
       }
       setTimeSlots(slots);
     } catch {
-      // Si falla, generar slots por defecto sin restricciones
+      // Si falla, no bloquear la pantalla
     }
   };
 
   const handleSave = async () => {
+    // FIX doble-submit: guard con ref (más rápido que useState)
+    if (saveLockRef.current) return;
+
     Keyboard.dismiss();
     if (!canSchedule) {
       setErrorModal({ visible: true, message: '⚠️ Tu plan Gratuito no permite agendar citas. Actualiza a Plan Básico.' }); return;
@@ -291,7 +286,11 @@ export default function NewAppointmentScreen() {
     if (!selectedSlot || !selectedSlot.available) {
       setErrorModal({ visible: true, message: 'El horario seleccionado no está disponible.' }); return;
     }
+
+    // Bloquear ANTES del fetch
+    saveLockRef.current = true;
     setLoading(true);
+
     try {
       const dateString = `${date.getFullYear()}-${String(date.getMonth()+1).padStart(2,'0')}-${String(date.getDate()).padStart(2,'0')}`;
       await apiPost('/api/appointments', {
@@ -311,8 +310,11 @@ export default function NewAppointmentScreen() {
       invalidateCache('appointments_list');
       router.back();
     } catch (error: any) {
+      // Solo desbloquear en error — en éxito el router.back() desmonta el componente
+      saveLockRef.current = false;
+      setLoading(false);
       setErrorModal({ visible: true, message: error?.message || 'Error al crear la cita' });
-    } finally { setLoading(false); }
+    }
   };
 
   const filteredClients = clients.filter(c =>
@@ -554,12 +556,21 @@ export default function NewAppointmentScreen() {
             </View>
           </View>
 
+          {/* Botón guardar con feedback visual mejorado */}
           <TouchableOpacity
             style={[styles.saveButton, loading && styles.saveButtonDisabled]}
             onPress={handleSave}
             disabled={loading}
+            activeOpacity={0.8}
           >
-            {loading ? <ActivityIndicator color="#ffffff" /> : <Text style={styles.saveButtonText}>Guardar Cita</Text>}
+            {loading ? (
+              <View style={styles.saveButtonContent}>
+                <ActivityIndicator color="#ffffff" size="small" />
+                <Text style={styles.saveButtonText}>Guardando cita...</Text>
+              </View>
+            ) : (
+              <Text style={styles.saveButtonText}>Guardar Cita</Text>
+            )}
           </TouchableOpacity>
         </ScrollView>
       </KeyboardAvoidingView>
@@ -606,7 +617,6 @@ export default function NewAppointmentScreen() {
               </TouchableOpacity>
             </View>
             <ScrollView style={{ padding: 16 }}>
-              {/* Sin asignar */}
               <TouchableOpacity
                 style={[styles.staffItem, !selectedStaff && styles.staffItemSelected]}
                 onPress={() => { setSelectedStaff(null); setShowStaffPicker(false); }}
@@ -721,7 +731,7 @@ export default function NewAppointmentScreen() {
         </View>
       </Modal>
 
-      {/* Modal clientes — lista aparece arriba, teclado solo si toca "Buscar" */}
+      {/* Modal clientes */}
       <Modal
         visible={showClientPicker}
         animationType="slide"
@@ -737,7 +747,6 @@ export default function NewAppointmentScreen() {
               </TouchableOpacity>
             </View>
 
-            {/* Búsqueda: solo se activa si el usuario lo toca explícitamente */}
             {showClientSearch ? (
               <TextInput
                 style={styles.searchInput}
@@ -851,6 +860,7 @@ const styles = StyleSheet.create({
   switchText:             { fontSize: 16, fontWeight: '600', color: colors.text },
   saveButton:             { backgroundColor: colors.primary, borderRadius: 12, padding: 16, alignItems: 'center', marginTop: 8, marginBottom: 32 },
   saveButtonDisabled:     { opacity: 0.6 },
+  saveButtonContent:      { flexDirection: 'row', alignItems: 'center', gap: 10 },
   saveButtonText:         { fontSize: 16, fontWeight: '600', color: '#ffffff' },
   dateOverlay:            { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.40)' },
   datePanelContainer:     { position: 'absolute', bottom: 0, left: 0, right: 0, backgroundColor: '#ffffff', borderTopLeftRadius: 24, borderTopRightRadius: 24, paddingBottom: 40 },
