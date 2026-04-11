@@ -3,7 +3,7 @@ import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity,
   ActivityIndicator, RefreshControl,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useFocusEffect } from '@react-navigation/native';
 import MaterialIcons from '@expo/vector-icons/MaterialIcons';
@@ -36,6 +36,7 @@ export default function StaffHomeScreen() {
   const router = useRouter();
   const { staffMemberData, signOut } = useAuth();
   const { colors: tc } = useTheme();
+  const insets = useSafeAreaInsets();
 
   const today = useMemo(() => new Date(), []);
 
@@ -43,18 +44,15 @@ export default function StaffHomeScreen() {
   const [calMonth, setCalMonth] = useState(today.getMonth());
   const [selectedDate, setSelectedDate] = useState(today);
 
-  // Citas del día seleccionado
   const [appointments, setAppointments] = useState<Appointment[]>([]);
   const [loading,    setLoading]    = useState(true);
   const [refreshing, setRefreshing] = useState(false);
 
-  // Mapa de días con citas en el mes actual (para los puntos indicadores)
   const [monthDots, setMonthDots] = useState<Record<string, { mine: boolean; others: boolean }>>({});
 
   const orgUserId = staffMemberData?.organizationUserId ?? '';
   const myStaffId = staffMemberData?.id ?? '';
 
-  // ── Cargar citas del día seleccionado ────────────────────────
   const loadAppointments = useCallback(async (isPull = false) => {
     if (!orgUserId) return;
     if (isPull) setRefreshing(true); else setLoading(true);
@@ -76,7 +74,6 @@ export default function StaffHomeScreen() {
     }
   }, [selectedDate, orgUserId]);
 
-  // ── Cargar dots del mes visible ───────────────────────────
   const loadMonthDots = useCallback(async () => {
     if (!orgUserId) return;
     try {
@@ -107,7 +104,6 @@ export default function StaffHomeScreen() {
     loadMonthDots();
   }, [loadAppointments, loadMonthDots]));
 
-  // Recargar dots cuando cambia el mes visible
   const prevMonth = () => {
     if (calMonth === 0) { setCalYear(y => y - 1); setCalMonth(11); }
     else setCalMonth(m => m - 1);
@@ -117,7 +113,6 @@ export default function StaffHomeScreen() {
     else setCalMonth(m => m + 1);
   };
 
-  // ── Construir grid del mes ──────────────────────────────
   const calDays = useMemo(() => {
     const first   = new Date(calYear, calMonth, 1).getDay();
     const daysInMonth = new Date(calYear, calMonth + 1, 0).getDate();
@@ -138,6 +133,9 @@ export default function StaffHomeScreen() {
 
   const formattedSelectedDate = selectedDate.toLocaleDateString('es-MX', { weekday: 'long', day: 'numeric', month: 'long' });
 
+  // FAB bottom respetando safe area
+  const fabBottom = insets.bottom + 16;
+
   return (
     <SafeAreaView style={[s.container, { backgroundColor: tc.bg }]} edges={['top']}>
       {/* ── Header ── */}
@@ -146,8 +144,17 @@ export default function StaffHomeScreen() {
           <Text style={[s.greeting, { color: tc.textMuted }]}>{getGreeting()},</Text>
           <Text style={[s.name, { color: tc.text }]}>{staffMemberData?.name ?? 'Colaborador'}</Text>
         </View>
+        {/* Botón perfil */}
         <TouchableOpacity
-          style={[s.signOutBtn, { backgroundColor: tc.bg, borderColor: tc.border }]}
+          style={[s.headerBtn, { backgroundColor: tc.bg, borderColor: tc.border, marginRight: 8 }]}
+          onPress={() => router.push('/staff-app/profile')}
+          activeOpacity={0.7}
+        >
+          <MaterialIcons name="person-outline" size={18} color={tc.textMuted} />
+        </TouchableOpacity>
+        {/* Botón logout */}
+        <TouchableOpacity
+          style={[s.headerBtn, { backgroundColor: tc.bg, borderColor: tc.border }]}
           onPress={() => signOut()}
           activeOpacity={0.7}
         >
@@ -167,7 +174,6 @@ export default function StaffHomeScreen() {
       >
         {/* ── Calendario mensual ── */}
         <View style={[s.calContainer, { backgroundColor: tc.surface, borderBottomColor: tc.border }]}>
-          {/* Navegación mes */}
           <View style={s.calNav}>
             <TouchableOpacity onPress={prevMonth} style={s.calNavBtn} activeOpacity={0.7}>
               <MaterialIcons name="chevron-left" size={24} color={tc.text} />
@@ -180,14 +186,12 @@ export default function StaffHomeScreen() {
             </TouchableOpacity>
           </View>
 
-          {/* Cabecera días semana */}
           <View style={s.calWeekRow}>
             {WEEKDAYS.map(d => (
               <Text key={d} style={[s.calWeekDay, { color: tc.textMuted }]}>{d}</Text>
             ))}
           </View>
 
-          {/* Grid de días */}
           <View style={s.calGrid}>
             {calDays.map((day, idx) => {
               if (!day) return <View key={`e-${idx}`} style={s.calCell} />;
@@ -217,7 +221,6 @@ export default function StaffHomeScreen() {
                       isToday && !isSelected && { color: '#10B981', fontWeight: '700' },
                     ]}>{day}</Text>
                   </View>
-                  {/* Puntos indicadores de citas */}
                   {dots && (
                     <View style={s.dotsRow}>
                       {dots.mine    && <View style={[s.dot, { backgroundColor: '#10B981' }]} />}
@@ -242,7 +245,7 @@ export default function StaffHomeScreen() {
           </View>
         </View>
 
-        {/* ── Lista de citas del día seleccionado ── */}
+        {/* ── Lista de citas ── */}
         <View style={s.listSection}>
           <Text style={[s.dateTitle, { color: tc.text }]}>
             {formattedSelectedDate.charAt(0).toUpperCase() + formattedSelectedDate.slice(1)}
@@ -262,13 +265,12 @@ export default function StaffHomeScreen() {
               </Text>
 
               {appointments.map(appt => {
-                const mine       = isMyAppointment(appt);
+                const mine        = isMyAppointment(appt);
                 const statusColor = getStatusColor(appt.status);
-                const clientName = appt.client?.name ?? appt.client_name_temp ?? 'Cliente';
-                const staffName  = (appt.staff as any)?.name ?? null;
-                const staffColor = (appt.staff as any)?.color ?? '#94A3B8';
+                const clientName  = appt.client?.name ?? appt.client_name_temp ?? 'Cliente';
+                const staffName   = (appt.staff as any)?.name ?? null;
+                const staffColor  = (appt.staff as any)?.color ?? '#94A3B8';
 
-                // Las citas de otros colaboradores son solo lectura — no navegan a detalle
                 const handlePress = mine
                   ? () => router.push(`/staff-app/appointment/${appt.id}`)
                   : undefined;
@@ -286,24 +288,20 @@ export default function StaffHomeScreen() {
                     activeOpacity={mine ? 0.75 : 1}
                     disabled={!mine}
                   >
-                    {/* Acento lateral con color del colaborador */}
                     <View style={[s.apptAccent, { backgroundColor: staffColor }]} />
-
                     <View style={s.apptTimeBox}>
                       <Text style={[s.apptTime, { color: mine ? tc.text : tc.textMuted }]}>
                         {appt.start_time.slice(0, 5)}
                       </Text>
                     </View>
-
                     <View style={s.apptBody}>
                       <Text style={[s.apptClient, { color: mine ? tc.text : tc.textMuted }]} numberOfLines={1}>
-                        {mine ? clientName : '••••••'}  {/* privacidad: ocultar nombre de clientes ajenos */}
+                        {mine ? clientName : '••••••'}
                       </Text>
                       <Text style={[s.apptService, { color: tc.textMuted }]} numberOfLines={1}>
                         {appt.service_name}{staffName ? `  ·  ${staffName}` : ''}
                       </Text>
                     </View>
-
                     <View style={{ alignItems: 'flex-end', gap: 4 }}>
                       <View style={[s.statusBadge, { backgroundColor: statusColor + '22' }]}>
                         <Text style={[s.statusText, { color: statusColor }]}>{appt.status}</Text>
@@ -318,7 +316,6 @@ export default function StaffHomeScreen() {
                         </View>
                       )}
                     </View>
-
                     {mine
                       ? <MaterialIcons name="chevron-right" size={18} color={tc.border} style={{ marginLeft: 4 }} />
                       : <MaterialIcons name="lock" size={14} color={tc.border} style={{ marginLeft: 4 }} />
@@ -330,12 +327,12 @@ export default function StaffHomeScreen() {
           )}
         </View>
 
-        <View style={{ height: 120 }} />
+        <View style={{ height: fabBottom + 72 }} />
       </ScrollView>
 
-      {/* ── FAB Nueva cita ── */}
+      {/* ── FAB Nueva cita — respeta safe area ── */}
       <TouchableOpacity
-        style={s.fab}
+        style={[s.fab, { bottom: fabBottom }]}
         onPress={() => router.push('/staff-app/new-appointment')}
         activeOpacity={0.85}
       >
@@ -346,47 +343,44 @@ export default function StaffHomeScreen() {
 }
 
 const s = StyleSheet.create({
-  container:       { flex: 1 },
-  centered:        { paddingVertical: 30, alignItems: 'center' },
-  header:          { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, paddingVertical: 14, borderBottomWidth: 0.5 },
-  greeting:        { fontSize: 13, fontWeight: '500' },
-  name:            { fontSize: 22, fontWeight: '800', letterSpacing: -0.5 },
-  signOutBtn:      { width: 38, height: 38, borderRadius: 12, borderWidth: 1, justifyContent: 'center', alignItems: 'center' },
-  // Calendario
-  calContainer:    { paddingHorizontal: 16, paddingBottom: 12, borderBottomWidth: 0.5 },
-  calNav:          { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: 12 },
-  calNavBtn:       { padding: 6 },
-  calMonthTitle:   { fontSize: 16, fontWeight: '700' },
-  calWeekRow:      { flexDirection: 'row', marginBottom: 4 },
-  calWeekDay:      { flex: 1, textAlign: 'center', fontSize: 11, fontWeight: '700', letterSpacing: 0.5 },
-  calGrid:         { flexDirection: 'row', flexWrap: 'wrap' },
-  calCell:         { width: '14.28%', alignItems: 'center', paddingVertical: 3 },
-  calDayCircle:    { width: 34, height: 34, borderRadius: 17, justifyContent: 'center', alignItems: 'center' },
-  calDayText:      { fontSize: 14 },
-  dotsRow:         { flexDirection: 'row', gap: 2, marginTop: 2 },
-  dot:             { width: 5, height: 5, borderRadius: 3 },
-  // Leyenda
-  legend:          { flexDirection: 'row', gap: 20, paddingHorizontal: 16, paddingVertical: 10, borderBottomWidth: 0.5 },
-  legendItem:      { flexDirection: 'row', alignItems: 'center', gap: 6 },
-  legendText:      { fontSize: 11, fontWeight: '500' },
-  // Lista
-  listSection:     { padding: 16 },
-  dateTitle:       { fontSize: 17, fontWeight: '700', marginBottom: 4 },
-  countLabel:      { fontSize: 13, marginBottom: 12 },
-  emptyCard:       { borderRadius: 16, borderWidth: 1, padding: 32, alignItems: 'center', gap: 8, marginTop: 8 },
-  emptyText:       { fontSize: 14, fontWeight: '500' },
-  apptCard:        { flexDirection: 'row', alignItems: 'center', borderRadius: 14, borderWidth: 1, marginBottom: 8, overflow: 'hidden' },
-  apptCardMine:    { borderWidth: 1.5 },
-  apptCardOther:   { opacity: 0.7 },
-  apptAccent:      { width: 3, alignSelf: 'stretch' },
-  apptTimeBox:     { paddingHorizontal: 12, paddingVertical: 16, minWidth: 58, alignItems: 'center' },
-  apptTime:        { fontSize: 14, fontWeight: '700' },
-  apptBody:        { flex: 1, paddingVertical: 14 },
-  apptClient:      { fontSize: 15, fontWeight: '600' },
-  apptService:     { fontSize: 12, marginTop: 2 },
-  statusBadge:     { paddingHorizontal: 8, paddingVertical: 3, borderRadius: 8 },
-  statusText:      { fontSize: 10, fontWeight: '700' },
-  mineBadge:       { backgroundColor: '#ECFDF5', paddingHorizontal: 7, paddingVertical: 3, borderRadius: 8 },
-  mineText:        { fontSize: 10, fontWeight: '700', color: '#10B981' },
-  fab:             { position: 'absolute', bottom: 28, right: 20, width: 56, height: 56, borderRadius: 28, backgroundColor: '#10B981', justifyContent: 'center', alignItems: 'center', shadowColor: '#10B981', shadowOpacity: 0.4, shadowRadius: 12, shadowOffset: { width: 0, height: 4 }, elevation: 8 },
+  container:     { flex: 1 },
+  centered:      { paddingVertical: 30, alignItems: 'center' },
+  header:        { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, paddingVertical: 14, borderBottomWidth: 0.5 },
+  greeting:      { fontSize: 13, fontWeight: '500' },
+  name:          { fontSize: 22, fontWeight: '800', letterSpacing: -0.5 },
+  headerBtn:     { width: 38, height: 38, borderRadius: 12, borderWidth: 1, justifyContent: 'center', alignItems: 'center' },
+  calContainer:  { paddingHorizontal: 16, paddingBottom: 12, borderBottomWidth: 0.5 },
+  calNav:        { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: 12 },
+  calNavBtn:     { padding: 6 },
+  calMonthTitle: { fontSize: 16, fontWeight: '700' },
+  calWeekRow:    { flexDirection: 'row', marginBottom: 4 },
+  calWeekDay:    { flex: 1, textAlign: 'center', fontSize: 11, fontWeight: '700', letterSpacing: 0.5 },
+  calGrid:       { flexDirection: 'row', flexWrap: 'wrap' },
+  calCell:       { width: '14.28%', alignItems: 'center', paddingVertical: 3 },
+  calDayCircle:  { width: 34, height: 34, borderRadius: 17, justifyContent: 'center', alignItems: 'center' },
+  calDayText:    { fontSize: 14 },
+  dotsRow:       { flexDirection: 'row', gap: 2, marginTop: 2 },
+  dot:           { width: 5, height: 5, borderRadius: 3 },
+  legend:        { flexDirection: 'row', gap: 20, paddingHorizontal: 16, paddingVertical: 10, borderBottomWidth: 0.5 },
+  legendItem:    { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  legendText:    { fontSize: 11, fontWeight: '500' },
+  listSection:   { padding: 16 },
+  dateTitle:     { fontSize: 17, fontWeight: '700', marginBottom: 4 },
+  countLabel:    { fontSize: 13, marginBottom: 12 },
+  emptyCard:     { borderRadius: 16, borderWidth: 1, padding: 32, alignItems: 'center', gap: 8, marginTop: 8 },
+  emptyText:     { fontSize: 14, fontWeight: '500' },
+  apptCard:      { flexDirection: 'row', alignItems: 'center', borderRadius: 14, borderWidth: 1, marginBottom: 8, overflow: 'hidden' },
+  apptCardMine:  { borderWidth: 1.5 },
+  apptCardOther: { opacity: 0.7 },
+  apptAccent:    { width: 3, alignSelf: 'stretch' },
+  apptTimeBox:   { paddingHorizontal: 12, paddingVertical: 16, minWidth: 58, alignItems: 'center' },
+  apptTime:      { fontSize: 14, fontWeight: '700' },
+  apptBody:      { flex: 1, paddingVertical: 14 },
+  apptClient:    { fontSize: 15, fontWeight: '600' },
+  apptService:   { fontSize: 12, marginTop: 2 },
+  statusBadge:   { paddingHorizontal: 8, paddingVertical: 3, borderRadius: 8 },
+  statusText:    { fontSize: 10, fontWeight: '700' },
+  mineBadge:     { backgroundColor: '#ECFDF5', paddingHorizontal: 7, paddingVertical: 3, borderRadius: 8 },
+  mineText:      { fontSize: 10, fontWeight: '700', color: '#10B981' },
+  fab:           { position: 'absolute', right: 20, width: 56, height: 56, borderRadius: 28, backgroundColor: '#10B981', justifyContent: 'center', alignItems: 'center', shadowColor: '#10B981', shadowOpacity: 0.4, shadowRadius: 12, shadowOffset: { width: 0, height: 4 }, elevation: 8 },
 });
