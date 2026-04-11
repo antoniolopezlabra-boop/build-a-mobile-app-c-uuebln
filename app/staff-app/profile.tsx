@@ -2,8 +2,9 @@ import React, { useState, useEffect } from 'react';
 import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity,
   TextInput, ActivityIndicator, Alert, Modal,
+  KeyboardAvoidingView, Platform, TouchableWithoutFeedback, Keyboard,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import MaterialIcons from '@expo/vector-icons/MaterialIcons';
 import { useAuth } from '@/contexts/AuthContext';
@@ -14,6 +15,7 @@ export default function StaffProfileScreen() {
   const router = useRouter();
   const { staffMemberData, user, signOut } = useAuth();
   const { colors: tc } = useTheme();
+  const insets = useSafeAreaInsets();
 
   const [businessName, setBusinessName] = useState<string | null>(null);
   const [loadingBiz, setLoadingBiz]     = useState(true);
@@ -23,6 +25,8 @@ export default function StaffProfileScreen() {
   const [newPw, setNewPw]             = useState('');
   const [confirmPw, setConfirmPw]     = useState('');
   const [savingPw, setSavingPw]       = useState(false);
+  const [showNewPw, setShowNewPw]     = useState(false);
+  const [showConfirmPw, setShowConfirmPw] = useState(false);
 
   useEffect(() => { loadBusinessName(); }, []);
 
@@ -56,11 +60,19 @@ export default function StaffProfileScreen() {
       Alert.alert('¡Listo!', 'Tu contraseña fue actualizada.');
       setShowPwModal(false);
       setNewPw(''); setConfirmPw('');
+      setShowNewPw(false); setShowConfirmPw(false);
     } catch (e: any) {
       Alert.alert('Error', e?.message ?? 'No se pudo cambiar la contraseña.');
     } finally {
       setSavingPw(false);
     }
+  };
+
+  const closePwModal = () => {
+    Keyboard.dismiss();
+    setShowPwModal(false);
+    setNewPw(''); setConfirmPw('');
+    setShowNewPw(false); setShowConfirmPw(false);
   };
 
   const handleSignOut = () => {
@@ -141,50 +153,94 @@ export default function StaffProfileScreen() {
         <View style={{ height: 40 }} />
       </ScrollView>
 
-      {/* Modal cambiar contraseña */}
+      {/* Modal cambiar contraseña — sube con el teclado */}
       <Modal visible={showPwModal} transparent animationType="slide">
-        <View style={s.modalOverlay}>
-          <View style={[s.modalBox, { backgroundColor: tc.surface }]}>
-            <Text style={[s.modalTitle, { color: tc.text }]}>Cambiar contraseña</Text>
+        <KeyboardAvoidingView
+          style={{ flex: 1 }}
+          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        >
+          <TouchableWithoutFeedback onPress={Keyboard.dismiss}>
+            <View style={s.modalOverlay}>
+              <TouchableWithoutFeedback>
+                <View style={[
+                  s.modalBox,
+                  { backgroundColor: tc.surface, paddingBottom: insets.bottom + 20 }
+                ]}>
+                  <View style={s.modalHandle} />
+                  <Text style={[s.modalTitle, { color: tc.text }]}>Cambiar contraseña</Text>
 
-            <TextInput
-              style={[s.input, { backgroundColor: tc.bg, color: tc.text, borderColor: tc.border }]}
-              placeholder="Nueva contraseña (mín. 8 caracteres)"
-              placeholderTextColor={tc.textMuted}
-              value={newPw}
-              onChangeText={setNewPw}
-              secureTextEntry
-              autoFocus
-            />
-            <TextInput
-              style={[s.input, { backgroundColor: tc.bg, color: tc.text, borderColor: tc.border, marginTop: 10 }]}
-              placeholder="Confirmar contraseña"
-              placeholderTextColor={tc.textMuted}
-              value={confirmPw}
-              onChangeText={setConfirmPw}
-              secureTextEntry
-            />
+                  {/* Nueva contraseña */}
+                  <View style={[s.inputWrap, { backgroundColor: tc.bg, borderColor: tc.border }]}>
+                    <TextInput
+                      style={[s.input, { color: tc.text }]}
+                      placeholder="Nueva contraseña (mín. 8 caracteres)"
+                      placeholderTextColor={tc.textMuted}
+                      value={newPw}
+                      onChangeText={setNewPw}
+                      secureTextEntry={!showNewPw}
+                      autoFocus
+                      autoCapitalize="none"
+                    />
+                    <TouchableOpacity
+                      onPress={() => setShowNewPw(v => !v)}
+                      style={s.eyeBtn}
+                      hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                    >
+                      <MaterialIcons
+                        name={showNewPw ? 'visibility' : 'visibility-off'}
+                        size={20}
+                        color={tc.textMuted}
+                      />
+                    </TouchableOpacity>
+                  </View>
 
-            <View style={s.modalBtns}>
-              <TouchableOpacity
-                style={[s.modalBtn, { backgroundColor: tc.bg, borderWidth: 1, borderColor: tc.border }]}
-                onPress={() => { setShowPwModal(false); setNewPw(''); setConfirmPw(''); }}
-              >
-                <Text style={[s.modalBtnText, { color: tc.textMuted }]}>Cancelar</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={[s.modalBtn, { backgroundColor: '#10B981' }]}
-                onPress={handleChangePassword}
-                disabled={savingPw}
-              >
-                {savingPw
-                  ? <ActivityIndicator size="small" color="#fff" />
-                  : <Text style={[s.modalBtnText, { color: '#fff' }]}>Guardar</Text>
-                }
-              </TouchableOpacity>
+                  {/* Confirmar contraseña */}
+                  <View style={[s.inputWrap, { backgroundColor: tc.bg, borderColor: tc.border, marginTop: 10 }]}>
+                    <TextInput
+                      style={[s.input, { color: tc.text }]}
+                      placeholder="Confirmar contraseña"
+                      placeholderTextColor={tc.textMuted}
+                      value={confirmPw}
+                      onChangeText={setConfirmPw}
+                      secureTextEntry={!showConfirmPw}
+                      autoCapitalize="none"
+                    />
+                    <TouchableOpacity
+                      onPress={() => setShowConfirmPw(v => !v)}
+                      style={s.eyeBtn}
+                      hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                    >
+                      <MaterialIcons
+                        name={showConfirmPw ? 'visibility' : 'visibility-off'}
+                        size={20}
+                        color={tc.textMuted}
+                      />
+                    </TouchableOpacity>
+                  </View>
+
+                  <View style={s.modalBtns}>
+                    <TouchableOpacity
+                      style={[s.modalBtn, { backgroundColor: tc.bg, borderWidth: 1, borderColor: tc.border }]}
+                      onPress={closePwModal}
+                    >
+                      <Text style={[s.modalBtnText, { color: tc.textMuted }]}>Cancelar</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      style={[s.modalBtn, { backgroundColor: '#10B981' }]}
+                      onPress={handleChangePassword}
+                      disabled={savingPw}
+                    >
+                      {savingPw
+                        ? <ActivityIndicator size="small" color="#fff" />
+                        : <Text style={[s.modalBtnText, { color: '#fff' }]}>Guardar</Text>
+                      }
+                    </TouchableOpacity>
+                  </View>
+                </View>
+              </TouchableWithoutFeedback>
             </View>
-          </View>
-        </View>
+          </TouchableWithoutFeedback>
+        </KeyboardAvoidingView>
       </Modal>
     </SafeAreaView>
   );
@@ -209,10 +265,14 @@ const s = StyleSheet.create({
   divider:      { height: 0.5, marginVertical: 12 },
   actionRow:    { flexDirection: 'row', alignItems: 'center', gap: 12, borderRadius: 16, borderWidth: 1, padding: 16, marginBottom: 10 },
   actionText:   { flex: 1, fontSize: 15, fontWeight: '600' },
-  modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.4)', justifyContent: 'flex-end' },
-  modalBox:     { borderTopLeftRadius: 24, borderTopRightRadius: 24, padding: 20 },
-  modalTitle:   { fontSize: 17, fontWeight: '700', marginBottom: 14 },
-  input:        { borderRadius: 12, borderWidth: 1, paddingHorizontal: 14, paddingVertical: 12, fontSize: 15 },
+  // Modal
+  modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-end' },
+  modalBox:     { borderTopLeftRadius: 24, borderTopRightRadius: 24, padding: 20, paddingTop: 12 },
+  modalHandle:  { width: 40, height: 4, borderRadius: 2, backgroundColor: '#CBD5E1', alignSelf: 'center', marginBottom: 16 },
+  modalTitle:   { fontSize: 17, fontWeight: '700', marginBottom: 16 },
+  inputWrap:    { flexDirection: 'row', alignItems: 'center', borderRadius: 12, borderWidth: 1, paddingHorizontal: 14 },
+  input:        { flex: 1, paddingVertical: 12, fontSize: 15 },
+  eyeBtn:       { paddingLeft: 8, paddingVertical: 12 },
   modalBtns:    { flexDirection: 'row', gap: 10, marginTop: 16 },
   modalBtn:     { flex: 1, borderRadius: 12, paddingVertical: 13, alignItems: 'center' },
   modalBtnText: { fontSize: 15, fontWeight: '700' },
