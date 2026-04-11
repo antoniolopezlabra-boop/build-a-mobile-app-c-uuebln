@@ -32,7 +32,7 @@ interface StaffMember {
   name: string;
   role: string | null;
   color: string;
-  busy?: boolean; // true si ya tiene cita en el mismo horario
+  busy?: boolean;
 }
 
 interface Appointment {
@@ -104,7 +104,6 @@ export default function AppointmentDetailScreen() {
     }
   };
 
-  // Cargar disponibilidad de staff al abrir el modal de asignar
   const loadStaffAvailability = async () => {
     if (!appointment) return;
     const appt = appointment;
@@ -112,19 +111,17 @@ export default function AppointmentDetailScreen() {
     const endTime   = appt.endTime || appt.end_time;
     if (!startTime || !endTime) return;
 
-    // Buscar si cada staff tiene alguna cita que colisione con el horario de ESTA cita
     const { data: busyApts } = await supabase
       .from('appointments')
       .select('staff_id, start_time, end_time')
       .eq('user_id', user?.id)
       .eq('date', appt.date)
-      .not('id', 'eq', appt.id)                             // excluir la cita actual
+      .not('id', 'eq', appt.id)
       .not('status', 'in', '("Cancelada","No asistió","Rechazada")')
       .not('staff_id', 'is', null);
 
     if (!busyApts) return;
 
-    // Marcar qué staff ya está ocupado en ese horario
     const [sh, sm] = startTime.split(':').map(Number);
     const [eh, em] = endTime.split(':').map(Number);
     const startMin = sh * 60 + sm;
@@ -135,10 +132,7 @@ export default function AppointmentDetailScreen() {
         if (a.staff_id !== m.id) return false;
         const [ash, asm] = (a.start_time || '00:00').split(':').map(Number);
         const [aeh, aem] = (a.end_time   || '00:00').split(':').map(Number);
-        const aStart = ash * 60 + asm;
-        const aEnd   = aeh * 60 + aem;
-        // Hay conflicto si los rangos se solapan
-        return startMin < aEnd && endMin > aStart;
+        return startMin < aeh * 60 + aem && endMin > ash * 60 + asm;
       });
       return { ...m, busy: conflict };
     }));
@@ -158,23 +152,19 @@ export default function AppointmentDetailScreen() {
     }
   };
 
-  // Asignar colaborador CON verificación de conflicto de horario
   const handleAssignStaff = async (staffId: string | null) => {
     if (!appointment) return;
-
-    // Si intenta asignar un staff que ya está ocupado, bloquear
     if (staffId) {
       const staffMember = staffMembers.find(m => m.id === staffId);
       if (staffMember?.busy) {
         Alert.alert(
           'Horario ocupado',
-          `${staffMember.name} ya tiene una cita en ese horario. Elige otro colaborador o cambia el horario de la cita.`,
+          `${staffMember.name} ya tiene una cita en ese horario.`,
           [{ text: 'Entendido', style: 'cancel' }]
         );
         return;
       }
     }
-
     setAssigningStaff(true);
     try {
       await apiPatch(`/api/appointments/${appointment.id}`, { staff_id: staffId });
@@ -230,10 +220,10 @@ export default function AppointmentDetailScreen() {
       const { error } = await supabase
         .from('appointments')
         .update({
-          client_id:        newClient.id,
-          client_name_temp: null,
+          client_id:         newClient.id,
+          client_name_temp:  null,
           client_phone_temp: null,
-          updated_at:       new Date().toISOString(),
+          updated_at:        new Date().toISOString(),
         })
         .eq('id', appointment.id);
       if (error) throw error;
@@ -309,7 +299,7 @@ export default function AppointmentDetailScreen() {
         </TouchableOpacity>
         <Text style={[styles.title, { color: tc.text }]}>Detalle de Cita</Text>
         <TouchableOpacity
-          onPress={() => showConfirmation('delete', 'Eliminar Cita', '¿Estás seguro de que deseas eliminar esta cita?')}
+          onPress={() => showConfirmation('delete', 'Eliminar Cita', '¿Estás seguro de que deseas eliminar esta cita? Esta acción no se puede deshacer.')}
           style={styles.deleteButton}
         >
           <IconSymbol ios_icon_name="trash" android_material_icon_name="delete" size={24} color="#EF4444" />
@@ -373,10 +363,7 @@ export default function AppointmentDetailScreen() {
               <Text style={[styles.sectionTitle, { color: tc.text }]}>Colaborador</Text>
               <TouchableOpacity
                 style={styles.assignBtn}
-                onPress={() => {
-                  setAssignStaffModal(true);
-                  loadStaffAvailability();
-                }}
+                onPress={() => { setAssignStaffModal(true); loadStaffAvailability(); }}
               >
                 <MaterialIcons name={assignedStaff ? 'swap-horiz' : 'person-add-alt'} size={15} color="#fff" />
                 <Text style={styles.assignBtnText}>{assignedStaff ? 'Cambiar' : 'Asignar'}</Text>
@@ -398,10 +385,7 @@ export default function AppointmentDetailScreen() {
             ) : (
               <TouchableOpacity
                 style={[styles.staffUnassigned, { backgroundColor: tc.bg, borderColor: tc.border }]}
-                onPress={() => {
-                  setAssignStaffModal(true);
-                  loadStaffAvailability();
-                }}
+                onPress={() => { setAssignStaffModal(true); loadStaffAvailability(); }}
               >
                 <View style={[styles.staffAvatarEmpty, { backgroundColor: tc.border + '40' }]}>
                   <MaterialIcons name="person-outline" size={22} color={tc.textMuted} />
@@ -452,10 +436,11 @@ export default function AppointmentDetailScreen() {
           </View>
         </View>
 
-        {/* Acciones */}
+        {/* ── Acciones con jerarquía visual clara ── */}
         <View style={[styles.actionsSection, { backgroundColor: tc.surface }]}>
           <Text style={[styles.sectionTitle, { color: tc.text }]}>Acciones</Text>
 
+          {/* Solicitud desde link público */}
           {appointment.status === 'Solicitud' && (
             <View>
               <View style={styles.solicitudBanner}>
@@ -465,23 +450,28 @@ export default function AppointmentDetailScreen() {
                   <Text style={styles.solicitudSub}>{clientName} · {clientPhone}</Text>
                 </View>
               </View>
+              {/* Primaria */}
               <TouchableOpacity
-                style={[styles.actionButton, { backgroundColor: '#10B981', marginBottom: 10 }]}
+                style={styles.btnPrimary}
                 onPress={() => showConfirmation('approve', 'Aceptar solicitud', `¿Confirmas la cita de ${clientName}?`)}
+                activeOpacity={0.8}
               >
                 <MaterialIcons name="check-circle" size={22} color="#fff" />
-                <Text style={styles.actionButtonText}>Aceptar solicitud</Text>
+                <Text style={styles.btnPrimaryText}>Aceptar solicitud</Text>
               </TouchableOpacity>
+              {/* Destructiva */}
               <TouchableOpacity
-                style={[styles.actionButton, { backgroundColor: '#EF4444' }]}
+                style={[styles.btnOutline, { borderColor: '#EF4444', marginTop: 10 }]}
                 onPress={() => showConfirmation('reject', 'Rechazar solicitud', '¿Deseas rechazar esta solicitud?')}
+                activeOpacity={0.8}
               >
-                <MaterialIcons name="cancel" size={22} color="#fff" />
-                <Text style={styles.actionButtonText}>Rechazar solicitud</Text>
+                <MaterialIcons name="cancel" size={18} color="#EF4444" />
+                <Text style={[styles.btnOutlineText, { color: '#EF4444' }]}>Rechazar solicitud</Text>
               </TouchableOpacity>
             </View>
           )}
 
+          {/* En espera */}
           {appointment.status === 'En espera' && (
             <View>
               <View style={[styles.solicitudBanner, { backgroundColor: '#F3E8FF', borderColor: '#8B5CF6' }]}>
@@ -489,79 +479,133 @@ export default function AppointmentDetailScreen() {
                 <Text style={[styles.solicitudTitle, { color: '#8B5CF6' }]}>Cita en espera de confirmación</Text>
               </View>
               <TouchableOpacity
-                style={[styles.actionButton, { backgroundColor: '#10B981', marginBottom: 10 }]}
+                style={styles.btnPrimary}
                 onPress={() => showConfirmation('approve', 'Aprobar cita', '¿Confirmas que puedes atender esta cita?')}
+                activeOpacity={0.8}
               >
                 <MaterialIcons name="check-circle" size={22} color="#fff" />
-                <Text style={styles.actionButtonText}>Aprobar cita</Text>
+                <Text style={styles.btnPrimaryText}>Aprobar cita</Text>
               </TouchableOpacity>
               <TouchableOpacity
-                style={[styles.actionButton, { backgroundColor: '#EF4444', marginBottom: 10 }]}
-                onPress={() => showConfirmation('reject', 'Rechazar cita', '¿Deseas rechazar esta cita?')}
+                style={styles.btnSecondary}
+                onPress={handleReschedule}
+                activeOpacity={0.8}
               >
-                <MaterialIcons name="cancel" size={22} color="#fff" />
-                <Text style={styles.actionButtonText}>Rechazar cita</Text>
+                <MaterialIcons name="event" size={18} color="#3B82F6" />
+                <Text style={styles.btnSecondaryText}>Modificar horario</Text>
               </TouchableOpacity>
-              <TouchableOpacity style={[styles.actionButton, { backgroundColor: '#3B82F6' }]} onPress={handleReschedule}>
-                <MaterialIcons name="event" size={22} color="#fff" />
-                <Text style={styles.actionButtonText}>Modificar horario</Text>
+              <TouchableOpacity
+                style={[styles.btnOutline, { borderColor: '#EF4444' }]}
+                onPress={() => showConfirmation('reject', 'Rechazar cita', '¿Deseas rechazar esta cita?')}
+                activeOpacity={0.8}
+              >
+                <MaterialIcons name="cancel" size={18} color="#EF4444" />
+                <Text style={[styles.btnOutlineText, { color: '#EF4444' }]}>Rechazar cita</Text>
               </TouchableOpacity>
             </View>
           )}
 
+          {/* Pendiente: Confirmar es la acción primaria */}
           {appointment.status === 'Pendiente' && (
-            <TouchableOpacity
-              style={[styles.actionButton, { backgroundColor: '#10B981' }]}
-              onPress={() => showConfirmation('confirm', 'Confirmar Cita', '¿Deseas confirmar esta cita?')}
-            >
-              <MaterialIcons name="check-circle" size={22} color="#fff" />
-              <Text style={styles.actionButtonText}>Confirmar</Text>
-            </TouchableOpacity>
-          )}
-
-          {appointment.status === 'Completada' && (
-            <TouchableOpacity
-              style={[styles.actionButton, { backgroundColor: '#10B981' }]}
-              onPress={() => showConfirmation('paid', 'Marcar como Pagado', '¿Confirmas que ya se cobró este servicio?')}
-            >
-              <MaterialIcons name="attach-money" size={22} color="#fff" />
-              <Text style={styles.actionButtonText}>Pagado</Text>
-            </TouchableOpacity>
-          )}
-
-          {(appointment.status === 'Pendiente' || appointment.status === 'Confirmada') && (
-            <>
-              <TouchableOpacity style={[styles.actionButton, { backgroundColor: '#3B82F6', marginTop: 10 }]} onPress={handleReschedule}>
-                <MaterialIcons name="event" size={22} color="#fff" />
-                <Text style={styles.actionButtonText}>Reagendar</Text>
-              </TouchableOpacity>
+            <View>
+              {/* PRIMARIA — Confirmar */}
               <TouchableOpacity
-                style={[styles.actionButton, { backgroundColor: '#6B7280', marginTop: 10 }]}
+                style={styles.btnPrimary}
+                onPress={() => showConfirmation('confirm', 'Confirmar Cita', '¿Deseas confirmar esta cita?')}
+                activeOpacity={0.8}
+              >
+                <MaterialIcons name="check-circle" size={22} color="#fff" />
+                <Text style={styles.btnPrimaryText}>Confirmar cita</Text>
+              </TouchableOpacity>
+              {/* SECUNDARIA — Reagendar */}
+              <TouchableOpacity
+                style={styles.btnSecondary}
+                onPress={handleReschedule}
+                activeOpacity={0.8}
+              >
+                <MaterialIcons name="event" size={18} color="#3B82F6" />
+                <Text style={styles.btnSecondaryText}>Reagendar</Text>
+              </TouchableOpacity>
+              {/* DESTRUCTIVAS — pequeñas y con borde */}
+              <View style={styles.destructiveRow}>
+                <TouchableOpacity
+                  style={[styles.btnOutlineSmall, { borderColor: '#F97316', flex: 1 }]}
+                  onPress={() => showConfirmation('noshow', 'No asistió', '¿El cliente no se presentó?')}
+                  activeOpacity={0.8}
+                >
+                  <MaterialIcons name="person-off" size={16} color="#F97316" />
+                  <Text style={[styles.btnOutlineSmallText, { color: '#F97316' }]}>No asistió</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[styles.btnOutlineSmall, { borderColor: '#EF4444', flex: 1 }]}
+                  onPress={() => showConfirmation('cancel', 'Cancelar Cita', '¿Estás seguro de que deseas cancelar esta cita? Esta acción no se puede deshacer.')}
+                  activeOpacity={0.8}
+                >
+                  <MaterialIcons name="close" size={16} color="#EF4444" />
+                  <Text style={[styles.btnOutlineSmallText, { color: '#EF4444' }]}>Cancelar</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          )}
+
+          {/* Confirmada: Completar es la acción primaria */}
+          {appointment.status === 'Confirmada' && (
+            <View>
+              {/* PRIMARIA — Completar */}
+              <TouchableOpacity
+                style={styles.btnPrimary}
                 onPress={() => showConfirmation('complete', 'Completar Cita', '¿Marcar esta cita como completada?')}
+                activeOpacity={0.8}
               >
                 <MaterialIcons name="check" size={22} color="#fff" />
-                <Text style={styles.actionButtonText}>Completar</Text>
+                <Text style={styles.btnPrimaryText}>Marcar como completada</Text>
               </TouchableOpacity>
+              {/* SECUNDARIA — Reagendar */}
               <TouchableOpacity
-                style={[styles.actionButton, { backgroundColor: '#F97316', marginTop: 10 }]}
-                onPress={() => showConfirmation('noshow', 'No asistió', '¿El cliente no se presentó?')}
+                style={styles.btnSecondary}
+                onPress={handleReschedule}
+                activeOpacity={0.8}
               >
-                <MaterialIcons name="cancel" size={22} color="#fff" />
-                <Text style={styles.actionButtonText}>No asistió</Text>
+                <MaterialIcons name="event" size={18} color="#3B82F6" />
+                <Text style={styles.btnSecondaryText}>Reagendar</Text>
               </TouchableOpacity>
-              <TouchableOpacity
-                style={[styles.actionButton, { backgroundColor: '#EF4444', marginTop: 10 }]}
-                onPress={() => showConfirmation('cancel', 'Cancelar Cita', '¿Estás seguro de que deseas cancelar esta cita?')}
-              >
-                <MaterialIcons name="close" size={22} color="#fff" />
-                <Text style={styles.actionButtonText}>Cancelar</Text>
-              </TouchableOpacity>
-            </>
+              {/* DESTRUCTIVAS — pequeñas */}
+              <View style={styles.destructiveRow}>
+                <TouchableOpacity
+                  style={[styles.btnOutlineSmall, { borderColor: '#F97316', flex: 1 }]}
+                  onPress={() => showConfirmation('noshow', 'No asistió', '¿El cliente no se presentó a la cita confirmada?')}
+                  activeOpacity={0.8}
+                >
+                  <MaterialIcons name="person-off" size={16} color="#F97316" />
+                  <Text style={[styles.btnOutlineSmallText, { color: '#F97316' }]}>No asistió</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[styles.btnOutlineSmall, { borderColor: '#EF4444', flex: 1 }]}
+                  onPress={() => showConfirmation('cancel', 'Cancelar Cita', '¿Estás seguro de que deseas cancelar esta cita confirmada? Esta acción no se puede deshacer.')}
+                  activeOpacity={0.8}
+                >
+                  <MaterialIcons name="close" size={16} color="#EF4444" />
+                  <Text style={[styles.btnOutlineSmallText, { color: '#EF4444' }]}>Cancelar</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          )}
+
+          {/* Completada: Pagado */}
+          {appointment.status === 'Completada' && (
+            <TouchableOpacity
+              style={styles.btnPrimary}
+              onPress={() => showConfirmation('paid', 'Marcar como Pagado', '¿Confirmas que ya se cobró este servicio?')}
+              activeOpacity={0.8}
+            >
+              <MaterialIcons name="attach-money" size={22} color="#fff" />
+              <Text style={styles.btnPrimaryText}>Marcar como pagado</Text>
+            </TouchableOpacity>
           )}
         </View>
       </ScrollView>
 
-      {/* ── Modal: Asignar colaborador CON verificación de conflicto ── */}
+      {/* Modal: Asignar colaborador */}
       <Modal visible={assignStaffModal} transparent animationType="slide" onRequestClose={() => setAssignStaffModal(false)}>
         <KeyboardAvoidingView style={styles.modalOverlay} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
           <TouchableOpacity style={styles.modalBackdrop} activeOpacity={1} onPress={() => setAssignStaffModal(false)} />
@@ -574,9 +618,7 @@ export default function AppointmentDetailScreen() {
               </TouchableOpacity>
             </View>
             <Text style={[styles.modalSub, { color: tc.textMuted }]}>Selecciona quién atenderá esta cita.</Text>
-
             <ScrollView showsVerticalScrollIndicator={false}>
-              {/* Sin asignar */}
               <TouchableOpacity
                 style={[
                   styles.staffOption,
@@ -595,7 +637,6 @@ export default function AppointmentDetailScreen() {
                 </View>
                 {!appointment.staff_id && <MaterialIcons name="check-circle" size={20} color="#10B981" />}
               </TouchableOpacity>
-
               {staffMembers.map(m => {
                 const isSelected = appointment.staff_id === m.id;
                 const isBusy = m.busy === true;
@@ -620,9 +661,7 @@ export default function AppointmentDetailScreen() {
                       <Text style={[styles.staffOptionName, { color: isBusy ? '#EF4444' : tc.text }]}>{m.name}</Text>
                       {isBusy
                         ? <Text style={[styles.staffOptionRole, { color: '#EF4444' }]}>🚫 Ocupado en este horario</Text>
-                        : m.role
-                          ? <Text style={[styles.staffOptionRole, { color: tc.textMuted }]}>{m.role}</Text>
-                          : null
+                        : m.role ? <Text style={[styles.staffOptionRole, { color: tc.textMuted }]}>{m.role}</Text> : null
                       }
                     </View>
                     {isSelected && !isBusy && <MaterialIcons name="check-circle" size={20} color={m.color} />}
@@ -637,7 +676,7 @@ export default function AppointmentDetailScreen() {
         </KeyboardAvoidingView>
       </Modal>
 
-      {/* ── Modal: Guardar como cliente ── */}
+      {/* Modal: Guardar como cliente */}
       <Modal visible={saveClientModal} transparent animationType="slide" onRequestClose={() => setSaveClientModal(false)}>
         <KeyboardAvoidingView style={styles.modalOverlay} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
           <TouchableOpacity style={styles.modalBackdrop} activeOpacity={1} onPress={() => setSaveClientModal(false)} />
@@ -654,49 +693,14 @@ export default function AppointmentDetailScreen() {
             </Text>
             <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
               <Text style={[styles.fieldLabel, { color: tc.textMuted }]}>Nombre *</Text>
-              <TextInput
-                style={[styles.fieldInput, { backgroundColor: tc.inputBg, borderColor: tc.inputBorder, color: tc.text }]}
-                value={clientForm.name}
-                onChangeText={v => setClientForm(p => ({ ...p, name: v }))}
-                placeholder="Nombre completo"
-                placeholderTextColor={tc.textMuted}
-                returnKeyType="next"
-              />
+              <TextInput style={[styles.fieldInput, { backgroundColor: tc.inputBg, borderColor: tc.inputBorder, color: tc.text }]} value={clientForm.name} onChangeText={v => setClientForm(p => ({ ...p, name: v }))} placeholder="Nombre completo" placeholderTextColor={tc.textMuted} returnKeyType="next" />
               <Text style={[styles.fieldLabel, { color: tc.textMuted }]}>Teléfono / WhatsApp *</Text>
-              <TextInput
-                style={[styles.fieldInput, { backgroundColor: tc.inputBg, borderColor: tc.inputBorder, color: tc.text }]}
-                value={clientForm.phone}
-                onChangeText={v => setClientForm(p => ({ ...p, phone: v }))}
-                placeholder="Ej: 442 123 4567"
-                placeholderTextColor={tc.textMuted}
-                keyboardType="phone-pad"
-                returnKeyType="next"
-              />
+              <TextInput style={[styles.fieldInput, { backgroundColor: tc.inputBg, borderColor: tc.inputBorder, color: tc.text }]} value={clientForm.phone} onChangeText={v => setClientForm(p => ({ ...p, phone: v }))} placeholder="Ej: 442 123 4567" placeholderTextColor={tc.textMuted} keyboardType="phone-pad" returnKeyType="next" />
               <Text style={[styles.fieldLabel, { color: tc.textMuted }]}>Email (opcional)</Text>
-              <TextInput
-                style={[styles.fieldInput, { backgroundColor: tc.inputBg, borderColor: tc.inputBorder, color: tc.text }]}
-                value={clientForm.email}
-                onChangeText={v => setClientForm(p => ({ ...p, email: v }))}
-                placeholder="correo@ejemplo.com"
-                placeholderTextColor={tc.textMuted}
-                keyboardType="email-address"
-                autoCapitalize="none"
-                returnKeyType="next"
-              />
+              <TextInput style={[styles.fieldInput, { backgroundColor: tc.inputBg, borderColor: tc.inputBorder, color: tc.text }]} value={clientForm.email} onChangeText={v => setClientForm(p => ({ ...p, email: v }))} placeholder="correo@ejemplo.com" placeholderTextColor={tc.textMuted} keyboardType="email-address" autoCapitalize="none" returnKeyType="next" />
               <Text style={[styles.fieldLabel, { color: tc.textMuted }]}>Notas (opcional)</Text>
-              <TextInput
-                style={[styles.fieldInput, styles.fieldTextarea, { backgroundColor: tc.inputBg, borderColor: tc.inputBorder, color: tc.text }]}
-                value={clientForm.notes}
-                onChangeText={v => setClientForm(p => ({ ...p, notes: v }))}
-                placeholder="Preferencias, alergias..."
-                placeholderTextColor={tc.textMuted}
-                multiline
-              />
-              <TouchableOpacity
-                style={[styles.modalSaveBtn, savingClient && { opacity: 0.6 }]}
-                onPress={handleSaveAsClient}
-                disabled={savingClient}
-              >
+              <TextInput style={[styles.fieldInput, styles.fieldTextarea, { backgroundColor: tc.inputBg, borderColor: tc.inputBorder, color: tc.text }]} value={clientForm.notes} onChangeText={v => setClientForm(p => ({ ...p, notes: v }))} placeholder="Preferencias, alergias..." placeholderTextColor={tc.textMuted} multiline />
+              <TouchableOpacity style={[styles.modalSaveBtn, savingClient && { opacity: 0.6 }]} onPress={handleSaveAsClient} disabled={savingClient}>
                 {savingClient
                   ? <ActivityIndicator color="#fff" />
                   : <><MaterialIcons name="person-add-alt" size={18} color="#fff" /><Text style={styles.modalSaveBtnText}>Guardar cliente</Text></>
@@ -781,8 +785,17 @@ const styles = StyleSheet.create({
   notSavedPill:         { alignSelf: 'flex-start', backgroundColor: '#FEF3C7', paddingHorizontal: 8, paddingVertical: 3, borderRadius: 6, marginTop: 4 },
   notSavedText:         { fontSize: 11, color: '#92400E', fontWeight: '600' },
   actionsSection:       { padding: 20, marginBottom: 32 },
-  actionButton:         { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', padding: 15, borderRadius: 12, gap: 8 },
-  actionButtonText:     { fontSize: 15, fontWeight: '700', color: '#fff' },
+  // Jerarquía de botones
+  btnPrimary:           { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 10, backgroundColor: '#10B981', borderRadius: 14, paddingVertical: 16, marginBottom: 10 },
+  btnPrimaryText:       { fontSize: 16, fontWeight: '800', color: '#fff' },
+  btnSecondary:         { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, backgroundColor: '#EFF6FF', borderRadius: 12, paddingVertical: 13, marginBottom: 10, borderWidth: 1, borderColor: '#BFDBFE' },
+  btnSecondaryText:     { fontSize: 15, fontWeight: '700', color: '#3B82F6' },
+  btnOutline:           { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, borderRadius: 12, paddingVertical: 12, marginBottom: 8, borderWidth: 1.5, backgroundColor: 'transparent' },
+  btnOutlineText:       { fontSize: 14, fontWeight: '700' },
+  destructiveRow:       { flexDirection: 'row', gap: 10, marginTop: 2 },
+  btnOutlineSmall:      { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, borderRadius: 10, paddingVertical: 11, borderWidth: 1.5, backgroundColor: 'transparent' },
+  btnOutlineSmallText:  { fontSize: 13, fontWeight: '700' },
+  // Legacy (solicitudBanner)
   solicitudBanner:      { flexDirection: 'row', alignItems: 'center', gap: 10, backgroundColor: '#EFF6FF', borderRadius: 12, padding: 12, marginBottom: 12, borderWidth: 1, borderColor: '#3B82F6' },
   solicitudTitle:       { fontSize: 13, fontWeight: '700', color: '#3B82F6' },
   solicitudSub:         { fontSize: 12, color: '#6B7280', marginTop: 2 },
