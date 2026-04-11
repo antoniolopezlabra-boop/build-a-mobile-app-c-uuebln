@@ -16,6 +16,8 @@ function json(body: unknown, status = 200) {
   })
 }
 
+const GRATUITO_MONTHLY_LIMIT = 10
+
 serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders })
 
@@ -51,8 +53,42 @@ serve(async (req) => {
       return json({ error: 'Link no encontrado o inactivo' }, 404)
     }
 
+    // ── Verificar límite del plan Gratuito ──────────────────────────────
+    // Consultar el plan activo del negocio
+    const { data: sub } = await supabase
+      .from('subscriptions')
+      .select('plan_type')
+      .eq('user_id', link.user_id)
+      .eq('is_active', true)
+      .single()
+
+    const planType = sub?.plan_type ?? 'Gratuito'
+
+    if (planType === 'Gratuito') {
+      // Contar citas del mes actual (excluir canceladas y no asistió)
+      const now       = new Date()
+      const monthStart = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-01`
+      const monthEnd   = new Date(now.getFullYear(), now.getMonth() + 1, 0)
+      const monthEndStr = `${monthEnd.getFullYear()}-${String(monthEnd.getMonth() + 1).padStart(2, '0')}-${String(monthEnd.getDate()).padStart(2, '0')}`
+
+      const { count } = await supabase
+        .from('appointments')
+        .select('id', { count: 'exact', head: true })
+        .eq('user_id', link.user_id)
+        .gte('date', monthStart)
+        .lte('date', monthEndStr)
+        .not('status', 'in', '("Cancelada","No asistió","Rechazada")')
+
+      if ((count ?? 0) >= GRATUITO_MONTHLY_LIMIT) {
+        return json({
+          error: 'Este negocio ha alcanzado su límite de citas este mes. Intenta contactarlos directamente por WhatsApp.',
+          code: 'PLAN_LIMIT_REACHED',
+        }, 403)
+      }
+    }
+    // ────────────────────────────────────────────────────────────────────
+
     // Verificar disponibilidad del slot
-    // Si viene staff_id, solo verificar conflicto de ESE colaborador
     let conflictQuery = supabase
       .from('appointments')
       .select('id')
@@ -78,8 +114,6 @@ serve(async (req) => {
     const whatsappNotification = link.whatsapp_confirmation ?? true
     const status = link.require_approval ? 'Solicitud' : 'Confirmada'
 
-    // FIX: removido service_id — la columna no existe en la tabla appointments.
-    // La tabla solo tiene service_name para identificar el servicio.
     const { data: appointment, error: aptError } = await supabase
       .from('appointments')
       .insert({
