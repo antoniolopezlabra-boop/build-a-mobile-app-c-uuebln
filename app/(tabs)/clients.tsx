@@ -61,7 +61,6 @@ const getInitials = (name: string) => {
   return name.substring(0, 2).toUpperCase();
 };
 
-// FIX: usar T12:00:00 para evitar bug de timezone en lastVisit
 const formatLastVisit = (lastVisit: string | null | undefined) => {
   if (!lastVisit) return null;
   const visitDate = new Date(lastVisit + 'T12:00:00');
@@ -85,7 +84,6 @@ export default function ClientsScreen() {
   const [filter, setFilter] = useState<FilterType>('Todos');
   const [errorModal, setErrorModal] = useState({ visible: false, message: '' });
 
-  // FIX: useFocusEffect para refrescar al volver de crear/editar cliente
   useFocusEffect(
     useCallback(() => {
       const cached = getCached<Client[]>('clients_list');
@@ -132,6 +130,96 @@ export default function ClientsScreen() {
 
   const activeCount   = allClients.filter(c => c.isActive !== false).length;
   const inactiveCount = allClients.filter(c => c.isActive === false).length;
+  const hasClients    = allClients.length > 0;
+
+  // ── Estado vacío: determinar mensaje exacto según el contexto ──────────
+  const renderEmptyState = () => {
+    // Búsqueda sin resultados
+    if (searchQuery) {
+      return (
+        <View style={s.empty}>
+          <View style={[s.emptyIconWrap, { backgroundColor: tc.surface }]}>
+            <MaterialIcons name="search-off" size={36} color={tc.border} />
+          </View>
+          <Text style={[s.emptyTitle, { color: tc.text }]}>Sin resultados</Text>
+          <Text style={[s.emptyDesc, { color: tc.textMuted }]}>
+            No encontramos ningún cliente con “{searchQuery}”
+          </Text>
+          <TouchableOpacity style={s.emptyBtnSecondary} onPress={() => setSearchQuery('')}>
+            <MaterialIcons name="close" size={14} color="#10B981" />
+            <Text style={s.emptyBtnSecondaryText}>Limpiar búsqueda</Text>
+          </TouchableOpacity>
+        </View>
+      );
+    }
+
+    // Filtro Inactivos sin resultados
+    if (filter === 'Inactivos') {
+      return (
+        <View style={s.empty}>
+          <View style={[s.emptyIconWrap, { backgroundColor: tc.surface }]}>
+            <MaterialIcons name="thumb-up" size={36} color="#10B981" />
+          </View>
+          <Text style={[s.emptyTitle, { color: tc.text }]}>Sin clientes inactivos</Text>
+          <Text style={[s.emptyDesc, { color: tc.textMuted }]}>
+            Todos tus clientes han tenido una visita reciente. ¡Excelente retención!
+          </Text>
+        </View>
+      );
+    }
+
+    // Filtro Activos sin resultados (raro, pero posible)
+    if (filter === 'Activos' && hasClients) {
+      return (
+        <View style={s.empty}>
+          <View style={[s.emptyIconWrap, { backgroundColor: tc.surface }]}>
+            <MaterialIcons name="group" size={36} color={tc.border} />
+          </View>
+          <Text style={[s.emptyTitle, { color: tc.text }]}>Sin clientes activos</Text>
+          <Text style={[s.emptyDesc, { color: tc.textMuted }]}>
+            Todos tus clientes están marcados como inactivos.
+          </Text>
+          <TouchableOpacity style={s.emptyBtnSecondary} onPress={() => setFilter('Todos')}>
+            <Text style={s.emptyBtnSecondaryText}>Ver todos los clientes</Text>
+          </TouchableOpacity>
+        </View>
+      );
+    }
+
+    // Sin clientes en absoluto — onboarding completo
+    return (
+      <View style={s.empty}>
+        <View style={[s.emptyIconWrap, { backgroundColor: tc.surface }]}>
+          <MaterialIcons name="group-add" size={36} color="#10B981" />
+        </View>
+        <Text style={[s.emptyTitle, { color: tc.text }]}>Aún no tienes clientes</Text>
+        <Text style={[s.emptyDesc, { color: tc.textMuted }]}>
+          Comienza agregando a tus primeros clientes para llevar su historial de citas.
+        </Text>
+
+        {/* Pasos de onboarding */}
+        <View style={[s.onboardingCard, { backgroundColor: tc.surface, borderColor: tc.border }]}>
+          {[
+            { icon: 'person-add-alt', text: 'Agrega clientes manualmente' },
+            { icon: 'link',           text: 'O comparte tu link de citas — se guardan solos' },
+            { icon: 'history',        text: 'Consulta el historial de visitas de cada uno' },
+          ].map(({ icon, text }, i) => (
+            <View key={i} style={[s.onboardingRow, i > 0 && { borderTopWidth: 0.5, borderTopColor: tc.border }]}>
+              <View style={[s.onboardingIconWrap, { backgroundColor: '#ECFDF5' }]}>
+                <MaterialIcons name={icon as any} size={16} color="#10B981" />
+              </View>
+              <Text style={[s.onboardingText, { color: tc.textMuted }]}>{text}</Text>
+            </View>
+          ))}
+        </View>
+
+        <TouchableOpacity style={s.emptyBtn} onPress={() => router.push('/clients/new')}>
+          <MaterialIcons name="person-add-alt" size={16} color="#fff" />
+          <Text style={s.emptyBtnText}>Agregar primer cliente</Text>
+        </TouchableOpacity>
+      </View>
+    );
+  };
 
   if (loading && allClients.length === 0) {
     return (
@@ -216,25 +304,7 @@ export default function ClientsScreen() {
           />
         }
       >
-        {filteredClients.length === 0 ? (
-          <View style={s.empty}>
-            <View style={[s.emptyIconWrap, { backgroundColor: tc.surface }]}>
-              <MaterialIcons name="group" size={36} color={tc.border} />
-            </View>
-            <Text style={[s.emptyTitle, { color: tc.text }]}>
-              {searchQuery ? 'Sin resultados' : filter === 'Inactivos' ? 'Sin clientes inactivos' : 'Sin clientes aún'}
-            </Text>
-            <Text style={[s.emptyDesc, { color: tc.textMuted }]}>
-              {searchQuery ? 'Intenta con otro término' : 'Agrega tu primer cliente'}
-            </Text>
-            {!searchQuery && (
-              <TouchableOpacity style={s.emptyBtn} onPress={() => router.push('/clients/new')}>
-                <MaterialIcons name="person-add-alt" size={16} color="#fff" />
-                <Text style={s.emptyBtnText}>Nuevo cliente</Text>
-              </TouchableOpacity>
-            )}
-          </View>
-        ) : (
+        {filteredClients.length === 0 ? renderEmptyState() : (
           <>
             {filter === 'Inactivos' && (
               <TouchableOpacity
@@ -303,44 +373,53 @@ export default function ClientsScreen() {
 }
 
 const s = StyleSheet.create({
-  container:          { flex: 1 },
-  loading:            { flex: 1, justifyContent: 'center', alignItems: 'center' },
-  header:             { paddingHorizontal: 20, paddingTop: 16, paddingBottom: 12, borderBottomWidth: 0.5 },
-  headerTop:          { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 14 },
-  title:              { fontSize: 28, fontWeight: '800', letterSpacing: -0.5 },
-  subtitle:           { fontSize: 13, marginTop: 2 },
-  headerStats:        { flexDirection: 'row', gap: 12, alignItems: 'center' },
-  headerStat:         { alignItems: 'center' },
-  headerStatNum:      { fontSize: 20, fontWeight: '800', color: '#10B981' },
-  headerStatLabel:    { fontSize: 10, fontWeight: '500', marginTop: 1 },
-  searchBox:          { flexDirection: 'row', alignItems: 'center', borderRadius: 12, paddingHorizontal: 12, paddingVertical: 10, marginBottom: 12, borderWidth: 0.5, gap: 8 },
-  searchInput:        { flex: 1, fontSize: 15 },
-  filters:            { flexDirection: 'row', gap: 8 },
-  filterBtn:          { paddingVertical: 7, paddingHorizontal: 16, borderRadius: 20, borderWidth: 0.5 },
-  filterBtnActive:    { backgroundColor: '#10B981', borderColor: '#10B981' },
-  filterText:         { fontSize: 13, fontWeight: '600' },
-  filterTextActive:   { color: '#fff' },
-  scroll:             { padding: 16, paddingBottom: 100 },
-  empty:              { alignItems: 'center', paddingVertical: 60, gap: 10 },
-  emptyIconWrap:      { width: 72, height: 72, borderRadius: 20, justifyContent: 'center', alignItems: 'center' },
-  emptyTitle:         { fontSize: 17, fontWeight: '600' },
-  emptyDesc:          { fontSize: 13 },
-  emptyBtn:           { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: '#10B981', borderRadius: 12, paddingVertical: 12, paddingHorizontal: 24, marginTop: 4 },
-  emptyBtnText:       { color: '#fff', fontSize: 14, fontWeight: '700' },
-  inactiveBanner:     { borderRadius: 14, padding: 14, flexDirection: 'row', alignItems: 'center', gap: 12, marginBottom: 12, borderWidth: 0.5 },
-  inactiveBannerIcon: { width: 36, height: 36, borderRadius: 10, justifyContent: 'center', alignItems: 'center' },
-  inactiveBannerTitle:{ fontSize: 13, fontWeight: '600' },
-  inactiveBannerDesc: { fontSize: 12, marginTop: 2 },
-  clientCard:         { borderRadius: 14, padding: 14, flexDirection: 'row', alignItems: 'center', marginBottom: 8, gap: 12, borderWidth: 1 },
-  avatar:             { width: 46, height: 46, borderRadius: 14, justifyContent: 'center', alignItems: 'center' },
-  avatarText:         { fontSize: 16, fontWeight: '800' },
-  clientInfo:         { flex: 1, gap: 2 },
-  clientNameRow:      { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  clientName:         { fontSize: 15, fontWeight: '700', flex: 1 },
-  activeDot:          { width: 8, height: 8, borderRadius: 4 },
-  clientPhone:        { fontSize: 13 },
-  clientMeta:         { flexDirection: 'row', gap: 10, marginTop: 4 },
-  metaChip:           { flexDirection: 'row', alignItems: 'center', gap: 3 },
-  metaText:           { fontSize: 11, fontWeight: '500' },
-  fab:                { position: 'absolute', right: 20, bottom: 100, width: 56, height: 56, borderRadius: 28, backgroundColor: colors.primary, justifyContent: 'center', alignItems: 'center', elevation: 6, shadowColor: '#000', shadowOpacity: 0.2, shadowRadius: 8 },
+  container:             { flex: 1 },
+  loading:               { flex: 1, justifyContent: 'center', alignItems: 'center' },
+  header:                { paddingHorizontal: 20, paddingTop: 16, paddingBottom: 12, borderBottomWidth: 0.5 },
+  headerTop:             { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 14 },
+  title:                 { fontSize: 28, fontWeight: '800', letterSpacing: -0.5 },
+  subtitle:              { fontSize: 13, marginTop: 2 },
+  headerStats:           { flexDirection: 'row', gap: 12, alignItems: 'center' },
+  headerStat:            { alignItems: 'center' },
+  headerStatNum:         { fontSize: 20, fontWeight: '800', color: '#10B981' },
+  headerStatLabel:       { fontSize: 10, fontWeight: '500', marginTop: 1 },
+  searchBox:             { flexDirection: 'row', alignItems: 'center', borderRadius: 12, paddingHorizontal: 12, paddingVertical: 10, marginBottom: 12, borderWidth: 0.5, gap: 8 },
+  searchInput:           { flex: 1, fontSize: 15 },
+  filters:               { flexDirection: 'row', gap: 8 },
+  filterBtn:             { paddingVertical: 7, paddingHorizontal: 16, borderRadius: 20, borderWidth: 0.5 },
+  filterBtnActive:       { backgroundColor: '#10B981', borderColor: '#10B981' },
+  filterText:            { fontSize: 13, fontWeight: '600' },
+  filterTextActive:      { color: '#fff' },
+  scroll:                { padding: 16, paddingBottom: 100 },
+  // Estado vacío
+  empty:                 { alignItems: 'center', paddingVertical: 48, paddingHorizontal: 24, gap: 10 },
+  emptyIconWrap:         { width: 72, height: 72, borderRadius: 20, justifyContent: 'center', alignItems: 'center', marginBottom: 4 },
+  emptyTitle:            { fontSize: 18, fontWeight: '700', textAlign: 'center' },
+  emptyDesc:             { fontSize: 13, textAlign: 'center', lineHeight: 20 },
+  emptyBtn:              { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: '#10B981', borderRadius: 12, paddingVertical: 13, paddingHorizontal: 28, marginTop: 8 },
+  emptyBtnText:          { color: '#fff', fontSize: 14, fontWeight: '700' },
+  emptyBtnSecondary:     { flexDirection: 'row', alignItems: 'center', gap: 5, borderRadius: 10, paddingVertical: 10, paddingHorizontal: 20, borderWidth: 1.5, borderColor: '#10B981', marginTop: 4 },
+  emptyBtnSecondaryText: { color: '#10B981', fontSize: 13, fontWeight: '700' },
+  // Onboarding card — solo cuando no hay ningún cliente
+  onboardingCard:        { borderRadius: 16, borderWidth: 1, width: '100%', marginTop: 8, overflow: 'hidden' },
+  onboardingRow:         { flexDirection: 'row', alignItems: 'center', gap: 12, padding: 14 },
+  onboardingIconWrap:    { width: 32, height: 32, borderRadius: 10, justifyContent: 'center', alignItems: 'center' },
+  onboardingText:        { fontSize: 13, flex: 1, lineHeight: 18 },
+  // Tarjetas de clientes
+  inactiveBanner:        { borderRadius: 14, padding: 14, flexDirection: 'row', alignItems: 'center', gap: 12, marginBottom: 12, borderWidth: 0.5 },
+  inactiveBannerIcon:    { width: 36, height: 36, borderRadius: 10, justifyContent: 'center', alignItems: 'center' },
+  inactiveBannerTitle:   { fontSize: 13, fontWeight: '600' },
+  inactiveBannerDesc:    { fontSize: 12, marginTop: 2 },
+  clientCard:            { borderRadius: 14, padding: 14, flexDirection: 'row', alignItems: 'center', marginBottom: 8, gap: 12, borderWidth: 1 },
+  avatar:                { width: 46, height: 46, borderRadius: 14, justifyContent: 'center', alignItems: 'center' },
+  avatarText:            { fontSize: 16, fontWeight: '800' },
+  clientInfo:            { flex: 1, gap: 2 },
+  clientNameRow:         { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  clientName:            { fontSize: 15, fontWeight: '700', flex: 1 },
+  activeDot:             { width: 8, height: 8, borderRadius: 4 },
+  clientPhone:           { fontSize: 13 },
+  clientMeta:            { flexDirection: 'row', gap: 10, marginTop: 4 },
+  metaChip:              { flexDirection: 'row', alignItems: 'center', gap: 3 },
+  metaText:              { fontSize: 11, fontWeight: '500' },
+  fab:                   { position: 'absolute', right: 20, bottom: 100, width: 56, height: 56, borderRadius: 28, backgroundColor: colors.primary, justifyContent: 'center', alignItems: 'center', elevation: 6, shadowColor: '#000', shadowOpacity: 0.2, shadowRadius: 8 },
 });
