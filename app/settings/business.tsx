@@ -1,15 +1,7 @@
-
 import React, { useState, useEffect } from 'react';
 import {
-  View,
-  Text,
-  StyleSheet,
-  ScrollView,
-  TouchableOpacity,
-  TextInput,
-  ActivityIndicator,
-  Modal,
-  Image,
+  View, Text, StyleSheet, ScrollView, TouchableOpacity,
+  TextInput, ActivityIndicator, Modal, Image,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
@@ -21,37 +13,24 @@ import { apiPut, getBearerToken, BACKEND_URL } from '@/utils/api';
 import * as ImagePicker from 'expo-image-picker';
 
 const BUSINESS_TYPES = [
-  'Spa',
-  'Salón de belleza',
-  'Uñas',
-  'Barbería',
-  'Consultorio médico',
-  'Odontología',
-  'Veterinaria',
-  'Fotografía',
-  'Tutorías',
-  'Otro',
+  'Spa','Salón de belleza','Uñas','Barbería','Consultorio médico',
+  'Odontología','Veterinaria','Fotografía','Tutorías','Otro',
 ];
 
 export default function BusinessSettingsScreen() {
   const router = useRouter();
   const { businessProfile, refreshBusinessProfile } = useAuth();
-  const [saving, setSaving] = useState(false);
+  const [saving, setSaving]           = useState(false);
   const [showTypePicker, setShowTypePicker] = useState(false);
-  const [uploadingLogo, setUploadingLogo] = useState(false);
-  const [errorModal, setErrorModal] = useState<{ visible: boolean; message: string }>({
-    visible: false,
-    message: '',
-  });
+  const [uploadingLogo, setUploadingLogo]   = useState(false);
+  const [errorModal,   setErrorModal]   = useState({ visible: false, message: '' });
   const [successModal, setSuccessModal] = useState(false);
-
-  // Form state
   const [businessName, setBusinessName] = useState('');
   const [businessType, setBusinessType] = useState('');
-  const [address, setAddress] = useState('');
-  const [phone, setPhone] = useState('');
+  const [address, setAddress]           = useState('');
+  const [phone, setPhone]               = useState('');
   const [alternativePhone, setAlternativePhone] = useState('');
-  const [logoUrl, setLogoUrl] = useState('');
+  const [logoUrl, setLogoUrl]           = useState('');
 
   useEffect(() => {
     if (businessProfile) {
@@ -65,62 +44,35 @@ export default function BusinessSettingsScreen() {
   }, [businessProfile]);
 
   const handlePickLogo = async () => {
-    console.log('[BusinessSettings] Picking logo');
     const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ['images'],
-      allowsEditing: true,
-      aspect: [1, 1],
-      quality: 0.8,
+      mediaTypes: ['images'], allowsEditing: true, aspect: [1,1], quality: 0.8,
     });
-
-    if (!result.canceled && result.assets[0]) {
-      const asset = result.assets[0];
-      await uploadLogo(asset.uri);
-    }
+    if (!result.canceled && result.assets[0]) await uploadLogo(result.assets[0].uri);
   };
 
   const uploadLogo = async (uri: string) => {
     setUploadingLogo(true);
     try {
-      console.log('[BusinessSettings] Uploading logo to Supabase Storage');
       const { getCurrentUserId } = await import('@/utils/api');
       const { supabase } = await import('@/lib/supabase');
       const userId = await getCurrentUserId();
-
       const response = await fetch(uri);
       const blob = await response.blob();
-      
-      const base64 = await new Promise<string>((resolve, reject) => {
+      const base64 = await new Promise<string>((res, rej) => {
         const reader = new FileReader();
-        reader.onload = () => resolve((reader.result as string).split(',')[1]);
-        reader.onerror = reject;
+        reader.onload  = () => res((reader.result as string).split(',')[1]);
+        reader.onerror = rej;
         reader.readAsDataURL(blob);
       });
-      
-      const byteCharacters = atob(base64);
-      const byteArray = new Uint8Array(byteCharacters.length);
-      for (let i = 0; i < byteCharacters.length; i++) {
-        byteArray[i] = byteCharacters.charCodeAt(i);
-      }
-
+      const bytes = atob(base64);
+      const arr   = new Uint8Array(bytes.length);
+      for (let i = 0; i < bytes.length; i++) arr[i] = bytes.charCodeAt(i);
       const fileName = `${userId}/logo_${Date.now()}.jpg`;
-      const { error: uploadError } = await supabase.storage
-        .from('logos')
-        .upload(fileName, byteArray, {
-          contentType: 'image/jpeg',
-          upsert: true,
-        });
-
+      const { error: uploadError } = await supabase.storage.from('logos').upload(fileName, arr, { contentType: 'image/jpeg', upsert: true });
       if (uploadError) throw uploadError;
-
-      const { data: urlData } = supabase.storage
-        .from('logos')
-        .getPublicUrl(fileName);
-
+      const { data: urlData } = supabase.storage.from('logos').getPublicUrl(fileName);
       setLogoUrl(urlData.publicUrl);
-      console.log('[BusinessSettings] Logo uploaded:', urlData.publicUrl);
-    } catch (error: any) {
-      console.error('[BusinessSettings] Failed to upload logo:', error);
+    } catch {
       setErrorModal({ visible: true, message: 'Error al subir el logo' });
     } finally {
       setUploadingLogo(false);
@@ -129,30 +81,20 @@ export default function BusinessSettingsScreen() {
 
   const handleSave = async () => {
     if (!businessName.trim() || !businessType) {
-      setErrorModal({
-        visible: true,
-        message: 'El nombre y tipo de negocio son requeridos',
-      });
-      return;
+      setErrorModal({ visible: true, message: 'El nombre y tipo de negocio son requeridos' }); return;
     }
-
     setSaving(true);
     try {
-      console.log('[BusinessSettings] Saving business profile');
       await apiPut('/api/business-profile', {
-        businessName: businessName.trim(),
-        businessType,
+        businessName: businessName.trim(), businessType,
         address: address.trim() || undefined,
         phone: phone.trim() || undefined,
         alternativePhone: alternativePhone.trim() || undefined,
         logoUrl: logoUrl || undefined,
       });
-
       await refreshBusinessProfile();
       setSuccessModal(true);
-      console.log('[BusinessSettings] Business profile saved');
     } catch (error: any) {
-      console.error('[BusinessSettings] Failed to save:', error);
       setErrorModal({ visible: true, message: error?.message || 'Error al guardar' });
     } finally {
       setSaving(false);
@@ -160,41 +102,16 @@ export default function BusinessSettingsScreen() {
   };
 
   return (
-    <SafeAreaView style={styles.container}>
-      <ConfirmModal
-        visible={errorModal.visible}
-        title="Error"
-        message={errorModal.message}
-        buttons={[
-          {
-            text: 'Aceptar',
-            onPress: () => setErrorModal({ visible: false, message: '' }),
-            style: 'cancel',
-          },
-        ]}
-        onDismiss={() => setErrorModal({ visible: false, message: '' })}
-      />
+    // FIX #4: SafeAreaView edges={['top']} — sin paddingTop:48
+    <SafeAreaView style={styles.container} edges={['top']}>
+      <ConfirmModal visible={errorModal.visible} title="Error" message={errorModal.message}
+        buttons={[{ text: 'Aceptar', onPress: () => setErrorModal({ visible: false, message: '' }), style: 'cancel' }]}
+        onDismiss={() => setErrorModal({ visible: false, message: '' })} />
+      <ConfirmModal visible={successModal} title="¡Guardado!" message="La información del negocio se actualizó correctamente."
+        buttons={[{ text: 'Aceptar', onPress: () => { setSuccessModal(false); router.back(); }, style: 'default' }]}
+        onDismiss={() => { setSuccessModal(false); router.back(); }} />
 
-      <ConfirmModal
-        visible={successModal}
-        title="¡Guardado!"
-        message="La información del negocio se actualizó correctamente."
-        buttons={[
-          {
-            text: 'Aceptar',
-            onPress: () => {
-              setSuccessModal(false);
-              router.back();
-            },
-            style: 'default',
-          },
-        ]}
-        onDismiss={() => {
-          setSuccessModal(false);
-          router.back();
-        }}
-      />
-
+      {/* FIX #4: sin paddingTop:48 */}
       <View style={styles.header}>
         <TouchableOpacity onPress={() => router.back()} style={styles.backButton}>
           <IconSymbol android_material_icon_name="arrow-back" size={24} color={colors.text} />
@@ -204,21 +121,15 @@ export default function BusinessSettingsScreen() {
       </View>
 
       <ScrollView contentContainerStyle={styles.scrollContent}>
-        {/* Logo */}
         <View style={styles.logoSection}>
           <Text style={styles.fieldLabel}>Logo del negocio</Text>
           <TouchableOpacity style={styles.logoContainer} onPress={handlePickLogo}>
-            {logoUrl ? (
-              <Image source={{ uri: logoUrl }} style={styles.logoImage} />
-            ) : (
-              <View style={styles.logoPlaceholder}>
-                <IconSymbol android_material_icon_name="store" size={40} color={colors.textSecondary} />
-              </View>
-            )}
+            {logoUrl
+              ? <Image source={{ uri: logoUrl }} style={styles.logoImage} />
+              : <View style={styles.logoPlaceholder}><IconSymbol android_material_icon_name="store" size={40} color={colors.textSecondary} /></View>
+            }
             {uploadingLogo && (
-              <View style={styles.logoOverlay}>
-                <ActivityIndicator color="#FFFFFF" />
-              </View>
+              <View style={styles.logoOverlay}><ActivityIndicator color="#FFFFFF" /></View>
             )}
           </TouchableOpacity>
           <TouchableOpacity style={styles.changeLogoButton} onPress={handlePickLogo}>
@@ -227,75 +138,29 @@ export default function BusinessSettingsScreen() {
         </View>
 
         <Text style={styles.fieldLabel}>Nombre del negocio *</Text>
-        <TextInput
-          style={styles.input}
-          value={businessName}
-          onChangeText={setBusinessName}
-          placeholder="Nombre de tu negocio"
-          placeholderTextColor={colors.textSecondary}
-        />
+        <TextInput style={styles.input} value={businessName} onChangeText={setBusinessName} placeholder="Nombre de tu negocio" placeholderTextColor={colors.textSecondary} />
 
         <Text style={styles.fieldLabel}>Tipo de negocio *</Text>
         <TouchableOpacity style={styles.pickerButton} onPress={() => setShowTypePicker(true)}>
-          <Text style={[styles.pickerText, !businessType && styles.pickerPlaceholder]}>
-            {businessType || 'Seleccionar tipo'}
-          </Text>
-          <IconSymbol
-            android_material_icon_name="arrow-drop-down"
-            size={24}
-            color={colors.textSecondary}
-          />
+          <Text style={[styles.pickerText, !businessType && styles.pickerPlaceholder]}>{businessType || 'Seleccionar tipo'}</Text>
+          <IconSymbol android_material_icon_name="arrow-drop-down" size={24} color={colors.textSecondary} />
         </TouchableOpacity>
 
         <Text style={styles.fieldLabel}>Dirección (opcional)</Text>
-        <TextInput
-          style={styles.input}
-          value={address}
-          onChangeText={setAddress}
-          placeholder="Calle, número, colonia, ciudad"
-          placeholderTextColor={colors.textSecondary}
-        />
+        <TextInput style={styles.input} value={address} onChangeText={setAddress} placeholder="Calle, número, colonia, ciudad" placeholderTextColor={colors.textSecondary} />
 
         <Text style={styles.fieldLabel}>Teléfono (opcional)</Text>
-        <TextInput
-          style={styles.input}
-          value={phone}
-          onChangeText={setPhone}
-          placeholder="+52 55 1234 5678"
-          placeholderTextColor={colors.textSecondary}
-          keyboardType="phone-pad"
-        />
+        <TextInput style={styles.input} value={phone} onChangeText={setPhone} placeholder="+52 55 1234 5678" placeholderTextColor={colors.textSecondary} keyboardType="phone-pad" />
 
         <Text style={styles.fieldLabel}>Teléfono alternativo (opcional)</Text>
-        <TextInput
-          style={styles.input}
-          value={alternativePhone}
-          onChangeText={setAlternativePhone}
-          placeholder="+52 55 8765 4321"
-          placeholderTextColor={colors.textSecondary}
-          keyboardType="phone-pad"
-        />
+        <TextInput style={styles.input} value={alternativePhone} onChangeText={setAlternativePhone} placeholder="+52 55 8765 4321" placeholderTextColor={colors.textSecondary} keyboardType="phone-pad" />
 
-        <TouchableOpacity
-          style={[styles.saveButton, saving && styles.saveButtonDisabled]}
-          onPress={handleSave}
-          disabled={saving}
-        >
-          {saving ? (
-            <ActivityIndicator color="#FFFFFF" />
-          ) : (
-            <Text style={styles.saveButtonText}>Guardar cambios</Text>
-          )}
+        <TouchableOpacity style={[styles.saveButton, saving && styles.saveButtonDisabled]} onPress={handleSave} disabled={saving}>
+          {saving ? <ActivityIndicator color="#FFFFFF" /> : <Text style={styles.saveButtonText}>Guardar cambios</Text>}
         </TouchableOpacity>
       </ScrollView>
 
-      {/* Business Type Picker */}
-      <Modal
-        visible={showTypePicker}
-        animationType="slide"
-        transparent
-        onRequestClose={() => setShowTypePicker(false)}
-      >
+      <Modal visible={showTypePicker} animationType="slide" transparent onRequestClose={() => setShowTypePicker(false)}>
         <View style={styles.modalOverlay}>
           <View style={styles.pickerContainer}>
             <View style={styles.pickerHeader}>
@@ -305,19 +170,10 @@ export default function BusinessSettingsScreen() {
               </TouchableOpacity>
             </View>
             <ScrollView>
-              {BUSINESS_TYPES.map((type) => (
-                <TouchableOpacity
-                  key={type}
-                  style={styles.typeOption}
-                  onPress={() => {
-                    setBusinessType(type);
-                    setShowTypePicker(false);
-                  }}
-                >
+              {BUSINESS_TYPES.map(type => (
+                <TouchableOpacity key={type} style={styles.typeOption} onPress={() => { setBusinessType(type); setShowTypePicker(false); }}>
                   <Text style={styles.typeText}>{type}</Text>
-                  {businessType === type && (
-                    <IconSymbol android_material_icon_name="check" size={20} color={colors.primary} />
-                  )}
+                  {businessType === type && <IconSymbol android_material_icon_name="check" size={20} color={colors.primary} />}
                 </TouchableOpacity>
               ))}
             </ScrollView>
@@ -329,158 +185,32 @@ export default function BusinessSettingsScreen() {
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: colors.background,
-  },
-  header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    padding: 20,
-    paddingTop: 48,
-    backgroundColor: colors.card,
-    borderBottomWidth: 1,
-    borderBottomColor: colors.border,
-  },
-  backButton: {
-    padding: 4,
-  },
-  title: {
-    fontSize: 20,
-    fontWeight: 'bold',
-    color: colors.text,
-  },
-  placeholder: {
-    width: 32,
-  },
-  scrollContent: {
-    padding: 20,
-    paddingBottom: 40,
-  },
-  logoSection: {
-    alignItems: 'center',
-    marginBottom: 24,
-  },
-  logoContainer: {
-    width: 120,
-    height: 120,
-    borderRadius: 60,
-    overflow: 'hidden',
-    marginBottom: 12,
-  },
-  logoImage: {
-    width: '100%',
-    height: '100%',
-  },
-  logoPlaceholder: {
-    width: '100%',
-    height: '100%',
-    backgroundColor: colors.card,
-    justifyContent: 'center',
-    alignItems: 'center',
-    borderWidth: 2,
-    borderColor: colors.border,
-    borderStyle: 'dashed',
-  },
-  logoOverlay: {
-    ...StyleSheet.absoluteFillObject,
-    backgroundColor: 'rgba(0,0,0,0.5)',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  changeLogoButton: {
-    paddingVertical: 8,
-    paddingHorizontal: 16,
-  },
-  changeLogoText: {
-    fontSize: 14,
-    color: colors.primary,
-    fontWeight: '600',
-  },
-  fieldLabel: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: colors.text,
-    marginBottom: 8,
-    marginTop: 16,
-  },
-  input: {
-    backgroundColor: colors.card,
-    borderRadius: 12,
-    padding: 14,
-    fontSize: 16,
-    color: colors.text,
-    borderWidth: 1,
-    borderColor: colors.border,
-  },
-  pickerButton: {
-    backgroundColor: colors.card,
-    borderRadius: 12,
-    padding: 14,
-    borderWidth: 1,
-    borderColor: colors.border,
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-  },
-  pickerText: {
-    fontSize: 16,
-    color: colors.text,
-  },
-  pickerPlaceholder: {
-    color: colors.textSecondary,
-  },
-  saveButton: {
-    backgroundColor: colors.primary,
-    borderRadius: 12,
-    padding: 16,
-    alignItems: 'center',
-    marginTop: 32,
-  },
-  saveButtonDisabled: {
-    opacity: 0.6,
-  },
-  saveButtonText: {
-    color: '#FFFFFF',
-    fontSize: 18,
-    fontWeight: '600',
-  },
-  modalOverlay: {
-    flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.5)',
-    justifyContent: 'flex-end',
-  },
-  pickerContainer: {
-    backgroundColor: colors.card,
-    borderTopLeftRadius: 24,
-    borderTopRightRadius: 24,
-    maxHeight: '70%',
-    paddingBottom: 32,
-  },
-  pickerHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    padding: 20,
-    borderBottomWidth: 1,
-    borderBottomColor: colors.border,
-  },
-  pickerTitle: {
-    fontSize: 20,
-    fontWeight: 'bold',
-    color: colors.text,
-  },
-  typeOption: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    padding: 18,
-    borderBottomWidth: 1,
-    borderBottomColor: colors.border,
-  },
-  typeText: {
-    fontSize: 16,
-    color: colors.text,
-  },
+  container:          { flex: 1, backgroundColor: colors.background },
+  // FIX #4: paddingTop removido
+  header:             { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', padding: 20, paddingVertical: 16, backgroundColor: colors.card, borderBottomWidth: 1, borderBottomColor: colors.border },
+  backButton:         { padding: 4 },
+  title:              { fontSize: 20, fontWeight: 'bold', color: colors.text },
+  placeholder:        { width: 32 },
+  scrollContent:      { padding: 20, paddingBottom: 40 },
+  logoSection:        { alignItems: 'center', marginBottom: 24 },
+  logoContainer:      { width: 120, height: 120, borderRadius: 60, overflow: 'hidden', marginBottom: 12 },
+  logoImage:          { width: '100%', height: '100%' },
+  logoPlaceholder:    { width: '100%', height: '100%', backgroundColor: colors.card, justifyContent: 'center', alignItems: 'center', borderWidth: 2, borderColor: colors.border, borderStyle: 'dashed' },
+  logoOverlay:        { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', alignItems: 'center' },
+  changeLogoButton:   { paddingVertical: 8, paddingHorizontal: 16 },
+  changeLogoText:     { fontSize: 14, color: colors.primary, fontWeight: '600' },
+  fieldLabel:         { fontSize: 14, fontWeight: '600', color: colors.text, marginBottom: 8, marginTop: 16 },
+  input:              { backgroundColor: colors.card, borderRadius: 12, padding: 14, fontSize: 16, color: colors.text, borderWidth: 1, borderColor: colors.border },
+  pickerButton:       { backgroundColor: colors.card, borderRadius: 12, padding: 14, borderWidth: 1, borderColor: colors.border, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+  pickerText:         { fontSize: 16, color: colors.text },
+  pickerPlaceholder:  { color: colors.textSecondary },
+  saveButton:         { backgroundColor: colors.primary, borderRadius: 12, padding: 16, alignItems: 'center', marginTop: 32 },
+  saveButtonDisabled: { opacity: 0.6 },
+  saveButtonText:     { color: '#FFFFFF', fontSize: 18, fontWeight: '600' },
+  modalOverlay:       { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-end' },
+  pickerContainer:    { backgroundColor: colors.card, borderTopLeftRadius: 24, borderTopRightRadius: 24, maxHeight: '70%', paddingBottom: 32 },
+  pickerHeader:       { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', padding: 20, borderBottomWidth: 1, borderBottomColor: colors.border },
+  pickerTitle:        { fontSize: 20, fontWeight: 'bold', color: colors.text },
+  typeOption:         { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', padding: 18, borderBottomWidth: 1, borderBottomColor: colors.border },
+  typeText:           { fontSize: 16, color: colors.text },
 });
