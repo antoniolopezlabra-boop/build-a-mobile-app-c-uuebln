@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity,
   TextInput, ActivityIndicator, Modal, Alert,
@@ -36,46 +36,46 @@ export default function StaffNewAppointment() {
   const orgUserId = staffMemberData?.organizationUserId ?? '';
   const myStaffId = staffMemberData?.id ?? '';
 
+  const saveLockRef = useRef(false); // FIX #2: guard doble-submit
   const [saving, setSaving] = useState(false);
 
   // ── Cliente ────────────────────────────────────────
-  const [clients, setClients]                       = useState<Client[]>([]);
-  const [clientSearch, setClientSearch]             = useState('');
-  const [showClientSearch, setShowClientSearch]     = useState(false);
-  const [selectedClient, setSelectedClient]         = useState<Client | null>(null);
-  const [showClientPicker, setShowClientPicker]     = useState(false);
-  const [newClientName, setNewClientName]           = useState('');
-  const [newClientPhone, setNewClientPhone]         = useState('');
-  const [showNewClientForm, setShowNewClientForm]   = useState(false);
+  const [clients, setClients]                     = useState<Client[]>([]);
+  const [clientSearch, setClientSearch]           = useState('');
+  const [showClientSearch, setShowClientSearch]   = useState(false);
+  const [selectedClient, setSelectedClient]       = useState<Client | null>(null);
+  const [showClientPicker, setShowClientPicker]   = useState(false);
+  const [newClientName, setNewClientName]         = useState('');
+  const [newClientPhone, setNewClientPhone]       = useState('');
+  const [showNewClientForm, setShowNewClientForm] = useState(false);
 
   // ── Servicio ──────────────────────────────────────
-  const [services, setServices]                     = useState<Service[]>([]);
-  const [selectedService, setSelectedService]       = useState<Service | null>(null);
-  const [showServicePicker, setShowServicePicker]   = useState(false);
+  const [services, setServices]                   = useState<Service[]>([]);
+  const [selectedService, setSelectedService]     = useState<Service | null>(null);
+  const [showServicePicker, setShowServicePicker] = useState(false);
 
   // ── Staff ─────────────────────────────────────────
-  const [staffList, setStaffList]                   = useState<StaffMember[]>([]);
-  const [selectedStaff, setSelectedStaff]           = useState<StaffMember | null>(null);
-  const [showStaffPicker, setShowStaffPicker]       = useState(false);
+  const [staffList, setStaffList]                 = useState<StaffMember[]>([]);
+  const [selectedStaff, setSelectedStaff]         = useState<StaffMember | null>(null);
+  const [showStaffPicker, setShowStaffPicker]     = useState(false);
 
   // ── Fecha ─────────────────────────────────────────
-  const [date, setDate]                             = useState(new Date());
-  const [tempDate, setTempDate]                     = useState(new Date());
-  const [showDatePanel, setShowDatePanel]           = useState(false);
+  const [date, setDate]                           = useState(new Date());
+  const [tempDate, setTempDate]                   = useState(new Date());
+  const [showDatePanel, setShowDatePanel]         = useState(false);
   const [showDatePickerAndroid, setShowDatePickerAndroid] = useState(false);
 
   // ── Horarios disponibles ───────────────────────────
-  const [timeSlots, setTimeSlots]                   = useState<TimeSlot[]>([]);
-  const [selectedBlocks, setSelectedBlocks]         = useState<string[]>([]);
-  const [time, setTime]                             = useState('09:00');
-  const [dayIsClosed, setDayIsClosed]               = useState(false);
-  const [loadingSlots, setLoadingSlots]             = useState(false);
+  const [timeSlots, setTimeSlots]           = useState<TimeSlot[]>([]);
+  const [selectedBlocks, setSelectedBlocks] = useState<string[]>([]);
+  const [time, setTime]                     = useState('09:00');
+  const [dayIsClosed, setDayIsClosed]       = useState(false);
+  const [loadingSlots, setLoadingSlots]     = useState(false);
 
   const [notes, setNotes] = useState('');
 
   useEffect(() => { loadData(); }, []);
 
-  // Recargar slots cuando cambia fecha o staff
   useEffect(() => {
     if (orgUserId) checkAvailability();
   }, [date, selectedStaff, orgUserId]);
@@ -98,24 +98,26 @@ export default function StaffNewAppointment() {
     }
   };
 
-  // ── Misma lógica de disponibilidad que app/appointments/new.tsx ──
+  // FIX #5: excluir Cancelada, No asistió Y Rechazada para liberar slots correctamente
+  const EXCLUDED_STATUSES = ['Cancelada', 'No asisti\u00f3', 'Rechazada'];
+
   const checkAvailability = async () => {
     setLoadingSlots(true);
     try {
       const dateString = toDateStr(date);
       const dayOfWeek  = date.getDay();
 
-      // 1) Citas del día de este negocio
+      // Citas activas del día (excluye canceladas, no asistió, rechazadas)
       const { data: appts } = await supabase
         .from('appointments')
         .select('start_time, end_time, staff_id, status')
         .eq('user_id', orgUserId)
         .eq('date', dateString)
-        .not('status', 'eq', 'Cancelada');
+        .not('status', 'in', `(${EXCLUDED_STATUSES.map(s => `"${s}"`).join(',')})`);
 
       const allAppts = appts ?? [];
 
-      // 2) Horario del día: staff seleccionado → negocio → fallback
+      // Horario: staff seleccionado → negocio → fallback
       let dayConfig: { isOpen: boolean; startTime: string; endTime: string } | null = null;
 
       if (selectedStaff) {
@@ -154,17 +156,14 @@ export default function StaffNewAppointment() {
       const [startH, startM] = dayConfig.startTime.split(':').map(Number);
       const [endH,   endM]   = dayConfig.endTime.split(':').map(Number);
 
-      // 3) Citas del colaborador seleccionado (bloquean siempre)
       const staffAppts = selectedStaff
         ? allAppts.filter(a => a.staff_id === selectedStaff.id)
-        : allAppts; // sin staff: bloquear todas
+        : allAppts;
 
-      // 4) Slots pasados si es hoy
       const today    = new Date();
       const todayStr = toDateStr(today);
       const isToday  = dateString === todayStr;
 
-      // 5) Generar slots de 30 min
       const slots: TimeSlot[] = [];
       for (let total = startH * 60 + startM; total < endH * 60 + endM; total += 30) {
         const h = Math.floor(total / 60);
@@ -203,7 +202,6 @@ export default function StaffNewAppointment() {
     setClientSearch('');
   };
 
-  // ── Fecha handlers ──────────────────────────────────
   const openDatePicker = () => {
     Keyboard.dismiss();
     if (Platform.OS === 'ios') { setTempDate(date); setShowDatePanel(true); }
@@ -213,15 +211,14 @@ export default function StaffNewAppointment() {
   const cancelDate  = () => { setTempDate(date); setShowDatePanel(false); };
   const onAndroidDateChange = (_: any, d?: Date) => { setShowDatePickerAndroid(false); if (d) setDate(d); };
 
-  // ── Selección de bloques de horario ───────────────────
   const handleSlotPress = (slot: TimeSlot) => {
     if (!slot.available) return;
     Keyboard.dismiss();
     if (selectedBlocks.length === 0) {
       if (selectedService) {
-        const blocks   = Math.ceil(selectedService.durationMinutes / 30);
-        const thisIdx  = timeSlots.findIndex(s => s.time === slot.time);
-        const range    = timeSlots.slice(thisIdx, thisIdx + blocks);
+        const blocks  = Math.ceil(selectedService.durationMinutes / 30);
+        const thisIdx = timeSlots.findIndex(s => s.time === slot.time);
+        const range   = timeSlots.slice(thisIdx, thisIdx + blocks);
         if (range.length > 0 && range.every(s => s.available)) {
           setSelectedBlocks(range.map(s => s.time));
           setTime(slot.time);
@@ -242,8 +239,11 @@ export default function StaffNewAppointment() {
     }
   };
 
+  // FIX #2: guard doble-submit con useRef
   const handleSave = async () => {
+    if (saveLockRef.current) return;
     Keyboard.dismiss();
+
     if (!selectedClient && !showNewClientForm) { Alert.alert('Campo requerido', 'Selecciona o agrega un cliente.'); return; }
     if (showNewClientForm && !newClientName.trim()) { Alert.alert('Campo requerido', 'Ingresa el nombre del cliente.'); return; }
     if (!selectedService) { Alert.alert('Campo requerido', 'Selecciona un servicio.'); return; }
@@ -252,6 +252,7 @@ export default function StaffNewAppointment() {
     const selectedSlot = timeSlots.find(s => s.time === time);
     if (!selectedSlot?.available) { Alert.alert('No disponible', 'El horario seleccionado ya no está disponible.'); return; }
 
+    saveLockRef.current = true;
     setSaving(true);
     try {
       let clientId = selectedClient?.id ?? null;
@@ -264,7 +265,6 @@ export default function StaffNewAppointment() {
         clientId = newC.id;
       }
 
-      // endTime basado en bloques seleccionados
       const lastBlock = selectedBlocks[selectedBlocks.length - 1];
       const [lh, lm]  = lastBlock.split(':').map(Number);
       const endMin    = lh * 60 + lm + 30;
@@ -290,6 +290,7 @@ export default function StaffNewAppointment() {
       invalidateCache('appointments_list');
       router.back();
     } catch (e: any) {
+      saveLockRef.current = false; // desbloquear solo en error
       Alert.alert('Error', e?.message ?? 'No se pudo guardar la cita');
     } finally {
       setSaving(false);
@@ -301,7 +302,7 @@ export default function StaffNewAppointment() {
   const durationLabel = selectedBlocks.length > 0 ? (() => {
     const [h, m] = selectedBlocks[selectedBlocks.length - 1].split(':').map(Number);
     const e = h * 60 + m + 30;
-    return `${selectedBlocks[0]} → ${Math.floor(e/60).toString().padStart(2,'0')}:${(e%60).toString().padStart(2,'0')}  ·  ${selectedBlocks.length * 30} min`;
+    return `${selectedBlocks[0]} \u2192 ${Math.floor(e/60).toString().padStart(2,'0')}:${(e%60).toString().padStart(2,'0')}  \u00b7  ${selectedBlocks.length * 30} min`;
   })() : null;
 
   return (
@@ -327,7 +328,7 @@ export default function StaffNewAppointment() {
               <TouchableOpacity style={[s.field, { backgroundColor: tc.surface }]} onPress={() => setShowClientPicker(true)} activeOpacity={0.75}>
                 <MaterialIcons name="person" size={18} color="#10B981" />
                 <Text style={[s.fieldText, { color: selectedClient ? tc.text : tc.textMuted }]}>
-                  {selectedClient ? `${selectedClient.name}  ·  ${selectedClient.phone}` : 'Seleccionar cliente'}
+                  {selectedClient ? `${selectedClient.name}  \u00b7  ${selectedClient.phone}` : 'Seleccionar cliente'}
                 </Text>
                 <MaterialIcons name="expand-more" size={18} color={tc.textMuted} />
               </TouchableOpacity>
@@ -351,7 +352,7 @@ export default function StaffNewAppointment() {
           <TouchableOpacity style={[s.field, { backgroundColor: tc.surface }]} onPress={() => setShowServicePicker(true)} activeOpacity={0.75}>
             <MaterialIcons name="design-services" size={18} color="#10B981" />
             <Text style={[s.fieldText, { color: selectedService ? tc.text : tc.textMuted }]}>
-              {selectedService ? `${selectedService.name}  ·  ${selectedService.durationMinutes} min` : 'Seleccionar servicio'}
+              {selectedService ? `${selectedService.name}  \u00b7  ${selectedService.durationMinutes} min` : 'Seleccionar servicio'}
             </Text>
             <MaterialIcons name="expand-more" size={18} color={tc.textMuted} />
           </TouchableOpacity>
@@ -374,9 +375,9 @@ export default function StaffNewAppointment() {
             <DateTimePicker value={date} mode="date" minimumDate={new Date()} onChange={onAndroidDateChange} />
           )}
 
-          {/* ── Hora — bloques de disponibilidad real ── */}
+          {/* ── Hora ── */}
           <Text style={[s.label, { color: tc.textMuted }]}>
-            HORA{selectedStaff ? `  —  ${selectedStaff.name}` : ''}
+            HORA{selectedStaff ? `  \u2014  ${selectedStaff.name}` : ''}
           </Text>
 
           {loadingSlots ? (
@@ -387,7 +388,7 @@ export default function StaffNewAppointment() {
           ) : dayIsClosed ? (
             <View style={[s.dayClosed, { backgroundColor: '#FEF2F2' }]}>
               <Text style={s.dayClosedTitle}>
-                🚫 {selectedStaff ? `${selectedStaff.name} no trabaja este día` : 'Sin atención este día'}
+                \uD83D\uDEAB {selectedStaff ? `${selectedStaff.name} no trabaja este d\u00eda` : 'Sin atenci\u00f3n este d\u00eda'}
               </Text>
               <Text style={[s.dayClosedSub, { color: tc.textMuted }]}>Selecciona otra fecha o colaborador</Text>
             </View>
@@ -395,9 +396,9 @@ export default function StaffNewAppointment() {
             <>
               {durationLabel && (
                 <View style={s.durationBadge}>
-                  <Text style={s.durationBadgeText}>⏱ {durationLabel}</Text>
+                  <Text style={s.durationBadgeText}>\u23F1 {durationLabel}</Text>
                   <TouchableOpacity onPress={() => { setSelectedBlocks([]); setTime('09:00'); }}>
-                    <Text style={s.durationBadgeClear}>✕ Limpiar</Text>
+                    <Text style={s.durationBadgeClear}>\u2715 Limpiar</Text>
                   </TouchableOpacity>
                 </View>
               )}
@@ -423,7 +424,7 @@ export default function StaffNewAppointment() {
                   })}
                 </ScrollView>
               )}
-              <Text style={[s.slotHint, { color: tc.textMuted }]}>Toca un bloque para seleccionar · Desliza para ver más</Text>
+              <Text style={[s.slotHint, { color: tc.textMuted }]}>Toca un bloque para seleccionar \u00b7 Desliza para ver m\u00e1s</Text>
             </>
           )}
 
@@ -439,7 +440,7 @@ export default function StaffNewAppointment() {
       {Platform.OS === 'ios' && showDatePanel && (
         <>
           <TouchableOpacity style={s.panelOverlay} activeOpacity={1} onPress={cancelDate} />
-          <View style={[s.panel, { backgroundColor: '#fff' }]}>
+          <View style={[s.panel, { backgroundColor: '#fff', paddingBottom: insets.bottom + 16 }]}>
             <View style={s.panelHeader}>
               <TouchableOpacity onPress={cancelDate}><Text style={s.panelCancel}>Cancelar</Text></TouchableOpacity>
               <Text style={s.panelTitle}>Seleccionar fecha</Text>
@@ -454,7 +455,7 @@ export default function StaffNewAppointment() {
         </>
       )}
 
-      {/* Modal clientes — useSafeAreaInsets para notch */}
+      {/* Modal clientes */}
       <Modal visible={showClientPicker} animationType="slide" onRequestClose={closeClientPicker}>
         <View style={[s.fullModal, { backgroundColor: tc.bg, paddingTop: insets.top, paddingBottom: insets.bottom }]}>
           <View style={[s.fullModalHeader, { backgroundColor: tc.surface, borderBottomColor: tc.border }]}>
@@ -468,7 +469,7 @@ export default function StaffNewAppointment() {
             {showClientSearch ? (
               <View style={[s.searchBox, { backgroundColor: tc.bg, borderColor: '#10B981' }]}>
                 <MaterialIcons name="search" size={18} color="#10B981" />
-                <TextInput style={[s.searchInputInner, { color: tc.text }]} placeholder="Buscar por nombre o teléfono..." placeholderTextColor={tc.textMuted} value={clientSearch} onChangeText={setClientSearch} autoFocus={true} returnKeyType="search" />
+                <TextInput style={[s.searchInputInner, { color: tc.text }]} placeholder="Buscar por nombre o tel\u00e9fono..." placeholderTextColor={tc.textMuted} value={clientSearch} onChangeText={setClientSearch} autoFocus={true} returnKeyType="search" />
                 {clientSearch.length > 0 && (
                   <TouchableOpacity onPress={() => setClientSearch('')}><MaterialIcons name="close" size={16} color={tc.textMuted} /></TouchableOpacity>
                 )}
@@ -476,7 +477,7 @@ export default function StaffNewAppointment() {
             ) : (
               <TouchableOpacity style={[s.searchBox, { backgroundColor: tc.bg, borderColor: tc.border }]} onPress={() => setShowClientSearch(true)}>
                 <MaterialIcons name="search" size={18} color={tc.textMuted} />
-                <Text style={[s.searchPlaceholder, { color: tc.textMuted }]}>Buscar por nombre o teléfono...</Text>
+                <Text style={[s.searchPlaceholder, { color: tc.textMuted }]}>Buscar por nombre o tel\u00e9fono...</Text>
               </TouchableOpacity>
             )}
           </View>
@@ -514,7 +515,7 @@ export default function StaffNewAppointment() {
       {/* Modal servicios */}
       <Modal visible={showServicePicker} transparent animationType="slide" onRequestClose={() => setShowServicePicker(false)}>
         <View style={s.sheetOverlay}>
-          <View style={[s.sheet, { backgroundColor: tc.surface }]}>
+          <View style={[s.sheet, { backgroundColor: tc.surface, paddingBottom: insets.bottom + 20 }]}>
             <View style={s.sheetHandle} />
             <Text style={[s.sheetTitle, { color: tc.text }]}>Seleccionar servicio</Text>
             <ScrollView style={{ maxHeight: 400 }} showsVerticalScrollIndicator={false}>
@@ -527,7 +528,6 @@ export default function StaffNewAppointment() {
                     onPress={() => {
                       setSelectedService(sv);
                       setShowServicePicker(false);
-                      // Reajustar bloques seleccionados a la duración del nuevo servicio
                       if (selectedBlocks.length > 0 && timeSlots.length > 0) {
                         const blocks   = Math.ceil(sv.durationMinutes / 30);
                         const firstIdx = timeSlots.findIndex(s => s.time === selectedBlocks[0]);
@@ -541,7 +541,7 @@ export default function StaffNewAppointment() {
                   >
                     <View style={{ flex: 1 }}>
                       <Text style={[s.sheetRowMain, { color: tc.text }]}>{sv.name}</Text>
-                      <Text style={[s.sheetRowSub, { color: tc.textMuted }]}>{sv.durationMinutes} min  ·  ${sv.price?.toLocaleString('es-MX') ?? 0} MXN</Text>
+                      <Text style={[s.sheetRowSub, { color: tc.textMuted }]}>{sv.durationMinutes} min  \u00b7  ${sv.price?.toLocaleString('es-MX') ?? 0} MXN</Text>
                     </View>
                     {selectedService?.id === sv.id && <MaterialIcons name="check-circle" size={20} color="#10B981" />}
                   </TouchableOpacity>
@@ -558,7 +558,7 @@ export default function StaffNewAppointment() {
       {/* Modal staff */}
       <Modal visible={showStaffPicker} transparent animationType="slide" onRequestClose={() => setShowStaffPicker(false)}>
         <View style={s.sheetOverlay}>
-          <View style={[s.sheet, { backgroundColor: tc.surface }]}>
+          <View style={[s.sheet, { backgroundColor: tc.surface, paddingBottom: insets.bottom + 20 }]}>
             <View style={s.sheetHandle} />
             <Text style={[s.sheetTitle, { color: tc.text }]}>Asignar colaborador</Text>
             <ScrollView style={{ maxHeight: 350 }} showsVerticalScrollIndicator={false}>
@@ -571,7 +571,7 @@ export default function StaffNewAppointment() {
                   <View style={[s.staffDot, { backgroundColor: m.color, marginRight: 10 }]} />
                   <View style={{ flex: 1 }}>
                     <Text style={[s.sheetRowMain, { color: tc.text }]}>{m.name}</Text>
-                    {m.id === myStaffId && <Text style={[s.sheetRowSub, { color: '#10B981' }]}>Tú</Text>}
+                    {m.id === myStaffId && <Text style={[s.sheetRowSub, { color: '#10B981' }]}>T\u00fa</Text>}
                   </View>
                   {selectedStaff?.id === m.id && <MaterialIcons name="check-circle" size={20} color="#10B981" />}
                 </TouchableOpacity>
@@ -604,7 +604,6 @@ const s = StyleSheet.create({
   input:               { borderRadius: 10, borderWidth: 1, paddingHorizontal: 14, paddingVertical: 11, fontSize: 15 },
   textArea:            { borderRadius: 14, borderWidth: 1, paddingHorizontal: 14, paddingVertical: 12, fontSize: 15, minHeight: 80, textAlignVertical: 'top' },
   staffDot:            { width: 10, height: 10, borderRadius: 5 },
-  // Bloques de horario
   slotsLoading:        { flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 16 },
   slotsLoadingText:    { fontSize: 13 },
   dayClosed:           { borderRadius: 12, padding: 16, alignItems: 'center', gap: 4 },
@@ -622,9 +621,8 @@ const s = StyleSheet.create({
   slotTextDisabled:    { color: '#9CA3AF' },
   slotHint:            { fontSize: 11, marginTop: 8 },
   noSlots:             { fontSize: 13, paddingVertical: 12 },
-  // iOS date panel
   panelOverlay:        { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.4)' },
-  panel:               { position: 'absolute', bottom: 0, left: 0, right: 0, borderTopLeftRadius: 24, borderTopRightRadius: 24, paddingBottom: 40 },
+  panel:               { position: 'absolute', bottom: 0, left: 0, right: 0, borderTopLeftRadius: 24, borderTopRightRadius: 24 },
   panelHeader:         { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 20, paddingTop: 18, paddingBottom: 14, borderBottomWidth: 0.5, borderBottomColor: '#E2E8F0' },
   panelTitle:          { fontSize: 16, fontWeight: '700', color: '#0F172A' },
   panelCancel:         { fontSize: 15, color: '#94A3B8', fontWeight: '500' },
@@ -633,7 +631,6 @@ const s = StyleSheet.create({
   panelPreviewText:    { fontSize: 15, fontWeight: '600', color: '#10B981' },
   panelConfirmBtn:     { backgroundColor: '#10B981', marginHorizontal: 20, marginTop: 12, paddingVertical: 15, borderRadius: 14, alignItems: 'center' },
   panelConfirmBtnText: { fontSize: 16, fontWeight: '700', color: '#fff' },
-  // Modal clientes full screen
   fullModal:           { flex: 1 },
   fullModalHeader:     { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, paddingVertical: 14, borderBottomWidth: 0.5 },
   searchContainer:     { paddingHorizontal: 16, paddingVertical: 12, borderBottomWidth: 0.5 },
@@ -649,9 +646,8 @@ const s = StyleSheet.create({
   emptyText:           { fontSize: 14 },
   emptyBtn:            { flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: '#10B981', paddingHorizontal: 20, paddingVertical: 12, borderRadius: 12 },
   emptyBtnText:        { color: '#fff', fontWeight: '700', fontSize: 14 },
-  // Bottom sheets
   sheetOverlay:        { flex: 1, backgroundColor: 'rgba(0,0,0,0.45)', justifyContent: 'flex-end' },
-  sheet:               { borderTopLeftRadius: 24, borderTopRightRadius: 24, paddingHorizontal: 20, paddingTop: 12, paddingBottom: 36 },
+  sheet:               { borderTopLeftRadius: 24, borderTopRightRadius: 24, paddingHorizontal: 20, paddingTop: 12 },
   sheetHandle:         { width: 40, height: 4, borderRadius: 2, backgroundColor: '#CBD5E1', alignSelf: 'center', marginBottom: 16 },
   sheetTitle:          { fontSize: 17, fontWeight: '700', marginBottom: 12 },
   sheetRow:            { flexDirection: 'row', alignItems: 'center', paddingVertical: 16, borderBottomWidth: 0.5 },
