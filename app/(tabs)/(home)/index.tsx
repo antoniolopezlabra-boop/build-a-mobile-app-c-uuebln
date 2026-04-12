@@ -11,11 +11,17 @@ import MaterialIcons from '@expo/vector-icons/MaterialIcons';
 import { useAuth } from '@/contexts/AuthContext';
 import { useTheme } from '@/contexts/ThemeContext';
 import { apiGet } from '@/utils/api';
-import { getCached, setCached, CACHE_TTL } from '@/utils/cache';
+import { getCached, setCached, invalidateCache, CACHE_TTL } from '@/utils/cache';
 import { getStatusColor } from '@/utils/appointmentUtils';
 import { supabase } from '@/lib/supabase';
 
 const { width: SCREEN_W } = Dimensions.get('window');
+
+// FIX #13: clave dinámica de caché de reportes (año_mes)
+function getReportsCacheKey() {
+  const n = new Date();
+  return `reports_stats_${n.getFullYear()}_${n.getMonth() + 1}`;
+}
 
 // Paleta dark premium
 const D = {
@@ -221,6 +227,7 @@ export default function HomeScreen() {
     } catch (e) { console.warn('[Dashboard] loadUnpaidAppointments error:', e); }
   };
 
+  // FIX #13: invalidar caché de reportes con clave dinámica al marcar como pagado
   const markAsPaid = async (apptId: string) => {
     setMarkingPaidId(apptId);
     try {
@@ -228,6 +235,9 @@ export default function HomeScreen() {
         .update({ paid: true, updated_at: new Date().toISOString() }).eq('id', apptId);
       if (error) throw error;
       setUnpaidAppointments(prev => prev.filter(a => a.id !== apptId));
+      // FIX #13: invalidar reportes para que al ir a Reportes vea los ingresos actualizados
+      invalidateCache(getReportsCacheKey());
+      invalidateCache('dashboard_stats');
     } catch (e: any) {
       Alert.alert('Error', e?.message ?? 'No se pudo registrar el pago');
     } finally { setMarkingPaidId(null); }
@@ -278,7 +288,7 @@ export default function HomeScreen() {
               tintColor={D.gold} colors={[D.gold]} progressBackgroundColor={D.surface} />
           }
         >
-          {/* ── HEADER ── */}
+          {/* HEADER */}
           <View style={s.header}>
             <View style={{ flex: 1 }}>
               <Text style={s.greeting}>{getGreeting()},</Text>
@@ -300,7 +310,7 @@ export default function HomeScreen() {
             </TouchableOpacity>
           </View>
 
-          {/* ── UPGRADE BANNER ── */}
+          {/* UPGRADE BANNER */}
           {isGratuito && (
             <TouchableOpacity style={s.upgradeCard} onPress={() => router.push('/settings/subscription')} activeOpacity={0.85}>
               <View style={s.upgradeIconWrap}>
@@ -314,7 +324,7 @@ export default function HomeScreen() {
             </TouchableOpacity>
           )}
 
-          {/* ── COBROS PENDIENTES (hero card si hay adeudos) ── */}
+          {/* COBROS PENDIENTES */}
           {unpaidAppointments.length > 0 && (
             <View style={s.heroCard}>
               <View style={s.heroLeft}>
@@ -331,7 +341,7 @@ export default function HomeScreen() {
             </View>
           )}
 
-          {/* ── KPIs GRID ── */}
+          {/* KPIs GRID */}
           {!isGratuito && (
             <>
               <View style={s.sectionRow}>
@@ -354,7 +364,7 @@ export default function HomeScreen() {
             </>
           )}
 
-          {/* ── LISTA COBROS PENDIENTES ── */}
+          {/* LISTA COBROS PENDIENTES */}
           {unpaidAppointments.length > 0 && (
             <>
               <View style={s.sectionRow}>
@@ -400,7 +410,7 @@ export default function HomeScreen() {
             </>
           )}
 
-          {/* ── FILTRO STAFF ── */}
+          {/* FILTRO STAFF */}
           {staffMembers.length > 0 && (
             <>
               <View style={s.sectionRow}>
@@ -428,7 +438,7 @@ export default function HomeScreen() {
             </>
           )}
 
-          {/* ── CITAS DE HOY ── */}
+          {/* CITAS DE HOY */}
           <View style={s.sectionRow}>
             <Text style={s.sectionTitle}>
               {selectedStaffId ? `CITAS — ${staffMembers.find(m=>m.id===selectedStaffId)?.name?.toUpperCase()}` : 'AGENDA DE HOY'}
@@ -488,7 +498,7 @@ export default function HomeScreen() {
             </View>
           )}
 
-          {/* ── ACCIONES RÁPIDAS ── */}
+          {/* ACCIONES RÁPIDAS */}
           <View style={s.sectionRow}>
             <Text style={s.sectionTitle}>ACCIONES RÁPIDAS</Text>
           </View>
@@ -499,7 +509,7 @@ export default function HomeScreen() {
             <QuickAction icon="person-search"      label="Clientes inactivos" accent={D.gold}   onPress={() => router.push('/clients/inactive')} />
           </View>
 
-          {/* ── BANNER WHATSAPP ── */}
+          {/* BANNER WHATSAPP */}
           {(isBasico || isPremium) && !waConnected && (
             <TouchableOpacity style={s.waBanner} onPress={() => router.push('/settings/whatsapp')} activeOpacity={0.8}>
               <View style={s.waIconBox}>
@@ -522,8 +532,6 @@ export default function HomeScreen() {
 const s = StyleSheet.create({
   container:        { flex: 1, backgroundColor: D.bg },
   scroll:           { paddingHorizontal: 16, paddingTop: 8, paddingBottom: 120 },
-
-  // Header
   header:           { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 24 },
   greeting:         { fontSize: 13, color: D.textMuted, fontWeight: '500', marginBottom: 2 },
   userName:         { fontSize: 26, fontWeight: '900', color: D.text, letterSpacing: -0.5, marginBottom: 10 },
@@ -538,44 +546,29 @@ const s = StyleSheet.create({
                       justifyContent: 'center', alignItems: 'center', borderWidth: 2, borderColor: D.gold },
   avatarText:       { fontSize: 22, fontWeight: '900', color: D.gold },
   avatarRing:       { position: 'absolute', inset: -3, borderRadius: 23, borderWidth: 1, borderColor: D.gold + '44' },
-
-  // Upgrade
   upgradeCard:      { flexDirection: 'row', alignItems: 'center', gap: 12, backgroundColor: D.surface,
-                      borderRadius: 18, padding: 16, marginBottom: 20,
-                      borderWidth: 1, borderColor: D.gold + '44' },
-  upgradeIconWrap:  { width: 44, height: 44, borderRadius: 14, backgroundColor: D.goldDim,
-                      justifyContent: 'center', alignItems: 'center' },
+                      borderRadius: 18, padding: 16, marginBottom: 20, borderWidth: 1, borderColor: D.gold + '44' },
+  upgradeIconWrap:  { width: 44, height: 44, borderRadius: 14, backgroundColor: D.goldDim, justifyContent: 'center', alignItems: 'center' },
   upgradeTitle:     { fontSize: 15, fontWeight: '800', color: D.gold, marginBottom: 2 },
   upgradeDesc:      { fontSize: 12, color: D.textMuted, lineHeight: 17 },
-
-  // Hero cobros
   heroCard:         { backgroundColor: D.surface, borderRadius: 20, padding: 22, marginBottom: 20,
-                      flexDirection: 'row', alignItems: 'center',
-                      borderWidth: 1, borderColor: D.gold + '44' },
+                      flexDirection: 'row', alignItems: 'center', borderWidth: 1, borderColor: D.gold + '44' },
   heroLeft:         { flex: 1 },
   heroBadge:        { flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 8 },
   heroBadgeDot:     { width: 7, height: 7, borderRadius: 4, backgroundColor: D.gold },
   heroBadgeText:    { fontSize: 11, color: D.gold, fontWeight: '700', letterSpacing: 1 },
   heroAmount:       { fontSize: 38, fontWeight: '900', color: D.gold, letterSpacing: -1, lineHeight: 42 },
   heroSub:          { fontSize: 12, color: D.textMuted, marginTop: 4 },
-  heroIconWrap:     { width: 72, height: 72, borderRadius: 20, backgroundColor: D.goldDim,
-                      justifyContent: 'center', alignItems: 'center' },
-
-  // Secciones
+  heroIconWrap:     { width: 72, height: 72, borderRadius: 20, backgroundColor: D.goldDim, justifyContent: 'center', alignItems: 'center' },
   sectionRow:       { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12, marginTop: 4 },
   sectionTitle:     { fontSize: 11, fontWeight: '800', color: D.textMuted, letterSpacing: 1.5 },
   sectionDate:      { fontSize: 11, color: D.textMuted, fontWeight: '600' },
   seeAll:           { fontSize: 12, color: D.gold, fontWeight: '700' },
   countBadge:       { backgroundColor: D.orange + '33', borderRadius: 10, paddingHorizontal: 8, paddingVertical: 2 },
   countBadgeText:   { fontSize: 11, fontWeight: '800', color: D.orange },
-
-  // KPIs
   kpiRow:           { flexDirection: 'row', marginBottom: 16, marginHorizontal: -4 },
-
-  // Cobros pendientes
   unpaidCard:       { flexDirection: 'row', alignItems: 'center', backgroundColor: D.surface,
-                      borderRadius: 14, padding: 14, marginBottom: 8,
-                      borderWidth: 1, borderColor: D.orange + '33',
+                      borderRadius: 14, padding: 14, marginBottom: 8, borderWidth: 1, borderColor: D.orange + '33',
                       borderLeftWidth: 3, borderLeftColor: D.orange },
   unpaidLeft:       { flex: 1, marginRight: 10 },
   unpaidClient:     { fontSize: 14, fontWeight: '700', color: D.text, marginBottom: 3 },
@@ -583,18 +576,12 @@ const s = StyleSheet.create({
   unpaidAmount:     { fontSize: 15, fontWeight: '900', color: D.green, marginRight: 10 },
   payBtn:           { backgroundColor: D.gold, borderRadius: 10, paddingHorizontal: 14, paddingVertical: 9, minWidth: 64, alignItems: 'center' },
   payBtnText:       { fontSize: 12, fontWeight: '800', color: D.bg },
-
-  // Staff chips
   staffChip:        { flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 14, paddingVertical: 8,
-                      borderRadius: 20, borderWidth: 1, borderColor: D.border,
-                      backgroundColor: D.surface, marginRight: 8 },
+                      borderRadius: 20, borderWidth: 1, borderColor: D.border, backgroundColor: D.surface, marginRight: 8 },
   staffChipText:    { fontSize: 12, fontWeight: '600' },
   staffDot:         { width: 7, height: 7, borderRadius: 4 },
-
-  // Citas
-  apptCard:         { backgroundColor: D.surface, borderRadius: 14, flexDirection: 'row',
-                      alignItems: 'center', overflow: 'hidden',
-                      borderWidth: 1, borderColor: D.border, borderLeftWidth: 3 },
+  apptCard:         { backgroundColor: D.surface, borderRadius: 14, flexDirection: 'row', alignItems: 'center',
+                      overflow: 'hidden', borderWidth: 1, borderColor: D.border, borderLeftWidth: 3 },
   apptTimeCol:      { paddingHorizontal: 14, paddingVertical: 16, minWidth: 60, alignItems: 'center', gap: 4 },
   apptTime:         { fontSize: 13, fontWeight: '800', color: D.text },
   apptStaffDot:     { width: 5, height: 5, borderRadius: 3 },
@@ -603,8 +590,6 @@ const s = StyleSheet.create({
   apptService:      { fontSize: 11, color: D.textMuted, marginTop: 2 },
   apptBadge:        { marginRight: 8, paddingHorizontal: 8, paddingVertical: 4, borderRadius: 8 },
   apptBadgeText:    { fontSize: 10, fontWeight: '700' },
-
-  // Empty
   emptyCard:        { borderRadius: 18, padding: 32, alignItems: 'center', backgroundColor: D.surface,
                       borderWidth: 1, borderColor: D.border, gap: 8, marginBottom: 20 },
   emptyTitle:       { fontSize: 16, fontWeight: '700', color: D.text },
@@ -612,15 +597,10 @@ const s = StyleSheet.create({
   emptyBtn:         { flexDirection: 'row', alignItems: 'center', gap: 6,
                       backgroundColor: D.gold, paddingVertical: 10, paddingHorizontal: 20, borderRadius: 12, marginTop: 8 },
   emptyBtnText:     { color: D.bg, fontWeight: '800', fontSize: 14 },
-
-  // Acciones
   actionsGrid:      { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between', marginBottom: 20 },
-
-  // WA Banner
   waBanner:         { borderRadius: 16, padding: 14, flexDirection: 'row', alignItems: 'center', gap: 12,
                       backgroundColor: D.surface, borderWidth: 1, borderColor: '#166834' + '66' },
-  waIconBox:        { width: 40, height: 40, borderRadius: 12, backgroundColor: '#052E16',
-                      justifyContent: 'center', alignItems: 'center' },
+  waIconBox:        { width: 40, height: 40, borderRadius: 12, backgroundColor: '#052E16', justifyContent: 'center', alignItems: 'center' },
   waTitle:          { fontSize: 14, fontWeight: '700', color: D.text, marginBottom: 2 },
   waDesc:           { fontSize: 11, color: D.textMuted },
 });
