@@ -30,19 +30,18 @@ export default function ClientDetailScreen() {
   const router = useRouter();
   const params = useLocalSearchParams();
   const id = Array.isArray(params.id) ? params.id[0] : params.id;
-  const [loading, setLoading]             = useState(true);
-  const [client, setClient]               = useState<Client | null>(null);
-  const [stats, setStats]                 = useState<ClientStats | null>(null);
-  const [appointments, setAppointments]   = useState<Appointment[]>([]);
-  const [activeTab, setActiveTab]         = useState<'appointments' | 'messages'>('appointments');
-  const [errorModal, setErrorModal]       = useState({ visible: false, message: '' });
+  const [loading, setLoading]           = useState(true);
+  const [client, setClient]             = useState<Client | null>(null);
+  const [stats, setStats]               = useState<ClientStats | null>(null);
+  const [appointments, setAppointments] = useState<Appointment[]>([]);
+  const [activeTab, setActiveTab]       = useState<'appointments' | 'messages'>('appointments');
+  const [errorModal, setErrorModal]     = useState({ visible: false, message: '' });
 
   useEffect(() => { if (id) loadClientData(); }, [id]);
 
   const loadClientData = async () => {
     setLoading(true);
     try {
-      // FIX #8: cargar solo el cliente específico — no toda la lista
       const clientData = await apiGet<Client>(`/api/clients/${id}`);
       if (!clientData) throw new Error('Cliente no encontrado');
       setClient(clientData);
@@ -72,7 +71,7 @@ export default function ClientDetailScreen() {
   };
 
   const formatDate = (dateStr: string) => {
-    const date = new Date(dateStr + 'T12:00:00');
+    const date  = new Date(dateStr + 'T12:00:00');
     const day   = date.getDate();
     const month = date.toLocaleString('es-MX', { month: 'short' });
     const year  = date.getFullYear().toString().slice(-2);
@@ -110,12 +109,23 @@ export default function ClientDetailScreen() {
     );
   }
 
-  const initials          = getInitials(client.name);
+  const initials           = getInitials(client.name);
   const attendanceRateText = `${Math.round(stats.attendanceRate)}%`;
-  const lastVisitText     = stats.lastVisit ? formatDate(stats.lastVisit) : 'Sin visitas';
+  const lastVisitText      = stats.lastVisit ? formatDate(stats.lastVisit) : 'Sin visitas';
+
+  // FIX #14: pasar cliente pre-seleccionado a la pantalla de nueva cita
+  const handleScheduleAppointment = () => {
+    router.push({
+      pathname: '/appointments/new',
+      params: {
+        clientId:    client.id,
+        clientName:  client.name,
+        clientPhone: client.phone,
+      },
+    } as any);
+  };
 
   return (
-    // FIX #6: SafeAreaView edges={['top']} — sin paddingTop:48
     <SafeAreaView style={styles.container} edges={['top']}>
       <ConfirmModal
         visible={errorModal.visible} title="Error" message={errorModal.message}
@@ -123,7 +133,6 @@ export default function ClientDetailScreen() {
         onDismiss={() => setErrorModal({ visible: false, message: '' })}
       />
 
-      {/* FIX #6: sin paddingTop:48 */}
       <View style={styles.header}>
         <TouchableOpacity onPress={() => router.back()} style={styles.headerBackButton}>
           <IconSymbol android_material_icon_name="arrow-back" size={24} color={colors.text} />
@@ -164,7 +173,8 @@ export default function ClientDetailScreen() {
         </View>
 
         <View style={styles.actionButtons}>
-          <TouchableOpacity style={styles.actionButton} onPress={() => router.push('/appointments/new')}>
+          {/* FIX #14: pasa clientId, clientName y clientPhone */}
+          <TouchableOpacity style={styles.actionButton} onPress={handleScheduleAppointment}>
             <IconSymbol android_material_icon_name="calendar-today" size={20} color="#FFFFFF" />
             <Text style={styles.actionButtonText}>Agendar cita</Text>
           </TouchableOpacity>
@@ -189,6 +199,10 @@ export default function ClientDetailScreen() {
               <View style={styles.emptyState}>
                 <IconSymbol android_material_icon_name="calendar-today" size={48} color={colors.textSecondary} />
                 <Text style={styles.emptyStateText}>Sin citas registradas</Text>
+                <TouchableOpacity style={[styles.actionButton, { marginTop: 16, paddingHorizontal: 24 }]} onPress={handleScheduleAppointment}>
+                  <IconSymbol android_material_icon_name="add" size={18} color="#FFFFFF" />
+                  <Text style={styles.actionButtonText}>Agendar primera cita</Text>
+                </TouchableOpacity>
               </View>
             ) : (
               appointments.map(appointment => (
@@ -226,7 +240,6 @@ const styles = StyleSheet.create({
   errorText:                { fontSize: 18, color: colors.text, marginBottom: 20 },
   backButton:               { backgroundColor: colors.primary, borderRadius: 12, paddingVertical: 12, paddingHorizontal: 24 },
   backButtonText:           { color: '#FFFFFF', fontSize: 16, fontWeight: '600' },
-  // FIX #6: paddingTop removido del header
   header:                   { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', padding: 20, paddingVertical: 16, backgroundColor: colors.card, borderBottomWidth: 1, borderBottomColor: colors.border },
   headerBackButton:         { padding: 4 },
   headerTitle:              { fontSize: 18, fontWeight: 'bold', color: colors.text },
