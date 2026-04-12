@@ -2,10 +2,11 @@ import React, { useState, useEffect, useRef } from 'react';
 import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity,
   TextInput, ActivityIndicator, Modal, Alert,
-  KeyboardAvoidingView, Platform, Keyboard,
+  KeyboardAvoidingView, Platform, Keyboard, BackHandler,
 } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
+import { useFocusEffect } from '@react-navigation/native';
 import MaterialIcons from '@expo/vector-icons/MaterialIcons';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import { useAuth } from '@/contexts/AuthContext';
@@ -36,10 +37,9 @@ export default function StaffNewAppointment() {
   const orgUserId = staffMemberData?.organizationUserId ?? '';
   const myStaffId = staffMemberData?.id ?? '';
 
-  const saveLockRef = useRef(false); // FIX #2: guard doble-submit
+  const saveLockRef = useRef(false);
   const [saving, setSaving] = useState(false);
 
-  // ── Cliente ────────────────────────────────────────
   const [clients, setClients]                     = useState<Client[]>([]);
   const [clientSearch, setClientSearch]           = useState('');
   const [showClientSearch, setShowClientSearch]   = useState(false);
@@ -49,23 +49,19 @@ export default function StaffNewAppointment() {
   const [newClientPhone, setNewClientPhone]       = useState('');
   const [showNewClientForm, setShowNewClientForm] = useState(false);
 
-  // ── Servicio ──────────────────────────────────────
   const [services, setServices]                   = useState<Service[]>([]);
   const [selectedService, setSelectedService]     = useState<Service | null>(null);
   const [showServicePicker, setShowServicePicker] = useState(false);
 
-  // ── Staff ─────────────────────────────────────────
   const [staffList, setStaffList]                 = useState<StaffMember[]>([]);
   const [selectedStaff, setSelectedStaff]         = useState<StaffMember | null>(null);
   const [showStaffPicker, setShowStaffPicker]     = useState(false);
 
-  // ── Fecha ─────────────────────────────────────────
   const [date, setDate]                           = useState(new Date());
   const [tempDate, setTempDate]                   = useState(new Date());
   const [showDatePanel, setShowDatePanel]         = useState(false);
   const [showDatePickerAndroid, setShowDatePickerAndroid] = useState(false);
 
-  // ── Horarios disponibles ───────────────────────────
   const [timeSlots, setTimeSlots]           = useState<TimeSlot[]>([]);
   const [selectedBlocks, setSelectedBlocks] = useState<string[]>([]);
   const [time, setTime]                     = useState('09:00');
@@ -73,6 +69,47 @@ export default function StaffNewAppointment() {
   const [loadingSlots, setLoadingSlots]     = useState(false);
 
   const [notes, setNotes] = useState('');
+
+  // FIX #11: detectar si el form tiene datos para advertir al salir
+  const hasUnsavedData = !!(selectedClient || selectedService || selectedBlocks.length > 0 || newClientName.trim() || notes.trim());
+
+  // FIX #11: interceptar botón back de Android con datos sin guardar
+  useFocusEffect(
+    React.useCallback(() => {
+      const onBackPress = () => {
+        if (hasUnsavedData && !saving) {
+          Alert.alert(
+            'Descartar cambios',
+            '¿Seguro que quieres salir? Los datos de la cita se perderán.',
+            [
+              { text: 'Cancelar', style: 'cancel' },
+              { text: 'Salir', style: 'destructive', onPress: () => router.back() },
+            ]
+          );
+          return true; // bloquear back nativo
+        }
+        return false; // permitir back normal
+      };
+      const subscription = BackHandler.addEventListener('hardwareBackPress', onBackPress);
+      return () => subscription.remove();
+    }, [hasUnsavedData, saving])
+  );
+
+  // FIX #11: botón back del header con confirmación
+  const handleBack = () => {
+    if (hasUnsavedData && !saving) {
+      Alert.alert(
+        'Descartar cambios',
+        '¿Seguro que quieres salir? Los datos de la cita se perderán.',
+        [
+          { text: 'Cancelar', style: 'cancel' },
+          { text: 'Salir', style: 'destructive', onPress: () => router.back() },
+        ]
+      );
+    } else {
+      router.back();
+    }
+  };
 
   useEffect(() => { loadData(); }, []);
 
@@ -98,7 +135,6 @@ export default function StaffNewAppointment() {
     }
   };
 
-  // FIX #5: excluir Cancelada, No asistió Y Rechazada para liberar slots correctamente
   const EXCLUDED_STATUSES = ['Cancelada', 'No asisti\u00f3', 'Rechazada'];
 
   const checkAvailability = async () => {
@@ -107,7 +143,6 @@ export default function StaffNewAppointment() {
       const dateString = toDateStr(date);
       const dayOfWeek  = date.getDay();
 
-      // Citas activas del día (excluye canceladas, no asistió, rechazadas)
       const { data: appts } = await supabase
         .from('appointments')
         .select('start_time, end_time, staff_id, status')
@@ -117,7 +152,6 @@ export default function StaffNewAppointment() {
 
       const allAppts = appts ?? [];
 
-      // Horario: staff seleccionado → negocio → fallback
       let dayConfig: { isOpen: boolean; startTime: string; endTime: string } | null = null;
 
       if (selectedStaff) {
@@ -239,7 +273,6 @@ export default function StaffNewAppointment() {
     }
   };
 
-  // FIX #2: guard doble-submit con useRef
   const handleSave = async () => {
     if (saveLockRef.current) return;
     Keyboard.dismiss();
@@ -250,7 +283,7 @@ export default function StaffNewAppointment() {
     if (selectedBlocks.length === 0) { Alert.alert('Campo requerido', 'Selecciona un horario disponible.'); return; }
 
     const selectedSlot = timeSlots.find(s => s.time === time);
-    if (!selectedSlot?.available) { Alert.alert('No disponible', 'El horario seleccionado ya no está disponible.'); return; }
+    if (!selectedSlot?.available) { Alert.alert('No disponible', 'El horario seleccionado ya no est\u00e1 disponible.'); return; }
 
     saveLockRef.current = true;
     setSaving(true);
@@ -290,7 +323,7 @@ export default function StaffNewAppointment() {
       invalidateCache('appointments_list');
       router.back();
     } catch (e: any) {
-      saveLockRef.current = false; // desbloquear solo en error
+      saveLockRef.current = false;
       Alert.alert('Error', e?.message ?? 'No se pudo guardar la cita');
     } finally {
       setSaving(false);
@@ -307,9 +340,9 @@ export default function StaffNewAppointment() {
 
   return (
     <SafeAreaView style={[s.container, { backgroundColor: tc.bg }]} edges={['top']}>
-      {/* Header */}
+      {/* Header — FIX #11: botón back usa handleBack con confirmación */}
       <View style={[s.header, { backgroundColor: tc.surface, borderBottomColor: tc.border }]}>
-        <TouchableOpacity onPress={() => router.back()} style={s.back}>
+        <TouchableOpacity onPress={handleBack} style={s.back}>
           <MaterialIcons name="arrow-back" size={24} color={tc.text} />
         </TouchableOpacity>
         <Text style={[s.headerTitle, { color: tc.text }]}>Nueva cita</Text>
@@ -321,7 +354,6 @@ export default function StaffNewAppointment() {
       <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
         <ScrollView contentContainerStyle={s.scroll} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled" keyboardDismissMode="on-drag">
 
-          {/* ── Cliente ── */}
           <Text style={[s.label, { color: tc.textMuted }]}>CLIENTE *</Text>
           {!showNewClientForm ? (
             <>
@@ -340,14 +372,13 @@ export default function StaffNewAppointment() {
           ) : (
             <View style={[s.newClientBox, { backgroundColor: tc.surface, borderColor: '#10B981' }]}>
               <TextInput style={[s.input, { color: tc.text, borderColor: tc.border, backgroundColor: tc.bg }]} placeholder="Nombre *" placeholderTextColor={tc.textMuted} value={newClientName} onChangeText={setNewClientName} returnKeyType="next" />
-              <TextInput style={[s.input, { color: tc.text, borderColor: tc.border, backgroundColor: tc.bg, marginTop: 8 }]} placeholder="Teléfono" placeholderTextColor={tc.textMuted} value={newClientPhone} onChangeText={setNewClientPhone} keyboardType="phone-pad" returnKeyType="done" onSubmitEditing={Keyboard.dismiss} />
+              <TextInput style={[s.input, { color: tc.text, borderColor: tc.border, backgroundColor: tc.bg, marginTop: 8 }]} placeholder="Tel\u00e9fono" placeholderTextColor={tc.textMuted} value={newClientPhone} onChangeText={setNewClientPhone} keyboardType="phone-pad" returnKeyType="done" onSubmitEditing={Keyboard.dismiss} />
               <TouchableOpacity style={s.addClientLink} onPress={() => { setShowNewClientForm(false); setNewClientName(''); setNewClientPhone(''); }}>
-                <Text style={[s.addClientText, { color: tc.textMuted }]}>Cancelar — buscar existente</Text>
+                <Text style={[s.addClientText, { color: tc.textMuted }]}>Cancelar \u2014 buscar existente</Text>
               </TouchableOpacity>
             </View>
           )}
 
-          {/* ── Servicio ── */}
           <Text style={[s.label, { color: tc.textMuted }]}>SERVICIO *</Text>
           <TouchableOpacity style={[s.field, { backgroundColor: tc.surface }]} onPress={() => setShowServicePicker(true)} activeOpacity={0.75}>
             <MaterialIcons name="design-services" size={18} color="#10B981" />
@@ -357,7 +388,6 @@ export default function StaffNewAppointment() {
             <MaterialIcons name="expand-more" size={18} color={tc.textMuted} />
           </TouchableOpacity>
 
-          {/* ── Colaborador ── */}
           <Text style={[s.label, { color: tc.textMuted }]}>COLABORADOR</Text>
           <TouchableOpacity style={[s.field, { backgroundColor: tc.surface }]} onPress={() => setShowStaffPicker(true)} activeOpacity={0.75}>
             <View style={[s.staffDot, { backgroundColor: selectedStaff?.color ?? '#94A3B8' }]} />
@@ -365,7 +395,6 @@ export default function StaffNewAppointment() {
             <MaterialIcons name="expand-more" size={18} color={tc.textMuted} />
           </TouchableOpacity>
 
-          {/* ── Fecha ── */}
           <Text style={[s.label, { color: tc.textMuted }]}>FECHA</Text>
           <TouchableOpacity style={[s.field, { backgroundColor: tc.surface }]} onPress={openDatePicker} activeOpacity={0.75}>
             <MaterialIcons name="calendar-today" size={18} color="#10B981" />
@@ -375,7 +404,6 @@ export default function StaffNewAppointment() {
             <DateTimePicker value={date} mode="date" minimumDate={new Date()} onChange={onAndroidDateChange} />
           )}
 
-          {/* ── Hora ── */}
           <Text style={[s.label, { color: tc.textMuted }]}>
             HORA{selectedStaff ? `  \u2014  ${selectedStaff.name}` : ''}
           </Text>
@@ -428,7 +456,6 @@ export default function StaffNewAppointment() {
             </>
           )}
 
-          {/* ── Notas ── */}
           <Text style={[s.label, { color: tc.textMuted }]}>NOTAS</Text>
           <TextInput style={[s.textArea, { backgroundColor: tc.surface, color: tc.text, borderColor: tc.border }]} value={notes} onChangeText={setNotes} placeholder="Notas opcionales..." placeholderTextColor={tc.textMuted} multiline maxLength={500} returnKeyType="done" onSubmitEditing={Keyboard.dismiss} />
 
@@ -436,7 +463,6 @@ export default function StaffNewAppointment() {
         </ScrollView>
       </KeyboardAvoidingView>
 
-      {/* iOS Date Panel */}
       {Platform.OS === 'ios' && showDatePanel && (
         <>
           <TouchableOpacity style={s.panelOverlay} activeOpacity={1} onPress={cancelDate} />
@@ -455,7 +481,6 @@ export default function StaffNewAppointment() {
         </>
       )}
 
-      {/* Modal clientes */}
       <Modal visible={showClientPicker} animationType="slide" onRequestClose={closeClientPicker}>
         <View style={[s.fullModal, { backgroundColor: tc.bg, paddingTop: insets.top, paddingBottom: insets.bottom }]}>
           <View style={[s.fullModalHeader, { backgroundColor: tc.surface, borderBottomColor: tc.border }]}>
@@ -470,9 +495,7 @@ export default function StaffNewAppointment() {
               <View style={[s.searchBox, { backgroundColor: tc.bg, borderColor: '#10B981' }]}>
                 <MaterialIcons name="search" size={18} color="#10B981" />
                 <TextInput style={[s.searchInputInner, { color: tc.text }]} placeholder="Buscar por nombre o tel\u00e9fono..." placeholderTextColor={tc.textMuted} value={clientSearch} onChangeText={setClientSearch} autoFocus={true} returnKeyType="search" />
-                {clientSearch.length > 0 && (
-                  <TouchableOpacity onPress={() => setClientSearch('')}><MaterialIcons name="close" size={16} color={tc.textMuted} /></TouchableOpacity>
-                )}
+                {clientSearch.length > 0 && <TouchableOpacity onPress={() => setClientSearch('')}><MaterialIcons name="close" size={16} color={tc.textMuted} /></TouchableOpacity>}
               </View>
             ) : (
               <TouchableOpacity style={[s.searchBox, { backgroundColor: tc.bg, borderColor: tc.border }]} onPress={() => setShowClientSearch(true)}>
@@ -512,7 +535,6 @@ export default function StaffNewAppointment() {
         </View>
       </Modal>
 
-      {/* Modal servicios */}
       <Modal visible={showServicePicker} transparent animationType="slide" onRequestClose={() => setShowServicePicker(false)}>
         <View style={s.sheetOverlay}>
           <View style={[s.sheet, { backgroundColor: tc.surface, paddingBottom: insets.bottom + 20 }]}>
@@ -555,7 +577,6 @@ export default function StaffNewAppointment() {
         </View>
       </Modal>
 
-      {/* Modal staff */}
       <Modal visible={showStaffPicker} transparent animationType="slide" onRequestClose={() => setShowStaffPicker(false)}>
         <View style={s.sheetOverlay}>
           <View style={[s.sheet, { backgroundColor: tc.surface, paddingBottom: insets.bottom + 20 }]}>
