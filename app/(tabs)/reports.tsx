@@ -67,6 +67,12 @@ const STATUS_CONFIG: Record<string, { color: string; label: string }> = {
   'Pagado':     { color: '#10B981', label: 'Pagado' },
 };
 
+// FIX: clave de caché incluye año-mes para invalidarse automáticamente al cambiar de mes
+function getReportsCacheKey(): string {
+  const now = new Date();
+  return `reports_stats_${now.getFullYear()}_${now.getMonth() + 1}`;
+}
+
 export default function ReportsScreen() {
   const { canViewReports, isPremium, loading: planLoading } = usePlan();
   const { user } = useAuth();
@@ -88,15 +94,19 @@ export default function ReportsScreen() {
 
   useFocusEffect(
     useCallback(() => {
-      const cached = getCached<any>('reports_stats');
+      // FIX: clave incluye mes actual — si cambió el mes el caché no existe y carga frescos
+      const cacheKey = getReportsCacheKey();
+      const cached = getCached<any>(cacheKey);
       if (cached) { setStats(cached); setLoading(false); loadData(true, false, true); }
       else loadData();
     }, [])
   );
 
   const loadData = async (forceRefresh = false, isPullRefresh = false, silent = false) => {
+    const cacheKey = getReportsCacheKey();
+
     if (!forceRefresh && !isPullRefresh) {
-      const cached = getCached<any>('reports_stats');
+      const cached = getCached<any>(cacheKey);
       if (cached) { setStats(cached); setLoading(false); return; }
     }
     if (isPullRefresh) setRefreshing(true);
@@ -126,7 +136,6 @@ export default function ReportsScreen() {
           supabase.from('appointments').select('*', { count: 'exact', head: true }).eq('user_id', userId).in('status', ['Completada', 'Pagado']),
         ]);
 
-      // monthRevenue: status='Pagado' (legacy) + status='Completada' con paid=true (nuevo sistema)
       const [{ data: revLegacy }, { data: revNew }] = await Promise.all([
         supabase.from('appointments')
           .select('service_cost')
@@ -141,8 +150,6 @@ export default function ReportsScreen() {
           .gte('date', monthStartStr),
       ]);
 
-      // pendingRevenue: status='Completada' sin pagar (nuevo sistema)
-      // Las de status='Pagado' ya están cobradas por definición
       const { data: penD } = await supabase.from('appointments')
         .select('service_cost')
         .eq('user_id', userId)
@@ -188,7 +195,8 @@ export default function ReportsScreen() {
         clientsPerWeek,
       };
       setStats(fs);
-      setCached('reports_stats', fs, CACHE_TTL.REPORTS);
+      // FIX: guardar con clave que incluye mes
+      setCached(cacheKey, fs, CACHE_TTL.REPORTS);
 
       if (isPremium) await loadStaffStats(userId, staffRange);
     } catch (e) {
