@@ -14,21 +14,17 @@ import { invalidateCache } from '@/utils/cache';
 interface PhoneContact {
   id: string;
   name: string;
-  phone: string;      // teléfono limpio para API
-  rawPhone: string;   // teléfono original para mostrar
+  phone: string;
+  rawPhone: string;
   selected: boolean;
   alreadySaved: boolean;
 }
 
-// Quita todo excepto dígitos y + al inicio
 const cleanPhone = (raw: string): string => raw.replace(/[^0-9+]/g, '').trim();
 
-// Normaliza a los últimos 10 dígitos para comparar sin importar prefijo de país
 const normalizePhone = (raw: string): string => {
   const digits = cleanPhone(raw).replace(/^\+/, '');
-  // Quitar prefijo de país México (52) si tiene 12 dígitos empezando en 52
   if (digits.length === 12 && digits.startsWith('52')) return digits.slice(2);
-  // Quitar prefijo de país genérico si tiene más de 10 dígitos
   if (digits.length > 10) return digits.slice(-10);
   return digits;
 };
@@ -58,7 +54,6 @@ export default function ImportContactsScreen() {
         return;
       }
 
-      // Cargar contactos del teléfono Y clientes existentes en paralelo
       const [{ data: phoneContacts }, existingClients] = await Promise.all([
         Contacts.getContactsAsync({
           fields: [Contacts.Fields.Name, Contacts.Fields.PhoneNumbers],
@@ -67,7 +62,6 @@ export default function ImportContactsScreen() {
         apiGet<{ phone: string }[]>('/api/clients').catch(() => []),
       ]);
 
-      // Set de teléfonos normalizados (últimos 10 dígitos) para comparar
       const savedPhones = new Set(
         existingClients.map((c: any) => normalizePhone(c.phone || ''))
       );
@@ -91,8 +85,8 @@ export default function ImportContactsScreen() {
         parsed.push({
           id:           c.id ?? `${name}-${normalized}`,
           name,
-          phone,        // el limpio para enviar al API
-          rawPhone,     // el original para mostrar
+          phone,
+          rawPhone,
           selected:     false,
           alreadySaved: savedPhones.has(normalized),
         });
@@ -105,7 +99,7 @@ export default function ImportContactsScreen() {
       });
 
       setContacts(parsed);
-    } catch (e) {
+    } catch {
       Alert.alert('Error', 'No se pudieron cargar los contactos.');
     } finally {
       setLoading(false);
@@ -119,7 +113,7 @@ export default function ImportContactsScreen() {
 
   const toggleAll = () => {
     const eligible    = filteredContacts.filter(c => !c.alreadySaved);
-    const allSelected = eligible.every(c => c.selected);
+    const allSelected = eligible.length > 0 && eligible.every(c => c.selected);
     const ids         = new Set(eligible.map(c => c.id));
     setContacts(prev => prev.map(c =>
       ids.has(c.id) ? { ...c, selected: !allSelected } : c
@@ -170,18 +164,11 @@ export default function ImportContactsScreen() {
       setImportProgress(prev => ({ ...prev, done: prev.done + 1 }));
     }
 
-    // Marcar los importados como ya guardados en el estado local
-    // para que si el usuario no sale, los vea en gris
+    // Marcar importados como guardados en el estado local
     if (imported > 0) {
-      const importedPhones = new Set(
-        selectedContacts
-          .filter((_, i) => i < imported) // aproximación simple
-          .map(c => normalizePhone(c.phone))
-      );
+      const importedIds = new Set(selectedContacts.slice(0, imported).map(c => c.id));
       setContacts(prev => prev.map(c =>
-        importedPhones.has(normalizePhone(c.phone))
-          ? { ...c, selected: false, alreadySaved: true }
-          : c
+        importedIds.has(c.id) ? { ...c, selected: false, alreadySaved: true } : c
       ));
     }
 
@@ -189,21 +176,19 @@ export default function ImportContactsScreen() {
     setImporting(false);
 
     const parts: string[] = [];
-    if (imported > 0)   parts.push(`${imported} cliente${imported !== 1 ? 's' : ''} agregado${imported !== 1 ? 's' : ''} ✓`);
-    if (duplicates > 0) parts.push(`${duplicates} ya existía${duplicates !== 1 ? 'n' : ''}`);
+    if (imported > 0)   parts.push(`${imported} cliente${imported !== 1 ? 's' : ''} agregado${imported !== 1 ? 's' : ''}`);
+    if (duplicates > 0) parts.push(`${duplicates} ya exist\u00eda${duplicates !== 1 ? 'n' : ''}`);
     if (failed > 0)     parts.push(`${failed} con error`);
 
     let msg = parts.join(', ') + '.';
     if (errors.length > 0) msg += `\n\nDetalle: ${errors.slice(0, 3).join(', ')}`;
 
     Alert.alert(
-      imported > 0 ? '¡Importación lista!' : 'Importación completada',
+      imported > 0 ? '\u00a1Importaci\u00f3n lista!' : 'Sin cambios',
       msg,
       [{
         text: imported > 0 ? 'Ver mis clientes' : 'Cerrar',
-        onPress: () => {
-          if (imported > 0) router.back();
-        },
+        onPress: () => { if (imported > 0) router.back(); },
       }]
     );
   };
@@ -218,7 +203,7 @@ export default function ImportContactsScreen() {
           s.row,
           { backgroundColor: tc.surface, borderBottomColor: tc.border },
           item.selected && { backgroundColor: isDark ? '#052E16' : '#F0FDF4' },
-          isSaved && { opacity: 0.45 },
+          isSaved && { opacity: 0.4 },
         ]}
         onPress={() => !isSaved && toggleContact(item.id)}
         activeOpacity={isSaved ? 1 : 0.7}
@@ -265,7 +250,7 @@ export default function ImportContactsScreen() {
           </View>
           <Text style={[s.centeredTitle, { color: tc.text }]}>Acceso a contactos requerido</Text>
           <Text style={[s.centeredDesc, { color: tc.textMuted }]}>
-            VYLTA necesita acceso a tus contactos. Ve a Configuración y activa el permiso.
+            VYLTA necesita acceso a tus contactos. Ve a Configuraci\u00f3n y activa el permiso.
           </Text>
           <TouchableOpacity style={s.primaryBtn} onPress={loadContacts}>
             <Text style={s.primaryBtnText}>Volver a intentar</Text>
@@ -294,7 +279,7 @@ export default function ImportContactsScreen() {
     );
   }
 
-  // Importando
+  // Importando (progreso)
   if (importing) {
     const pct = importProgress.total > 0
       ? Math.round((importProgress.done / importProgress.total) * 100)
@@ -305,7 +290,7 @@ export default function ImportContactsScreen() {
           <ActivityIndicator size="large" color="#10B981" />
           <Text style={[s.centeredTitle, { color: tc.text }]}>Importando contactos...</Text>
           <Text style={[s.centeredDesc, { color: tc.textMuted }]}>
-            {importProgress.done} de {importProgress.total} — {pct}%
+            {importProgress.done} de {importProgress.total} \u2014 {pct}%
           </Text>
           <View style={[s.progressBar, { backgroundColor: isDark ? '#1E293B' : '#E2E8F0' }]}>
             <View style={[s.progressFill, { width: `${pct}%` as any }]} />
@@ -318,10 +303,11 @@ export default function ImportContactsScreen() {
     );
   }
 
-  // Principal
+  // Pantalla principal — SIEMPRE muestra la lista completa
   return (
     <SafeAreaView style={[s.container, { backgroundColor: tc.bg }]} edges={['top']}>
 
+      {/* Header */}
       <View style={[s.header, { backgroundColor: tc.surface, borderBottomColor: tc.border }]}>
         <TouchableOpacity onPress={() => router.back()} style={s.backBtn}>
           <MaterialIcons name="arrow-back" size={24} color={tc.text} />
@@ -329,12 +315,26 @@ export default function ImportContactsScreen() {
         <View style={s.headerMid}>
           <Text style={[s.headerTitle, { color: tc.text }]}>Importar contactos</Text>
           <Text style={[s.headerSub, { color: tc.textMuted }]}>
-            {newCount} nuevos · {alreadySavedCount} ya en tu lista
+            {newCount > 0
+              ? `${newCount} nuevos \u00b7 ${alreadySavedCount} ya en tu lista`
+              : `${alreadySavedCount} contacto${alreadySavedCount !== 1 ? 's' : ''} \u2014 todos ya en tu lista`
+            }
           </Text>
         </View>
         <View style={{ width: 40 }} />
       </View>
 
+      {/* Banner informativo cuando todos ya est\u00e1n guardados */}
+      {newCount === 0 && (
+        <View style={[s.allSavedBanner, { backgroundColor: isDark ? '#052E16' : '#F0FDF4', borderColor: isDark ? '#065F46' : '#BBF7D0' }]}>
+          <MaterialIcons name="check-circle" size={18} color="#10B981" />
+          <Text style={[s.allSavedText, { color: isDark ? '#6EE7B7' : '#065F46' }]}>
+            Todos tus contactos ya est\u00e1n en VYLTA. Si guardas nuevos en tu tel\u00e9fono, aparecer\u00e1n aqu\u00ed.
+          </Text>
+        </View>
+      )}
+
+      {/* Buscador */}
       <View style={[s.searchWrap, { backgroundColor: tc.surface, borderBottomColor: tc.border }]}>
         <View style={[s.searchBox, { backgroundColor: tc.inputBg, borderColor: tc.inputBorder }]}>
           <MaterialIcons name="search" size={18} color={tc.textMuted} />
@@ -342,7 +342,7 @@ export default function ImportContactsScreen() {
             style={[s.searchInput, { color: tc.text }]}
             value={search}
             onChangeText={setSearch}
-            placeholder="Buscar por nombre o número..."
+            placeholder="Buscar por nombre o n\u00famero..."
             placeholderTextColor={tc.textMuted}
             returnKeyType="search"
           />
@@ -354,6 +354,7 @@ export default function ImportContactsScreen() {
         </View>
       </View>
 
+      {/* Barra selecci\u00f3n */}
       <View style={[s.selectionBar, { backgroundColor: tc.surface, borderBottomColor: tc.border }]}>
         <TouchableOpacity
           style={s.selectAllBtn}
@@ -364,10 +365,11 @@ export default function ImportContactsScreen() {
             s.checkboxSmall,
             { borderColor: allFilteredSelected ? '#10B981' : tc.border },
             allFilteredSelected && { backgroundColor: '#10B981' },
+            eligibleFiltered.length === 0 && { opacity: 0.3 },
           ]}>
             {allFilteredSelected && <MaterialIcons name="check" size={11} color="#fff" />}
           </View>
-          <Text style={[s.selectAllText, { color: tc.textMuted }]}>
+          <Text style={[s.selectAllText, { color: eligibleFiltered.length === 0 ? tc.border : tc.textMuted }]}>
             {allFilteredSelected ? 'Deseleccionar todo' : 'Seleccionar todo'}
           </Text>
         </TouchableOpacity>
@@ -380,15 +382,8 @@ export default function ImportContactsScreen() {
         )}
       </View>
 
-      {newCount === 0 && !search ? (
-        <View style={s.centeredWrap}>
-          <MaterialIcons name="check-circle" size={48} color="#10B981" />
-          <Text style={[s.centeredTitle, { color: tc.text }]}>¡Todo al día!</Text>
-          <Text style={[s.centeredDesc, { color: tc.textMuted }]}>
-            Todos tus contactos de WhatsApp ya están en tu lista de clientes.
-          </Text>
-        </View>
-      ) : filteredContacts.length === 0 ? (
+      {/* Lista — siempre visible, sin reemplazar por pantalla de estado */}
+      {filteredContacts.length === 0 ? (
         <View style={s.centeredWrap}>
           <MaterialIcons name="person-search" size={44} color={tc.border} />
           <Text style={[s.centeredDesc, { color: tc.textMuted }]}>
@@ -409,6 +404,7 @@ export default function ImportContactsScreen() {
         />
       )}
 
+      {/* Bot\u00f3n flotante */}
       {selectedCount > 0 && (
         <View style={[s.fabWrap, { bottom: insets.bottom + 16 }]}>
           <TouchableOpacity
@@ -434,6 +430,9 @@ const s = StyleSheet.create({
   headerMid:         { flex: 1, alignItems: 'center' },
   headerTitle:       { fontSize: 17, fontWeight: '700' },
   headerSub:         { fontSize: 11, marginTop: 1 },
+  // Banner "todos guardados"
+  allSavedBanner:    { flexDirection: 'row', alignItems: 'flex-start', gap: 10, marginHorizontal: 16, marginTop: 12, marginBottom: 4, padding: 12, borderRadius: 12, borderWidth: 1 },
+  allSavedText:      { flex: 1, fontSize: 13, lineHeight: 18, fontWeight: '500' },
   searchWrap:        { paddingHorizontal: 16, paddingVertical: 10, borderBottomWidth: 0.5 },
   searchBox:         { flexDirection: 'row', alignItems: 'center', borderRadius: 12, paddingHorizontal: 12, paddingVertical: 9, borderWidth: 0.5, gap: 8 },
   searchInput:       { flex: 1, fontSize: 15 },
