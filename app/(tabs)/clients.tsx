@@ -76,11 +76,18 @@ export default function ClientsScreen() {
   const [filter,      setFilter]      = useState<FilterType>('Todos');
   const [errorModal,  setErrorModal]  = useState({ visible: false, message: '' });
 
+  // FIX: siempre revisar si el caché fue invalidado al hacer focus
+  // Si no hay caché (fue invalidado por importación u otra acción), recarga desde API
   useFocusEffect(
     useCallback(() => {
       const cached = getCached<Client[]>('clients_list');
-      if (cached) { setAllClients(cached); setLoading(false); }
-      else loadClients();
+      if (cached) {
+        setAllClients(cached);
+        setLoading(false);
+      } else {
+        // Sin caché = fue invalidado (ej: después de importar contactos)
+        loadClients();
+      }
     }, [])
   );
 
@@ -141,7 +148,7 @@ export default function ClientsScreen() {
           <MaterialIcons name="thumb-up" size={36} color="#10B981" />
         </View>
         <Text style={[s.emptyTitle, { color: tc.text }]}>Sin clientes inactivos</Text>
-        <Text style={[s.emptyDesc, { color: tc.textMuted }]}>Todos tus clientes han tenido una visita reciente. ¡Excelente retención!</Text>
+        <Text style={[s.emptyDesc, { color: tc.textMuted }]}>¡Todos tus clientes han tenido visitas recientes!</Text>
       </View>
     );
     if (filter === 'Activos' && hasClients) return (
@@ -205,7 +212,6 @@ export default function ClientsScreen() {
         onDismiss={() => setErrorModal({ visible: false, message: '' })}
       />
 
-      {/* Header */}
       <View style={[s.header, { backgroundColor: tc.surface, borderBottomColor: tc.border }]}>
         <View style={s.headerTop}>
           <View>
@@ -234,7 +240,6 @@ export default function ClientsScreen() {
           </View>
         </View>
 
-        {/* Búsqueda */}
         <View style={[s.searchBox, { backgroundColor: tc.inputBg, borderColor: tc.inputBorder }]}>
           <MaterialIcons name="search" size={20} color={tc.textMuted} />
           <TextInput
@@ -251,7 +256,6 @@ export default function ClientsScreen() {
           ) : null}
         </View>
 
-        {/* Filtros */}
         <View style={s.filters}>
           {(['Todos', 'Activos', 'Inactivos'] as FilterType[]).map(f => (
             <TouchableOpacity

@@ -8,7 +8,7 @@ import { useRouter } from 'expo-router';
 import * as Contacts from 'expo-contacts';
 import MaterialIcons from '@expo/vector-icons/MaterialIcons';
 import { useTheme } from '@/contexts/ThemeContext';
-import { apiPost } from '@/utils/api';
+import { apiPost, apiGet } from '@/utils/api';
 import { invalidateCache } from '@/utils/cache';
 
 interface PhoneContact {
@@ -17,6 +17,7 @@ interface PhoneContact {
   phone: string;
   rawPhone: string;
   selected: boolean;
+  alreadySaved: boolean; // ya existe en la lista de clientes
 }
 
 const cleanPhone = (raw: string): string => raw.replace(/[^0-9+]/g, '').trim();
@@ -46,15 +47,24 @@ export default function ImportContactsScreen() {
         return;
       }
 
-      const { data } = await Contacts.getContactsAsync({
-        fields: [Contacts.Fields.Name, Contacts.Fields.PhoneNumbers],
-        sort:   Contacts.SortTypes.FirstName,
-      });
+      // Cargar contactos del teléfono Y clientes existentes en paralelo
+      const [{ data: phoneContacts }, existingClients] = await Promise.all([
+        Contacts.getContactsAsync({
+          fields: [Contacts.Fields.Name, Contacts.Fields.PhoneNumbers],
+          sort:   Contacts.SortTypes.FirstName,
+        }),
+        apiGet<{ phone: string }[]>('/api/clients').catch(() => []),
+      ]);
+
+      // Set de teléfonos ya guardados (limpios) para comparar rápido
+      const savedPhones = new Set(
+        existingClients.map((c: any) => cleanPhone(c.phone || ''))
+      );
 
       const parsed: PhoneContact[] = [];
       const seen = new Set<string>();
 
-      for (const c of data) {
+      for (const c of phoneContacts) {
         const name   = (c.name || '').trim();
         const phones = c.phoneNumbers || [];
         if (!name || phones.length === 0) continue;
@@ -67,13 +77,20 @@ export default function ImportContactsScreen() {
         seen.add(phone);
 
         parsed.push({
-          id:      c.id ?? `${name}-${phone}`,
+          id:          c.id ?? `${name}-${phone}`,
           name,
           phone,
           rawPhone,
-          selected: false,
+          selected:    false,
+          alreadySaved: savedPhones.has(phone),
         });
       }
+
+      // Ordenar: primero los que NO están guardados, luego los que ya están
+      parsed.sort((a, b) => {
+        if (a.alreadySaved === b.alreadySaved) return 0;
+        return a.alreadySaved ? 1 : -1;
+      });
 
       setContacts(parsed);
     } catch {
@@ -84,12 +101,15 @@ export default function ImportContactsScreen() {
   };
 
   const toggleContact = (id: string) =>
-    setContacts(prev => prev.map(c => c.id === id ? { ...c, selected: !c.selected } : c));
+    setContacts(prev => prev.map(c =>
+      c.id === id && !c.alreadySaved ? { ...c, selected: !c.selected } : c
+    ));
 
   const toggleAll = () => {
-    const filtered    = filteredContacts;
-    const allSelected = filtered.every(c => c.selected);
-    const ids         = new Set(filtered.map(c => c.id));
+    // Solo opera sobre los que NO están guardados
+    const eligible    = filteredContacts.filter(c => !c.alreadySaved);
+    const allSelected = eligible.every(c => c.selected);
+    const ids         = new Set(eligible.map(c => c.id));
     setContacts(prev => prev.map(c =>
       ids.has(c.id) ? { ...c, selected: !allSelected } : c
     ));
@@ -103,7 +123,9 @@ export default function ImportContactsScreen() {
 
   const selectedContacts    = contacts.filter(c => c.selected);
   const selectedCount       = selectedContacts.length;
-  const allFilteredSelected = filteredContacts.length > 0 && filteredContacts.every(c => c.selected);
+  const eligibleFiltered    = filteredContacts.filter(c => !c.alreadySaved);
+  const allFilteredSelected = eligibleFiltered.length > 0 && eligibleFiltered.every(c => c.selected);
+  const alreadySavedCount   = contacts.filter(c => c.alreadySaved).length;
 
   const handleImport = async () => {
     if (selectedCount === 0) return;
@@ -130,7 +152,7 @@ export default function ImportContactsScreen() {
       setImportProgress(prev => ({ ...prev, done: prev.done + 1 }));
     }
 
-    // Invalidar caché ANTES de navegar para que clients.tsx recargue desde API
+    // Invalidar caché para que clients.tsx recargue
     invalidateCache('clients_list');
     setImporting(false);
 
@@ -145,38 +167,50 @@ export default function ImportContactsScreen() {
       msg,
       [{
         text: 'Ver mis clientes',
-        // router.replace para que clients.tsx se recargue desde cero (sin caché en memoria)
-        onPress: () => router.replace('/(tabs)/clients'),
+        // FIX: router.back() en lugar de replace para no romper la navegación
+        // clients.tsx recarga automáticamente porque el caché fue invalidado
+        onPress: () => router.back(),
       }]
     );
   };
 
   const renderContact = ({ item }: { item: PhoneContact }) => {
     const initials = item.name.trim().split(' ').map(w => w[0]).slice(0, 2).join('').toUpperCase();
+    const isSaved  = item.alreadySaved;
+
     return (
       <TouchableOpacity
         style={[
           s.row,
           { backgroundColor: tc.surface, borderBottomColor: tc.border },
           item.selected && { backgroundColor: isDark ? '#052E16' : '#F0FDF4' },
+          isSaved && { opacity: 0.5 },
         ]}
-        onPress={() => toggleContact(item.id)}
-        activeOpacity={0.7}
+        onPress={() => !isSaved && toggleContact(item.id)}
+        activeOpacity={isSaved ? 1 : 0.7}
       >
         <View style={[s.avatar, { backgroundColor: isDark ? '#1E293B' : '#ECFDF5' }]}>
-          <Text style={[s.avatarText, { color: '#10B981' }]}>{initials}</Text>
+          <Text style={[s.avatarText, { color: isSaved ? tc.textMuted : '#10B981' }]}>{initials}</Text>
         </View>
         <View style={s.rowInfo}>
           <Text style={[s.rowName, { color: tc.text }]} numberOfLines={1}>{item.name}</Text>
           <Text style={[s.rowPhone, { color: tc.textMuted }]}>{item.rawPhone}</Text>
         </View>
-        <View style={[
-          s.checkbox,
-          { borderColor: item.selected ? '#10B981' : tc.border },
-          item.selected && { backgroundColor: '#10B981' },
-        ]}>
-          {item.selected && <MaterialIcons name="check" size={14} color="#fff" />}
-        </View>
+        {/* Checkbox o badge "ya guardado" */}
+        {isSaved ? (
+          <View style={s.savedBadge}>
+            <MaterialIcons name="check-circle" size={16} color={tc.textMuted} />
+            <Text style={[s.savedText, { color: tc.textMuted }]}>En tu lista</Text>
+          </View>
+        ) : (
+          <View style={[
+            s.checkbox,
+            { borderColor: item.selected ? '#10B981' : tc.border },
+            item.selected && { backgroundColor: '#10B981' },
+          ]}>
+            {item.selected && <MaterialIcons name="check" size={14} color="#fff" />}
+          </View>
+        )}
       </TouchableOpacity>
     );
   };
@@ -198,7 +232,7 @@ export default function ImportContactsScreen() {
           </View>
           <Text style={[s.centeredTitle, { color: tc.text }]}>Acceso a contactos requerido</Text>
           <Text style={[s.centeredDesc, { color: tc.textMuted }]}>
-            VYLTA necesita acceso a tus contactos. Ve a Configuración y activa el permiso para VYLTA.
+            VYLTA necesita acceso a tus contactos. Ve a Configuración y activa el permiso.
           </Text>
           <TouchableOpacity style={s.primaryBtn} onPress={loadContacts}>
             <Text style={s.primaryBtnText}>Volver a intentar</Text>
@@ -208,7 +242,7 @@ export default function ImportContactsScreen() {
     );
   }
 
-  // Cargando contactos
+  // Cargando
   if (loading) {
     return (
       <SafeAreaView style={[s.container, { backgroundColor: tc.bg }]} edges={['top']}>
@@ -227,7 +261,7 @@ export default function ImportContactsScreen() {
     );
   }
 
-  // Importando (pantalla de progreso)
+  // Pantalla de progreso
   if (importing) {
     const pct = importProgress.total > 0
       ? Math.round((importProgress.done / importProgress.total) * 100)
@@ -244,7 +278,7 @@ export default function ImportContactsScreen() {
             <View style={[s.progressFill, { width: `${pct}%` as any }]} />
           </View>
           <Text style={[s.centeredDesc, { color: tc.textMuted, fontSize: 12 }]}>
-            Por favor espera, esto puede tomar unos segundos
+            Por favor espera…
           </Text>
         </View>
       </SafeAreaView>
@@ -252,6 +286,8 @@ export default function ImportContactsScreen() {
   }
 
   // Pantalla principal
+  const newCount = contacts.filter(c => !c.alreadySaved).length;
+
   return (
     <SafeAreaView style={[s.container, { backgroundColor: tc.bg }]} edges={['top']}>
 
@@ -262,7 +298,7 @@ export default function ImportContactsScreen() {
         <View style={s.headerMid}>
           <Text style={[s.headerTitle, { color: tc.text }]}>Importar contactos</Text>
           <Text style={[s.headerSub, { color: tc.textMuted }]}>
-            {contacts.length} contactos con teléfono
+            {newCount} nuevos · {alreadySavedCount} ya en tu lista
           </Text>
         </View>
         <View style={{ width: 40 }} />
@@ -288,7 +324,7 @@ export default function ImportContactsScreen() {
       </View>
 
       <View style={[s.selectionBar, { backgroundColor: tc.surface, borderBottomColor: tc.border }]}>
-        <TouchableOpacity style={s.selectAllBtn} onPress={toggleAll}>
+        <TouchableOpacity style={s.selectAllBtn} onPress={toggleAll} disabled={eligibleFiltered.length === 0}>
           <View style={[
             s.checkboxSmall,
             { borderColor: allFilteredSelected ? '#10B981' : tc.border },
@@ -371,6 +407,8 @@ const s = StyleSheet.create({
   rowPhone:          { fontSize: 12 },
   checkbox:          { width: 24, height: 24, borderRadius: 7, borderWidth: 2, justifyContent: 'center', alignItems: 'center' },
   checkboxSmall:     { width: 20, height: 20, borderRadius: 6, borderWidth: 2, justifyContent: 'center', alignItems: 'center' },
+  savedBadge:        { flexDirection: 'row', alignItems: 'center', gap: 4 },
+  savedText:         { fontSize: 11, fontWeight: '600' },
   centeredWrap:      { flex: 1, justifyContent: 'center', alignItems: 'center', padding: 36, gap: 14 },
   centeredTitle:     { fontSize: 20, fontWeight: '700', textAlign: 'center' },
   centeredDesc:      { fontSize: 14, textAlign: 'center', lineHeight: 22 },
