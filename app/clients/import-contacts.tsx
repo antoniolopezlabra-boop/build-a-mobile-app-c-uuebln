@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   View, Text, StyleSheet, FlatList, TouchableOpacity,
   ActivityIndicator, TextInput, Alert, Keyboard,
@@ -14,13 +14,11 @@ import { invalidateCache } from '@/utils/cache';
 interface PhoneContact {
   id: string;
   name: string;
-  phone: string;      // primer teléfono limpio
-  rawPhone: string;   // teléfono original del contacto
+  phone: string;
+  rawPhone: string;
   selected: boolean;
-  alreadyExists?: boolean;
 }
 
-// Limpia el número a solo dígitos + +
 const cleanPhone = (raw: string): string => raw.replace(/[^0-9+]/g, '').trim();
 
 export default function ImportContactsScreen() {
@@ -28,11 +26,13 @@ export default function ImportContactsScreen() {
   const { colors: tc, isDark } = useTheme();
   const insets  = useSafeAreaInsets();
 
-  const [loading, setLoading]       = useState(true);
-  const [importing, setImporting]   = useState(false);
-  const [contacts, setContacts]     = useState<PhoneContact[]>([]);
-  const [search, setSearch]         = useState('');
+  const [loading, setLoading]     = useState(true);
+  const [importing, setImporting] = useState(false);
+  const [contacts, setContacts]   = useState<PhoneContact[]>([]);
+  const [search, setSearch]       = useState('');
   const [permissionDenied, setPermissionDenied] = useState(false);
+  // Progreso de importación
+  const [importProgress, setImportProgress] = useState({ done: 0, total: 0 });
 
   useEffect(() => { loadContacts(); }, []);
 
@@ -51,12 +51,11 @@ export default function ImportContactsScreen() {
         sort:   Contacts.SortTypes.FirstName,
       });
 
-      // Filtrar contactos que tengan nombre y al menos un teléfono
       const parsed: PhoneContact[] = [];
       const seen = new Set<string>();
 
       for (const c of data) {
-        const name = (c.name || '').trim();
+        const name   = (c.name || '').trim();
         const phones = c.phoneNumbers || [];
         if (!name || phones.length === 0) continue;
 
@@ -64,7 +63,6 @@ export default function ImportContactsScreen() {
         const phone    = cleanPhone(rawPhone);
         if (!phone || phone.length < 7) continue;
 
-        // Deduplicar por teléfono limpio
         if (seen.has(phone)) continue;
         seen.add(phone);
 
@@ -78,7 +76,7 @@ export default function ImportContactsScreen() {
       }
 
       setContacts(parsed);
-    } catch (e) {
+    } catch {
       Alert.alert('Error', 'No se pudieron cargar los contactos.');
     } finally {
       setLoading(false);
@@ -90,11 +88,11 @@ export default function ImportContactsScreen() {
   };
 
   const toggleAll = () => {
-    const filtered = filteredContacts;
+    const filtered    = filteredContacts;
     const allSelected = filtered.every(c => c.selected);
-    const filteredIds = new Set(filtered.map(c => c.id));
+    const ids         = new Set(filtered.map(c => c.id));
     setContacts(prev => prev.map(c =>
-      filteredIds.has(c.id) ? { ...c, selected: !allSelected } : c
+      ids.has(c.id) ? { ...c, selected: !allSelected } : c
     ));
   };
 
@@ -104,16 +102,20 @@ export default function ImportContactsScreen() {
     return c.name.toLowerCase().includes(q) || c.phone.includes(q);
   });
 
-  const selectedContacts = contacts.filter(c => c.selected);
-  const selectedCount    = selectedContacts.length;
-  const allFilteredSelected = filteredContacts.length > 0 && filteredContacts.every(c => c.selected);
+  const selectedContacts      = contacts.filter(c => c.selected);
+  const selectedCount         = selectedContacts.length;
+  const allFilteredSelected   = filteredContacts.length > 0 && filteredContacts.every(c => c.selected);
 
+  // FIX: invalidar caché + navegar con replace para forzar recarga en clients.tsx
   const handleImport = async () => {
     if (selectedCount === 0) return;
     Keyboard.dismiss();
     setImporting(true);
+    setImportProgress({ done: 0, total: selectedCount });
+
     let imported = 0;
     let failed   = 0;
+    let duplicates = 0;
 
     for (const contact of selectedContacts) {
       try {
@@ -122,31 +124,45 @@ export default function ImportContactsScreen() {
           phone: contact.phone,
         });
         imported++;
-      } catch {
-        failed++;
+      } catch (e: any) {
+        // Si el error es de duplicado (409 o mensaje de unique constraint) lo contamos aparte
+        const msg = e?.message || '';
+        if (msg.includes('duplicate') || msg.includes('unique') || msg.includes('already') || e?.status === 409) {
+          duplicates++;
+        } else {
+          failed++;
+        }
       }
+      setImportProgress(prev => ({ ...prev, done: prev.done + 1 }));
     }
 
+    // Invalidar caché ANTES de navegar
     invalidateCache('clients_list');
     setImporting(false);
 
-    const msg = failed === 0
-      ? `${imported} cliente${imported !== 1 ? 's' : ''} importado${imported !== 1 ? 's' : ''} correctamente.`
-      : `${imported} importado${imported !== 1 ? 's' : ''}, ${failed} no se pudieron importar (ya existen o hubo un error).`;
+    // Construir mensaje
+    const parts: string[] = [];
+    if (imported > 0)   parts.push(`${imported} cliente${imported !== 1 ? 's' : ''} agregado${imported !== 1 ? 's' : ''}`);
+    if (duplicates > 0) parts.push(`${duplicates} ya existía${duplicates !== 1 ? 'n' : ''}`);
+    if (failed > 0)     parts.push(`${failed} con error`);
+    const msg = parts.join(', ') + '.';
 
     Alert.alert(
-      imported > 0 ? '\uD83C\uDF89 Importación lista' : 'Importación completada',
+      imported > 0 ? '🎉 ¡Importación lista!' : 'Importación completada',
       msg,
-      [{ text: 'Ver clientes', onPress: () => router.back() }]
+      [{
+        text: 'Ver mis clientes',
+        onPress: () => {
+          // FIX: replace en lugar de back() para que clients.tsx recargue desde API
+          router.replace('/(tabs)/clients');
+        },
+      }]
     );
   };
 
-  // ── Render contact row ────────────────────────────────────────────────
+  // ── Render fila contacto ──────────────────────────────────────────────
   const renderContact = ({ item }: { item: PhoneContact }) => {
     const initials = item.name.trim().split(' ').map(w => w[0]).slice(0, 2).join('').toUpperCase();
-    const avatarBg = isDark ? '#1E293B' : '#ECFDF5';
-    const avatarFg = '#10B981';
-
     return (
       <TouchableOpacity
         style={[
@@ -157,18 +173,13 @@ export default function ImportContactsScreen() {
         onPress={() => toggleContact(item.id)}
         activeOpacity={0.7}
       >
-        {/* Avatar */}
-        <View style={[s.avatar, { backgroundColor: avatarBg }]}>
-          <Text style={[s.avatarText, { color: avatarFg }]}>{initials}</Text>
+        <View style={[s.avatar, { backgroundColor: isDark ? '#1E293B' : '#ECFDF5' }]}>
+          <Text style={[s.avatarText, { color: '#10B981' }]}>{initials}</Text>
         </View>
-
-        {/* Info */}
         <View style={s.rowInfo}>
           <Text style={[s.rowName, { color: tc.text }]} numberOfLines={1}>{item.name}</Text>
           <Text style={[s.rowPhone, { color: tc.textMuted }]}>{item.rawPhone}</Text>
         </View>
-
-        {/* Checkbox */}
         <View style={[
           s.checkbox,
           { borderColor: item.selected ? '#10B981' : tc.border },
@@ -191,16 +202,16 @@ export default function ImportContactsScreen() {
           <Text style={[s.headerTitle, { color: tc.text }]}>Importar contactos</Text>
           <View style={{ width: 40 }} />
         </View>
-        <View style={s.permissionWrap}>
-          <View style={[s.permissionIcon, { backgroundColor: isDark ? '#1E293B' : '#FEF3C7' }]}>
+        <View style={s.centeredWrap}>
+          <View style={[s.bigIcon, { backgroundColor: isDark ? '#1E293B' : '#FEF3C7' }]}>
             <MaterialIcons name="contacts" size={44} color="#F59E0B" />
           </View>
-          <Text style={[s.permissionTitle, { color: tc.text }]}>Acceso a contactos requerido</Text>
-          <Text style={[s.permissionDesc, { color: tc.textMuted }]}>
-            VYLTA necesita acceso a tus contactos para importarlos como clientes. Ve a Configuración y activa el permiso.
+          <Text style={[s.centeredTitle, { color: tc.text }]}>Acceso a contactos requerido</Text>
+          <Text style={[s.centeredDesc, { color: tc.textMuted }]}>
+            VYLTA necesita acceso a tus contactos. Ve a Configuración de tu teléfono y activa el permiso para VYLTA.
           </Text>
-          <TouchableOpacity style={s.permissionBtn} onPress={loadContacts}>
-            <Text style={s.permissionBtnText}>Volver a intentar</Text>
+          <TouchableOpacity style={s.primaryBtn} onPress={loadContacts}>
+            <Text style={s.primaryBtnText}>Volver a intentar</Text>
           </TouchableOpacity>
         </View>
       </SafeAreaView>
@@ -218,9 +229,34 @@ export default function ImportContactsScreen() {
           <Text style={[s.headerTitle, { color: tc.text }]}>Importar contactos</Text>
           <View style={{ width: 40 }} />
         </View>
-        <View style={s.loadingWrap}>
+        <View style={s.centeredWrap}>
           <ActivityIndicator size="large" color="#10B981" />
-          <Text style={[s.loadingText, { color: tc.textMuted }]}>Cargando contactos...</Text>
+          <Text style={[s.centeredDesc, { color: tc.textMuted }]}>Cargando tu agenda...</Text>
+        </View>
+      </SafeAreaView>
+    );
+  }
+
+  // ── Overlay importando ────────────────────────────────────────────────
+  if (importing) {
+    const pct = importProgress.total > 0
+      ? Math.round((importProgress.done / importProgress.total) * 100)
+      : 0;
+    return (
+      <SafeAreaView style={[s.container, { backgroundColor: tc.bg }]} edges={['top']}>
+        <View style={s.centeredWrap}>
+          <ActivityIndicator size="large" color="#10B981" />
+          <Text style={[s.centeredTitle, { color: tc.text }]}>Importando contactos...</Text>
+          <Text style={[s.centeredDesc, { color: tc.textMuted }]}>
+            {importProgress.done} de {importProgress.total} — {pct}%
+          </Text>
+          {/* Barra de progreso */}
+          <View style={[s.progressBar, { backgroundColor: isDark ? '#1E293B' : '#E2E8F0' }]}>
+            <View style={[s.progressFill, { width: `${pct}%` as any }]} />
+          </View>
+          <Text style={[s.centeredDesc, { color: tc.textMuted, marginTop: 8 }]}>
+            Por favor espera, esto puede tomar unos segundos
+          </Text>
         </View>
       </SafeAreaView>
     );
@@ -264,7 +300,7 @@ export default function ImportContactsScreen() {
         </View>
       </View>
 
-      {/* Barra de selección */}
+      {/* Barra selección */}
       <View style={[s.selectionBar, { backgroundColor: tc.surface, borderBottomColor: tc.border }]}>
         <TouchableOpacity style={s.selectAllBtn} onPress={toggleAll}>
           <View style={[
@@ -285,12 +321,12 @@ export default function ImportContactsScreen() {
         )}
       </View>
 
-      {/* Lista de contactos */}
+      {/* Lista */}
       {filteredContacts.length === 0 ? (
-        <View style={s.emptyWrap}>
+        <View style={s.centeredWrap}>
           <MaterialIcons name="person-search" size={44} color={tc.border} />
-          <Text style={[s.emptyText, { color: tc.textMuted }]}>
-            {search ? `Sin resultados para "${search}"` : 'No hay contactos con teléfono'}
+          <Text style={[s.centeredDesc, { color: tc.textMuted }]}>
+            {search ? `Sin resultados para "${search}"` : 'No hay contactos con teléfono registrado'}
           </Text>
         </View>
       ) : (
@@ -300,29 +336,24 @@ export default function ImportContactsScreen() {
           renderItem={renderContact}
           keyboardShouldPersistTaps="handled"
           keyboardDismissMode="on-drag"
-          contentContainerStyle={{ paddingBottom: insets.bottom + 100 }}
+          contentContainerStyle={{ paddingBottom: insets.bottom + 110 }}
           initialNumToRender={30}
           maxToRenderPerBatch={30}
           getItemLayout={(_, index) => ({ length: 72, offset: 72 * index, index })}
         />
       )}
 
-      {/* Botón flotante importar */}
+      {/* FAB importar */}
       {selectedCount > 0 && (
         <View style={[s.fabWrap, { bottom: insets.bottom + 16 }]}>
           <TouchableOpacity
-            style={[s.importBtn, importing && { opacity: 0.7 }]}
+            style={s.importBtn}
             onPress={handleImport}
-            disabled={importing}
             activeOpacity={0.85}
           >
-            {importing ? (
-              <ActivityIndicator color="#fff" size="small" />
-            ) : (
-              <MaterialIcons name="person-add-alt" size={20} color="#fff" />
-            )}
+            <MaterialIcons name="person-add-alt" size={20} color="#fff" />
             <Text style={s.importBtnText}>
-              {importing ? 'Importando...' : `Importar ${selectedCount} contacto${selectedCount !== 1 ? 's' : ''}`}
+              Agregar {selectedCount} cliente{selectedCount !== 1 ? 's' : ''} a mi lista
             </Text>
           </TouchableOpacity>
         </View>
@@ -332,46 +363,37 @@ export default function ImportContactsScreen() {
 }
 
 const s = StyleSheet.create({
-  container:          { flex: 1 },
-  // Header
-  header:             { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, paddingVertical: 14, borderBottomWidth: 0.5 },
-  backBtn:            { width: 40, padding: 4 },
-  headerMid:          { flex: 1, alignItems: 'center' },
-  headerTitle:        { fontSize: 17, fontWeight: '700' },
-  headerSub:          { fontSize: 11, marginTop: 1 },
-  // Buscador
-  searchWrap:         { paddingHorizontal: 16, paddingVertical: 10, borderBottomWidth: 0.5 },
-  searchBox:          { flexDirection: 'row', alignItems: 'center', borderRadius: 12, paddingHorizontal: 12, paddingVertical: 9, borderWidth: 0.5, gap: 8 },
-  searchInput:        { flex: 1, fontSize: 15 },
-  // Barra selección
-  selectionBar:       { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, paddingVertical: 10, borderBottomWidth: 0.5 },
-  selectAllBtn:       { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  selectAllText:      { fontSize: 13, fontWeight: '600' },
-  selectedBadge:      { backgroundColor: '#10B981', borderRadius: 12, paddingHorizontal: 10, paddingVertical: 3 },
-  selectedBadgeText:  { fontSize: 12, fontWeight: '700', color: '#fff' },
-  // Fila de contacto
-  row:                { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, paddingVertical: 12, borderBottomWidth: 0.5, gap: 12, minHeight: 72 },
-  avatar:             { width: 44, height: 44, borderRadius: 13, justifyContent: 'center', alignItems: 'center' },
-  avatarText:         { fontSize: 16, fontWeight: '800' },
-  rowInfo:            { flex: 1, gap: 2 },
-  rowName:            { fontSize: 15, fontWeight: '600' },
-  rowPhone:           { fontSize: 12 },
-  checkbox:           { width: 24, height: 24, borderRadius: 7, borderWidth: 2, justifyContent: 'center', alignItems: 'center' },
-  checkboxSmall:      { width: 20, height: 20, borderRadius: 6, borderWidth: 2, justifyContent: 'center', alignItems: 'center' },
-  // Loading / permiso
-  loadingWrap:        { flex: 1, justifyContent: 'center', alignItems: 'center', gap: 16 },
-  loadingText:        { fontSize: 14 },
-  permissionWrap:     { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 36, gap: 16 },
-  permissionIcon:     { width: 88, height: 88, borderRadius: 24, justifyContent: 'center', alignItems: 'center' },
-  permissionTitle:    { fontSize: 20, fontWeight: '700', textAlign: 'center' },
-  permissionDesc:     { fontSize: 14, textAlign: 'center', lineHeight: 22 },
-  permissionBtn:      { backgroundColor: '#10B981', borderRadius: 12, paddingVertical: 13, paddingHorizontal: 28, marginTop: 8 },
-  permissionBtnText:  { color: '#fff', fontSize: 15, fontWeight: '700' },
-  // Empty
-  emptyWrap:          { flex: 1, justifyContent: 'center', alignItems: 'center', gap: 12 },
-  emptyText:          { fontSize: 14 },
-  // FAB importar
-  fabWrap:            { position: 'absolute', left: 20, right: 20 },
-  importBtn:          { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 10, backgroundColor: '#10B981', borderRadius: 16, paddingVertical: 16, shadowColor: '#000', shadowOpacity: 0.2, shadowRadius: 10, elevation: 6 },
-  importBtnText:      { color: '#fff', fontSize: 16, fontWeight: '800' },
+  container:        { flex: 1 },
+  header:           { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, paddingVertical: 14, borderBottomWidth: 0.5 },
+  backBtn:          { width: 40, padding: 4 },
+  headerMid:        { flex: 1, alignItems: 'center' },
+  headerTitle:      { fontSize: 17, fontWeight: '700' },
+  headerSub:        { fontSize: 11, marginTop: 1 },
+  searchWrap:       { paddingHorizontal: 16, paddingVertical: 10, borderBottomWidth: 0.5 },
+  searchBox:        { flexDirection: 'row', alignItems: 'center', borderRadius: 12, paddingHorizontal: 12, paddingVertical: 9, borderWidth: 0.5, gap: 8 },
+  searchInput:      { flex: 1, fontSize: 15 },
+  selectionBar:     { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, paddingVertical: 10, borderBottomWidth: 0.5 },
+  selectAllBtn:     { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  selectAllText:    { fontSize: 13, fontWeight: '600' },
+  selectedBadge:    { backgroundColor: '#10B981', borderRadius: 12, paddingHorizontal: 10, paddingVertical: 3 },
+  selectedBadgeText:{ fontSize: 12, fontWeight: '700', color: '#fff' },
+  row:              { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, paddingVertical: 12, borderBottomWidth: 0.5, gap: 12, minHeight: 72 },
+  avatar:           { width: 44, height: 44, borderRadius: 13, justifyContent: 'center', alignItems: 'center' },
+  avatarText:       { fontSize: 16, fontWeight: '800' },
+  rowInfo:          { flex: 1, gap: 2 },
+  rowName:          { fontSize: 15, fontWeight: '600' },
+  rowPhone:         { fontSize: 12 },
+  checkbox:         { width: 24, height: 24, borderRadius: 7, borderWidth: 2, justifyContent: 'center', alignItems: 'center' },
+  checkboxSmall:    { width: 20, height: 20, borderRadius: 6, borderWidth: 2, justifyContent: 'center', alignItems: 'center' },
+  centeredWrap:     { flex: 1, justifyContent: 'center', alignItems: 'center', padding: 36, gap: 14 },
+  centeredTitle:    { fontSize: 20, fontWeight: '700', textAlign: 'center' },
+  centeredDesc:     { fontSize: 14, textAlign: 'center', lineHeight: 22 },
+  bigIcon:          { width: 88, height: 88, borderRadius: 24, justifyContent: 'center', alignItems: 'center' },
+  primaryBtn:       { backgroundColor: '#10B981', borderRadius: 12, paddingVertical: 13, paddingHorizontal: 28, marginTop: 8 },
+  primaryBtnText:   { color: '#fff', fontSize: 15, fontWeight: '700' },
+  progressBar:      { width: '100%', height: 8, borderRadius: 4, overflow: 'hidden', marginTop: 8 },
+  progressFill:     { height: '100%', backgroundColor: '#10B981', borderRadius: 4 },
+  fabWrap:          { position: 'absolute', left: 20, right: 20 },
+  importBtn:        { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 10, backgroundColor: '#10B981', borderRadius: 16, paddingVertical: 16, shadowColor: '#000', shadowOpacity: 0.2, shadowRadius: 10, elevation: 6 },
+  importBtnText:    { color: '#fff', fontSize: 16, fontWeight: '800' },
 });
