@@ -45,33 +45,36 @@ const getAvatarColor = (name: string, dark: boolean) => {
   const arr = dark ? AVATAR_COLORS_DARK : AVATAR_COLORS;
   return arr[(name.charCodeAt(0) || 0) % arr.length];
 };
+
 const getInitials = (name: string) => {
   const parts = name.trim().split(' ');
   if (parts.length >= 2) return (parts[0][0] + parts[1][0]).toUpperCase();
   return name.substring(0, 2).toUpperCase();
 };
+
 const formatLastVisit = (lastVisit: string | null | undefined) => {
   if (!lastVisit) return null;
   const visitDate = new Date(lastVisit + 'T12:00:00');
-  const diffDays = Math.ceil(Math.abs(new Date().getTime() - visitDate.getTime()) / 86400000);
-  if (diffDays === 0) return 'Hoy';
-  if (diffDays === 1) return 'Ayer';
-  if (diffDays < 7)  return `Hace ${diffDays} d\u00edas`;
-  if (diffDays < 30) return `Hace ${Math.floor(diffDays / 7)} sem`;
-  if (diffDays < 365) return `Hace ${Math.floor(diffDays / 30)} meses`;
-  return `Hace ${Math.floor(diffDays / 365)} a\u00f1o${Math.floor(diffDays / 365) > 1 ? 's' : ''}`;
+  const diffDays  = Math.ceil(Math.abs(new Date().getTime() - visitDate.getTime()) / 86400000);
+  if (diffDays === 0)   return 'Hoy';
+  if (diffDays === 1)   return 'Ayer';
+  if (diffDays < 7)     return `Hace ${diffDays} días`;
+  if (diffDays < 30)    return `Hace ${Math.floor(diffDays / 7)} sem`;
+  if (diffDays < 365)   return `Hace ${Math.floor(diffDays / 30)} meses`;
+  const y = Math.floor(diffDays / 365);
+  return `Hace ${y} año${y > 1 ? 's' : ''}`;
 };
 
 export default function ClientsScreen() {
   const router = useRouter();
   const { colors: tc, isDark } = useTheme();
 
-  const [loading, setLoading]     = useState(true);
-  const [refreshing, setRefreshing] = useState(false);
-  const [allClients, setAllClients] = useState<Client[]>([]);
+  const [loading,     setLoading]     = useState(true);
+  const [refreshing,  setRefreshing]  = useState(false);
+  const [allClients,  setAllClients]  = useState<Client[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
-  const [filter, setFilter]       = useState<FilterType>('Todos');
-  const [errorModal, setErrorModal] = useState({ visible: false, message: '' });
+  const [filter,      setFilter]      = useState<FilterType>('Todos');
+  const [errorModal,  setErrorModal]  = useState({ visible: false, message: '' });
 
   useFocusEffect(
     useCallback(() => {
@@ -102,13 +105,14 @@ export default function ClientsScreen() {
   }, []);
 
   const filteredClients = allClients.filter(c => {
-    const matchesSearch = !searchQuery ||
+    const matchesSearch =
+      !searchQuery ||
       c.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
       c.phone.includes(searchQuery) ||
       (c.email || '').toLowerCase().includes(searchQuery.toLowerCase());
     const matchesFilter =
-      filter === 'Todos'    ? true :
-      filter === 'Activos'  ? c.isActive !== false :
+      filter === 'Todos'   ? true :
+      filter === 'Activos' ? c.isActive !== false :
       c.isActive === false;
     return matchesSearch && matchesFilter;
   });
@@ -124,10 +128,10 @@ export default function ClientsScreen() {
           <MaterialIcons name="search-off" size={36} color={tc.border} />
         </View>
         <Text style={[s.emptyTitle, { color: tc.text }]}>Sin resultados</Text>
-        <Text style={[s.emptyDesc, { color: tc.textMuted }]}>No encontramos ning\u00fan cliente con \u201c{searchQuery}\u201d</Text>
+        <Text style={[s.emptyDesc, { color: tc.textMuted }]}>No encontramos ningún cliente con "{searchQuery}"</Text>
         <TouchableOpacity style={s.emptyBtnSecondary} onPress={() => setSearchQuery('')}>
           <MaterialIcons name="close" size={14} color="#10B981" />
-          <Text style={s.emptyBtnSecondaryText}>Limpiar b\u00fasqueda</Text>
+          <Text style={s.emptyBtnSecondaryText}>Limpiar búsqueda</Text>
         </TouchableOpacity>
       </View>
     );
@@ -137,7 +141,7 @@ export default function ClientsScreen() {
           <MaterialIcons name="thumb-up" size={36} color="#10B981" />
         </View>
         <Text style={[s.emptyTitle, { color: tc.text }]}>Sin clientes inactivos</Text>
-        <Text style={[s.emptyDesc, { color: tc.textMuted }]}>Todos tus clientes han tenido una visita reciente. \u00a1Excelente retenci\u00f3n!</Text>
+        <Text style={[s.emptyDesc, { color: tc.textMuted }]}>Todos tus clientes han tenido una visita reciente. ¡Excelente retención!</Text>
       </View>
     );
     if (filter === 'Activos' && hasClients) return (
@@ -146,25 +150,24 @@ export default function ClientsScreen() {
           <MaterialIcons name="group" size={36} color={tc.border} />
         </View>
         <Text style={[s.emptyTitle, { color: tc.text }]}>Sin clientes activos</Text>
-        <Text style={[s.emptyDesc, { color: tc.textMuted }]}>Todos tus clientes est\u00e1n marcados como inactivos.</Text>
+        <Text style={[s.emptyDesc, { color: tc.textMuted }]}>Todos tus clientes están marcados como inactivos.</Text>
         <TouchableOpacity style={s.emptyBtnSecondary} onPress={() => setFilter('Todos')}>
           <Text style={s.emptyBtnSecondaryText}>Ver todos los clientes</Text>
         </TouchableOpacity>
       </View>
     );
-    // Sin clientes en absoluto
     return (
       <View style={s.empty}>
         <View style={[s.emptyIconWrap, { backgroundColor: tc.surface }]}>
           <MaterialIcons name="group-add" size={36} color="#10B981" />
         </View>
-        <Text style={[s.emptyTitle, { color: tc.text }]}>A\u00fan no tienes clientes</Text>
-        <Text style={[s.emptyDesc, { color: tc.textMuted }]}>Agrega a tus primeros clientes o imp\u00f3rtalos desde tus contactos.</Text>
+        <Text style={[s.emptyTitle, { color: tc.text }]}>Aún no tienes clientes</Text>
+        <Text style={[s.emptyDesc, { color: tc.textMuted }]}>Agrega a tus primeros clientes o impórtalos desde tus contactos.</Text>
         <View style={[s.onboardingCard, { backgroundColor: tc.surface, borderColor: tc.border }]}>
           {[
             { icon: 'person-add-alt', text: 'Agrega clientes manualmente' },
-            { icon: 'contacts',       text: 'Importa desde tus contactos del tel\u00e9fono' },
-            { icon: 'link',           text: 'O comparte tu link de citas \u2014 se guardan solos' },
+            { icon: 'contacts',       text: 'Importa desde tus contactos del teléfono' },
+            { icon: 'link',           text: 'O comparte tu link de citas — se guardan solos' },
           ].map(({ icon, text }, i) => (
             <View key={i} style={[s.onboardingRow, i > 0 && { borderTopWidth: 0.5, borderTopColor: tc.border }]}>
               <View style={[s.onboardingIconWrap, { backgroundColor: '#ECFDF5' }]}>
@@ -210,7 +213,6 @@ export default function ClientsScreen() {
             <Text style={[s.subtitle, { color: tc.textMuted }]}>{allClients.length} registrados</Text>
           </View>
           <View style={s.headerRight}>
-            {/* Bot\u00f3n importar contactos */}
             <TouchableOpacity
               style={[s.importContactsBtn, { backgroundColor: isDark ? '#052E16' : '#ECFDF5', borderColor: isDark ? '#065F46' : '#BBF7D0' }]}
               onPress={() => router.push('/clients/import-contacts')}
@@ -232,13 +234,14 @@ export default function ClientsScreen() {
           </View>
         </View>
 
-        {/* B\u00fasqueda */}
+        {/* Búsqueda */}
         <View style={[s.searchBox, { backgroundColor: tc.inputBg, borderColor: tc.inputBorder }]}>
           <MaterialIcons name="search" size={20} color={tc.textMuted} />
           <TextInput
             style={[s.searchInput, { color: tc.text }]}
-            value={searchQuery} onChangeText={setSearchQuery}
-            placeholder="Buscar por nombre, tel\u00e9fono o email..."
+            value={searchQuery}
+            onChangeText={setSearchQuery}
+            placeholder="Buscar por nombre, teléfono o email..."
             placeholderTextColor={tc.textMuted}
           />
           {searchQuery ? (
@@ -280,7 +283,7 @@ export default function ClientsScreen() {
                 </View>
                 <View style={{ flex: 1 }}>
                   <Text style={[s.inactiveBannerTitle, { color: isDark ? '#FED7AA' : '#92400E' }]}>Clientes sin visita reciente</Text>
-                  <Text style={[s.inactiveBannerDesc, { color: isDark ? '#FB923C' : '#B45309' }]}>Ver campa\u00f1a de reactivaci\u00f3n \u2192</Text>
+                  <Text style={[s.inactiveBannerDesc, { color: isDark ? '#FB923C' : '#B45309' }]}>Ver campaña de reactivación →</Text>
                 </View>
               </TouchableOpacity>
             )}
@@ -315,7 +318,9 @@ export default function ClientsScreen() {
                       )}
                       <View style={s.metaChip}>
                         <MaterialIcons name="event" size={11} color={tc.textMuted} />
-                        <Text style={[s.metaText, { color: tc.textMuted }]}>{client.totalVisits} {client.totalVisits === 1 ? 'cita' : 'citas'}</Text>
+                        <Text style={[s.metaText, { color: tc.textMuted }]}>
+                          {client.totalVisits} {client.totalVisits === 1 ? 'cita' : 'citas'}
+                        </Text>
                       </View>
                     </View>
                   </View>
@@ -342,7 +347,6 @@ const s = StyleSheet.create({
   title:                 { fontSize: 28, fontWeight: '800', letterSpacing: -0.5 },
   subtitle:              { fontSize: 13, marginTop: 2 },
   headerRight:           { alignItems: 'flex-end', gap: 8 },
-  // Bot\u00f3n importar
   importContactsBtn:     { flexDirection: 'row', alignItems: 'center', gap: 5, paddingHorizontal: 10, paddingVertical: 5, borderRadius: 10, borderWidth: 1 },
   importContactsBtnText: { fontSize: 12, fontWeight: '700', color: '#10B981' },
   headerStats:           { flexDirection: 'row', gap: 12, alignItems: 'center' },
@@ -357,7 +361,6 @@ const s = StyleSheet.create({
   filterText:            { fontSize: 13, fontWeight: '600' },
   filterTextActive:      { color: '#fff' },
   scroll:                { padding: 16, paddingBottom: 100 },
-  // Estado vac\u00edo
   empty:                 { alignItems: 'center', paddingVertical: 48, paddingHorizontal: 24, gap: 10 },
   emptyIconWrap:         { width: 72, height: 72, borderRadius: 20, justifyContent: 'center', alignItems: 'center', marginBottom: 4 },
   emptyTitle:            { fontSize: 18, fontWeight: '700', textAlign: 'center' },
