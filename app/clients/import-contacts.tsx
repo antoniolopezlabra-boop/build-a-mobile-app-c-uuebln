@@ -22,6 +22,7 @@ interface PhoneContact {
 
 const cleanPhone = (raw: string): string => raw.replace(/[^0-9+]/g, '').trim();
 
+// Compara solo los ultimos 10 digitos para no fallar por prefijo de pais
 const normalizePhone = (raw: string): string => {
   const digits = cleanPhone(raw).replace(/^\+/, '');
   if (digits.length === 12 && digits.startsWith('52')) return digits.slice(2);
@@ -30,9 +31,9 @@ const normalizePhone = (raw: string): string => {
 };
 
 export default function ImportContactsScreen() {
-  const router  = useRouter();
+  const router = useRouter();
   const { colors: tc, isDark } = useTheme();
-  const insets  = useSafeAreaInsets();
+  const insets = useSafeAreaInsets();
 
   const [loading,    setLoading]    = useState(true);
   const [importing,  setImporting]  = useState(false);
@@ -54,51 +55,58 @@ export default function ImportContactsScreen() {
         return;
       }
 
-      const [{ data: phoneContacts }, existingClients] = await Promise.all([
+      // Cargar contactos del telefono Y clientes existentes en paralelo
+      const [contactsResult, existingClients] = await Promise.all([
         Contacts.getContactsAsync({
           fields: [Contacts.Fields.Name, Contacts.Fields.PhoneNumbers],
-          sort:   Contacts.SortTypes.FirstName,
+          sort: Contacts.SortTypes.FirstName,
         }),
-        apiGet<{ phone: string }[]>('/api/clients').catch(() => []),
+        apiGet<any[]>('/api/clients').catch(() => []),
       ]);
 
-      const savedPhones = new Set(
-        existingClients.map((c: any) => normalizePhone(c.phone || ''))
-      );
+      // Set de telefonos ya guardados normalizados
+      const savedPhones = new Set<string>();
+      for (const c of existingClients) {
+        const normalized = normalizePhone(c.phone || '');
+        if (normalized) savedPhones.add(normalized);
+      }
 
       const parsed: PhoneContact[] = [];
       const seen = new Set<string>();
 
-      for (const c of phoneContacts) {
-        const name   = (c.name || '').trim();
+      for (const c of contactsResult.data) {
+        const name = (c.name || '').trim();
         const phones = c.phoneNumbers || [];
         if (!name || phones.length === 0) continue;
 
-        const rawPhone   = phones[0].number || '';
-        const phone      = cleanPhone(rawPhone);
+        const rawPhone = phones[0].number || '';
+        const phone = cleanPhone(rawPhone);
         if (!phone || phone.length < 7) continue;
 
         const normalized = normalizePhone(rawPhone);
         if (seen.has(normalized)) continue;
         seen.add(normalized);
 
+        const isSaved = savedPhones.has(normalized);
+
         parsed.push({
-          id:           c.id ?? `${name}-${normalized}`,
+          id: c.id ?? `${name}-${normalized}`,
           name,
           phone,
           rawPhone,
-          selected:     false,
-          alreadySaved: savedPhones.has(normalized),
+          selected: false,
+          alreadySaved: isSaved,
         });
       }
 
+      // Nuevos primero, ya guardados al final
       parsed.sort((a, b) => {
         if (a.alreadySaved === b.alreadySaved) return 0;
         return a.alreadySaved ? 1 : -1;
       });
 
       setContacts(parsed);
-    } catch {
+    } catch (e) {
       Alert.alert('Error', 'No se pudieron cargar los contactos.');
     } finally {
       setLoading(false);
@@ -111,9 +119,10 @@ export default function ImportContactsScreen() {
     ));
 
   const toggleAll = () => {
-    const eligible    = filteredContacts.filter(c => !c.alreadySaved);
-    const allSelected = eligible.length > 0 && eligible.every(c => c.selected);
-    const ids         = new Set(eligible.map(c => c.id));
+    const eligible = filteredContacts.filter(c => !c.alreadySaved);
+    if (eligible.length === 0) return;
+    const allSelected = eligible.every(c => c.selected);
+    const ids = new Set(eligible.map(c => c.id));
     setContacts(prev => prev.map(c =>
       ids.has(c.id) ? { ...c, selected: !allSelected } : c
     ));
@@ -125,12 +134,12 @@ export default function ImportContactsScreen() {
     return c.name.toLowerCase().includes(q) || c.rawPhone.includes(q);
   });
 
-  const selectedContacts    = contacts.filter(c => c.selected);
-  const selectedCount       = selectedContacts.length;
-  const eligibleFiltered    = filteredContacts.filter(c => !c.alreadySaved);
+  const selectedContacts = contacts.filter(c => c.selected);
+  const selectedCount = selectedContacts.length;
+  const eligibleFiltered = filteredContacts.filter(c => !c.alreadySaved);
   const allFilteredSelected = eligibleFiltered.length > 0 && eligibleFiltered.every(c => c.selected);
-  const alreadySavedCount   = contacts.filter(c => c.alreadySaved).length;
-  const newCount            = contacts.filter(c => !c.alreadySaved).length;
+  const alreadySavedCount = contacts.filter(c => c.alreadySaved).length;
+  const newCount = contacts.filter(c => !c.alreadySaved).length;
 
   const handleImport = async () => {
     if (selectedCount === 0) return;
@@ -138,8 +147,8 @@ export default function ImportContactsScreen() {
     setImporting(true);
     setImportProgress({ done: 0, total: selectedCount });
 
-    let imported   = 0;
-    let failed     = 0;
+    let imported = 0;
+    let failed = 0;
     let duplicates = 0;
     const errors: string[] = [];
 
@@ -149,24 +158,21 @@ export default function ImportContactsScreen() {
         imported++;
       } catch (e: any) {
         const msg = (e?.message || '').toLowerCase();
-        if (
-          msg.includes('duplicate') || msg.includes('unique') ||
-          msg.includes('already')   || msg.includes('exist')  ||
-          e?.status === 409         || e?.status === 422
-        ) {
+        if (msg.includes('duplicate') || msg.includes('unique') || msg.includes('already') || msg.includes('exist') || e?.status === 409 || e?.status === 422) {
           duplicates++;
         } else {
           failed++;
-          errors.push(`${contact.name}: ${e?.message || 'error desconocido'}`);
+          errors.push(contact.name + ': ' + (e?.message || 'error'));
         }
       }
       setImportProgress(prev => ({ ...prev, done: prev.done + 1 }));
     }
 
-    if (imported > 0) {
-      const importedIds = new Set(selectedContacts.slice(0, imported).map(c => c.id));
+    // Marcar importados como guardados en estado local
+    if (imported > 0 || duplicates > 0) {
+      const doneIds = new Set(selectedContacts.slice(0, imported + duplicates).map(c => c.id));
       setContacts(prev => prev.map(c =>
-        importedIds.has(c.id) ? { ...c, selected: false, alreadySaved: true } : c
+        doneIds.has(c.id) ? { ...c, selected: false, alreadySaved: true } : c
       ));
     }
 
@@ -174,26 +180,23 @@ export default function ImportContactsScreen() {
     setImporting(false);
 
     const parts: string[] = [];
-    if (imported > 0)   parts.push(`${imported} cliente${imported !== 1 ? 's' : ''} agregado${imported !== 1 ? 's' : ''}`);
-    if (duplicates > 0) parts.push(`${duplicates} ya existia${duplicates !== 1 ? 'n' : ''}`);
-    if (failed > 0)     parts.push(`${failed} con error`);
+    if (imported > 0)   parts.push(imported + ' cliente' + (imported !== 1 ? 's' : '') + ' agregado' + (imported !== 1 ? 's' : ''));
+    if (duplicates > 0) parts.push(duplicates + ' ya existia' + (duplicates !== 1 ? 'n' : ''));
+    if (failed > 0)     parts.push(failed + ' con error');
 
     let msg = parts.join(', ') + '.';
     if (errors.length > 0) msg += '\n\nDetalle: ' + errors.slice(0, 3).join(', ');
 
     Alert.alert(
-      imported > 0 ? 'Importacion lista!' : 'Sin cambios',
-      msg,
-      [{
-        text: imported > 0 ? 'Ver mis clientes' : 'Cerrar',
-        onPress: () => { if (imported > 0) router.back(); },
-      }]
+      imported > 0 ? 'Importacion lista!' : 'Proceso completado',
+      msg || 'Sin cambios.',
+      [{ text: imported > 0 ? 'Ver mis clientes' : 'Cerrar', onPress: () => { if (imported > 0) router.back(); } }]
     );
   };
 
   const renderContact = ({ item }: { item: PhoneContact }) => {
     const initials = item.name.trim().split(' ').map(w => w[0]).slice(0, 2).join('').toUpperCase();
-    const isSaved  = item.alreadySaved;
+    const isSaved = item.alreadySaved;
 
     return (
       <TouchableOpacity
@@ -246,9 +249,7 @@ export default function ImportContactsScreen() {
             <MaterialIcons name="contacts" size={44} color="#F59E0B" />
           </View>
           <Text style={[s.centeredTitle, { color: tc.text }]}>Acceso a contactos requerido</Text>
-          <Text style={[s.centeredDesc, { color: tc.textMuted }]}>
-            VYLTA necesita acceso a tus contactos. Ve a Configuracion y activa el permiso para VYLTA.
-          </Text>
+          <Text style={[s.centeredDesc, { color: tc.textMuted }]}>VYLTA necesita acceso a tus contactos. Ve a Configuracion y activa el permiso.</Text>
           <TouchableOpacity style={s.primaryBtn} onPress={loadContacts}>
             <Text style={s.primaryBtnText}>Volver a intentar</Text>
           </TouchableOpacity>
@@ -276,23 +277,17 @@ export default function ImportContactsScreen() {
   }
 
   if (importing) {
-    const pct = importProgress.total > 0
-      ? Math.round((importProgress.done / importProgress.total) * 100)
-      : 0;
+    const pct = importProgress.total > 0 ? Math.round((importProgress.done / importProgress.total) * 100) : 0;
     return (
       <SafeAreaView style={[s.container, { backgroundColor: tc.bg }]} edges={['top']}>
         <View style={s.centeredWrap}>
           <ActivityIndicator size="large" color="#10B981" />
           <Text style={[s.centeredTitle, { color: tc.text }]}>Importando contactos...</Text>
-          <Text style={[s.centeredDesc, { color: tc.textMuted }]}>
-            {importProgress.done} de {importProgress.total} - {pct}%
-          </Text>
+          <Text style={[s.centeredDesc, { color: tc.textMuted }]}>{importProgress.done} de {importProgress.total} - {pct}%</Text>
           <View style={[s.progressBar, { backgroundColor: isDark ? '#1E293B' : '#E2E8F0' }]}>
-            <View style={[s.progressFill, { width: `${pct}%` as any }]} />
+            <View style={[s.progressFill, { width: (pct + '%') as any }]} />
           </View>
-          <Text style={[s.centeredDesc, { color: tc.textMuted, fontSize: 12 }]}>
-            Por favor espera...
-          </Text>
+          <Text style={[s.centeredDesc, { color: tc.textMuted, fontSize: 12 }]}>Por favor espera...</Text>
         </View>
       </SafeAreaView>
     );
@@ -309,8 +304,8 @@ export default function ImportContactsScreen() {
           <Text style={[s.headerTitle, { color: tc.text }]}>Importar contactos</Text>
           <Text style={[s.headerSub, { color: tc.textMuted }]}>
             {newCount > 0
-              ? `${newCount} nuevos · ${alreadySavedCount} ya en tu lista`
-              : `${alreadySavedCount} contacto${alreadySavedCount !== 1 ? 's' : ''} — todos ya en tu lista`
+              ? newCount + ' nuevos  '  + alreadySavedCount + ' ya en tu lista'
+              : alreadySavedCount + ' contacto' + (alreadySavedCount !== 1 ? 's' : '') + ' - todos ya en tu lista'
             }
           </Text>
         </View>
@@ -346,11 +341,7 @@ export default function ImportContactsScreen() {
       </View>
 
       <View style={[s.selectionBar, { backgroundColor: tc.surface, borderBottomColor: tc.border }]}>
-        <TouchableOpacity
-          style={s.selectAllBtn}
-          onPress={toggleAll}
-          disabled={eligibleFiltered.length === 0}
-        >
+        <TouchableOpacity style={s.selectAllBtn} onPress={toggleAll} disabled={eligibleFiltered.length === 0}>
           <View style={[
             s.checkboxSmall,
             { borderColor: allFilteredSelected ? '#10B981' : tc.border },
@@ -365,9 +356,7 @@ export default function ImportContactsScreen() {
         </TouchableOpacity>
         {selectedCount > 0 && (
           <View style={s.selectedBadge}>
-            <Text style={s.selectedBadgeText}>
-              {selectedCount} seleccionado{selectedCount !== 1 ? 's' : ''}
-            </Text>
+            <Text style={s.selectedBadgeText}>{selectedCount} seleccionado{selectedCount !== 1 ? 's' : ''}</Text>
           </View>
         )}
       </View>
@@ -375,9 +364,7 @@ export default function ImportContactsScreen() {
       {filteredContacts.length === 0 ? (
         <View style={s.centeredWrap}>
           <MaterialIcons name="person-search" size={44} color={tc.border} />
-          <Text style={[s.centeredDesc, { color: tc.textMuted }]}>
-            Sin resultados para "{search}"
-          </Text>
+          <Text style={[s.centeredDesc, { color: tc.textMuted }]}>Sin resultados para "{search}"</Text>
         </View>
       ) : (
         <FlatList
@@ -395,11 +382,7 @@ export default function ImportContactsScreen() {
 
       {selectedCount > 0 && (
         <View style={[s.fabWrap, { bottom: insets.bottom + 16 }]}>
-          <TouchableOpacity
-            style={s.importBtn}
-            onPress={handleImport}
-            activeOpacity={0.85}
-          >
+          <TouchableOpacity style={s.importBtn} onPress={handleImport} activeOpacity={0.85}>
             <MaterialIcons name="person-add-alt" size={20} color="#fff" />
             <Text style={s.importBtnText}>
               Agregar {selectedCount} cliente{selectedCount !== 1 ? 's' : ''} a mi lista
