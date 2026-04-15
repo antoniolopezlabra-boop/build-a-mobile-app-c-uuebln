@@ -26,7 +26,7 @@ interface Message {
 // TODO: mover a EAS Secrets en producción con expo-constants
 // Para producción: import Constants from 'expo-constants';
 // const ANTHROPIC_API_KEY = Constants.expoConfig?.extra?.anthropicApiKey;
-const ANTHROPIC_API_KEY = 'sk-ant-api03-Nt2WyxvMzgTSMSeAbnJwBxxVnhBpHMDoO_P0jYl9iT91aF66SU0CdTEe94ydpp2eoC1tKgFtYT30-kZZOPxt1w-_w-dHgAA';
+const ANTHROPIC_API_KEY = 'sk-ant-api03-FJ69QehjinZ5ZpkYdAqPfGoBbzavpDpxzC3tOtfsJF1mWP4TSFu4gvf8vuN4S6XYXxLG1HbpAZ3L-ainvWDm3w-vdXjywAA';
 
 const SYSTEM_PROMPT = `Eres el asistente de soporte de VYLTA, una app de gestión y automatización de citas por WhatsApp para micro-negocios en México (estéticas, barberías, spas, consultorios, etc.).
 
