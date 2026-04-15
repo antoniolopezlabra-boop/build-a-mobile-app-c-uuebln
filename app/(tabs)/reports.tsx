@@ -1,5 +1,5 @@
 import { getTodayString } from '@/utils/dateUtils';
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useRef } from 'react';
 import { useFocusEffect } from '@react-navigation/native';
 import { useRouter } from 'expo-router';
 import { usePlan } from '@/contexts/PlanContext';
@@ -57,21 +57,32 @@ interface StaffStat {
   completionRate: number;
 }
 
+const MONTHS_ES = ['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'];
+
 const STATUS_CONFIG: Record<string, { color: string; label: string }> = {
   'Confirmada': { color: '#10B981', label: 'Confirmada' },
   'Pendiente':  { color: '#F59E0B', label: 'Pendiente' },
   'Completada': { color: '#6366F1', label: 'Completada' },
   'Cancelada':  { color: '#EF4444', label: 'Cancelada' },
-  'No asistió':{ color: '#9CA3AF', label: 'No asistió' },
+  'No asisti\u00f3':{ color: '#9CA3AF', label: 'No asisti\u00f3' },
   'Reagendada': { color: '#3B82F6', label: 'Reagendada' },
   'Pagado':     { color: '#10B981', label: 'Pagado' },
 };
+
+function getReportsCacheKey(year: number, month: number): string {
+  return `reports_stats_${year}_${month}`;
+}
 
 export default function ReportsScreen() {
   const { canViewReports, isPremium, loading: planLoading } = usePlan();
   const { user } = useAuth();
   const router = useRouter();
   const { colors: tc, isDark } = useTheme();
+
+  // Mes seleccionado para el reporte — por defecto el mes actual
+  const now = new Date();
+  const [selectedYear,  setSelectedYear]  = useState(now.getFullYear());
+  const [selectedMonth, setSelectedMonth] = useState(now.getMonth()); // 0-indexed
 
   const [loading, setLoading]       = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -86,17 +97,53 @@ export default function ReportsScreen() {
   const [aptsList, setAptsList]         = useState<AppointmentItem[]>([]);
   const [clientsModal, setClientsModal] = useState(false);
 
+  const isCurrentMonth = selectedYear === now.getFullYear() && selectedMonth === now.getMonth();
+
   useFocusEffect(
     useCallback(() => {
-      const cached = getCached<any>('reports_stats');
+      const cacheKey = getReportsCacheKey(selectedYear, selectedMonth);
+      const cached = getCached<any>(cacheKey);
       if (cached) { setStats(cached); setLoading(false); loadData(true, false, true); }
       else loadData();
     }, [])
   );
 
+  // Navegar al mes anterior
+  const goToPrevMonth = () => {
+    if (selectedMonth === 0) {
+      setSelectedYear(y => y - 1);
+      setSelectedMonth(11);
+    } else {
+      setSelectedMonth(m => m - 1);
+    }
+  };
+
+  // Navegar al mes siguiente (no pasar del mes actual)
+  const goToNextMonth = () => {
+    if (isCurrentMonth) return;
+    if (selectedMonth === 11) {
+      setSelectedYear(y => y + 1);
+      setSelectedMonth(0);
+    } else {
+      setSelectedMonth(m => m + 1);
+    }
+  };
+
+  // Recargar datos cuando cambia el mes seleccionado
+  const prevMonthRef = useRef({ year: selectedYear, month: selectedMonth });
+  React.useEffect(() => {
+    const prev = prevMonthRef.current;
+    if (prev.year !== selectedYear || prev.month !== selectedMonth) {
+      prevMonthRef.current = { year: selectedYear, month: selectedMonth };
+      loadData();
+    }
+  }, [selectedYear, selectedMonth]);
+
   const loadData = async (forceRefresh = false, isPullRefresh = false, silent = false) => {
+    const cacheKey = getReportsCacheKey(selectedYear, selectedMonth);
+
     if (!forceRefresh && !isPullRefresh) {
-      const cached = getCached<any>('reports_stats');
+      const cached = getCached<any>(cacheKey);
       if (cached) { setStats(cached); setLoading(false); return; }
     }
     if (isPullRefresh) setRefreshing(true);
@@ -104,68 +151,56 @@ export default function ReportsScreen() {
 
     try {
       const userId = await getCurrentUserId();
-      const today = getTodayString();
+      const today  = getTodayString();
+
+      // Semana actual (siempre desde hoy, no cambia con el mes)
       const weekStart = new Date();
       const dow = weekStart.getDay();
       weekStart.setDate(weekStart.getDate() - (dow === 0 ? 6 : dow - 1));
-      const weekStartStr  = weekStart.toISOString().split('T')[0];
-      const monthStart    = new Date(); monthStart.setDate(1);
-      const monthStartStr = monthStart.toISOString().split('T')[0];
-      const lastMonthStart = new Date(); lastMonthStart.setMonth(lastMonthStart.getMonth() - 1); lastMonthStart.setDate(1);
-      const lastMonthEnd   = new Date(); lastMonthEnd.setDate(0);
-      const lastMonthStartStr = lastMonthStart.toISOString().split('T')[0];
-      const lastMonthEndStr   = lastMonthEnd.toISOString().split('T')[0];
+      const weekStartStr = weekStart.toISOString().split('T')[0];
+
+      // Mes seleccionado
+      const mStart    = new Date(selectedYear, selectedMonth, 1);
+      const mEnd      = new Date(selectedYear, selectedMonth + 1, 0);
+      const monthStartStr = mStart.toISOString().split('T')[0];
+      const monthEndStr   = mEnd.toISOString().split('T')[0];
+
+      // Mes anterior al seleccionado (para comparativa)
+      const prevMStart = new Date(selectedYear, selectedMonth - 1, 1);
+      const prevMEnd   = new Date(selectedYear, selectedMonth, 0);
+      const lastMonthStartStr = prevMStart.toISOString().split('T')[0];
+      const lastMonthEndStr   = prevMEnd.toISOString().split('T')[0];
 
       const [{ data: tA }, { data: wA }, { data: mA }, { count: tC }, { count: tAC }, { count: cC }] =
         await Promise.all([
           supabase.from('appointments').select('status').eq('user_id', userId).eq('date', today),
           supabase.from('appointments').select('id, status').eq('user_id', userId).gte('date', weekStartStr),
-          supabase.from('appointments').select('id, status').eq('user_id', userId).gte('date', monthStartStr),
+          supabase.from('appointments').select('id, status').eq('user_id', userId).gte('date', monthStartStr).lte('date', monthEndStr),
           supabase.from('clients').select('*', { count: 'exact', head: true }).eq('user_id', userId),
           supabase.from('appointments').select('*', { count: 'exact', head: true }).eq('user_id', userId),
           supabase.from('appointments').select('*', { count: 'exact', head: true }).eq('user_id', userId).in('status', ['Completada', 'Pagado']),
         ]);
 
-      // monthRevenue: status='Pagado' (legacy) + status='Completada' con paid=true (nuevo sistema)
       const [{ data: revLegacy }, { data: revNew }] = await Promise.all([
-        supabase.from('appointments')
-          .select('service_cost')
-          .eq('user_id', userId)
-          .eq('status', 'Pagado')
-          .gte('date', monthStartStr),
-        supabase.from('appointments')
-          .select('service_cost')
-          .eq('user_id', userId)
-          .eq('status', 'Completada')
-          .eq('paid', true)
-          .gte('date', monthStartStr),
+        supabase.from('appointments').select('service_cost').eq('user_id', userId).eq('status', 'Pagado').gte('date', monthStartStr).lte('date', monthEndStr),
+        supabase.from('appointments').select('service_cost').eq('user_id', userId).eq('status', 'Completada').eq('paid', true).gte('date', monthStartStr).lte('date', monthEndStr),
       ]);
 
-      // pendingRevenue: status='Completada' sin pagar (nuevo sistema)
-      // Las de status='Pagado' ya están cobradas por definición
       const { data: penD } = await supabase.from('appointments')
-        .select('service_cost')
-        .eq('user_id', userId)
-        .eq('status', 'Completada')
-        .or('paid.is.null,paid.eq.false')
-        .gte('date', monthStartStr);
+        .select('service_cost').eq('user_id', userId).eq('status', 'Completada')
+        .or('paid.is.null,paid.eq.false').gte('date', monthStartStr).lte('date', monthEndStr);
 
-      const monthRevenue = [
-        ...(revLegacy || []),
-        ...(revNew    || []),
-      ].reduce((s: number, a: any) => s + (a.service_cost || 0), 0);
-
+      const monthRevenue  = [...(revLegacy || []), ...(revNew || [])].reduce((s: number, a: any) => s + (a.service_cost || 0), 0);
       const pendingRevenue = (penD || []).reduce((s: number, a: any) => s + (a.service_cost || 0), 0);
 
-      const { count: clientsThisMonth }  = await supabase.from('clients').select('*', { count: 'exact', head: true }).eq('user_id', userId).gte('created_at', monthStartStr);
-      const { count: clientsLastMonth }  = await supabase.from('clients').select('*', { count: 'exact', head: true }).eq('user_id', userId).gte('created_at', lastMonthStartStr).lte('created_at', lastMonthEndStr);
+      const { count: clientsThisMonth } = await supabase.from('clients').select('*', { count: 'exact', head: true }).eq('user_id', userId).gte('created_at', monthStartStr).lte('created_at', monthEndStr + 'T23:59:59');
+      const { count: clientsLastMonth } = await supabase.from('clients').select('*', { count: 'exact', head: true }).eq('user_id', userId).gte('created_at', lastMonthStartStr).lte('created_at', lastMonthEndStr + 'T23:59:59');
 
-      const { data: clientsMonthData } = await supabase.from('clients').select('created_at').eq('user_id', userId).gte('created_at', monthStartStr).order('created_at');
+      const { data: clientsMonthData } = await supabase.from('clients').select('created_at').eq('user_id', userId).gte('created_at', monthStartStr).lte('created_at', monthEndStr + 'T23:59:59').order('created_at');
       const clientsPerWeek = [0, 0, 0, 0];
       (clientsMonthData || []).forEach((c: any) => {
         const d = new Date(c.created_at);
-        const dayOfMonth = d.getDate();
-        const weekIdx = Math.min(Math.floor((dayOfMonth - 1) / 7), 3);
+        const weekIdx = Math.min(Math.floor((d.getDate() - 1) / 7), 3);
         clientsPerWeek[weekIdx]++;
       });
 
@@ -188,7 +223,7 @@ export default function ReportsScreen() {
         clientsPerWeek,
       };
       setStats(fs);
-      setCached('reports_stats', fs, CACHE_TTL.REPORTS);
+      setCached(cacheKey, fs, CACHE_TTL.REPORTS);
 
       if (isPremium) await loadStaffStats(userId, staffRange);
     } catch (e) {
@@ -204,7 +239,10 @@ export default function ReportsScreen() {
     setAptsLoading(true);
     try {
       const userId = await getCurrentUserId();
-      const today = getTodayString();
+      const today  = getTodayString();
+      const mStart = new Date(selectedYear, selectedMonth, 1).toISOString().split('T')[0];
+      const mEnd   = new Date(selectedYear, selectedMonth + 1, 0).toISOString().split('T')[0];
+
       let query = supabase
         .from('appointments')
         .select('id, service_name, date, start_time, status, client:clients(name), client_name_temp')
@@ -220,8 +258,7 @@ export default function ReportsScreen() {
         weekStart.setDate(weekStart.getDate() - (dow === 0 ? 6 : dow - 1));
         query = query.gte('date', weekStart.toISOString().split('T')[0]);
       } else {
-        const monthStart = new Date(); monthStart.setDate(1);
-        query = query.gte('date', monthStart.toISOString().split('T')[0]);
+        query = query.gte('date', mStart).lte('date', mEnd);
       }
 
       const { data } = await query.limit(50);
@@ -243,13 +280,14 @@ export default function ReportsScreen() {
   const loadStaffStats = async (userId: string, range: 'semana' | 'mes' | 'todo') => {
     try {
       let fromDate: string | null = null;
+      let toDate:   string | null = null;
       if (range === 'semana') {
         const d = new Date(); const dow = d.getDay();
         d.setDate(d.getDate() - (dow === 0 ? 6 : dow - 1));
         fromDate = d.toISOString().split('T')[0];
       } else if (range === 'mes') {
-        const d = new Date(); d.setDate(1);
-        fromDate = d.toISOString().split('T')[0];
+        fromDate = new Date(selectedYear, selectedMonth, 1).toISOString().split('T')[0];
+        toDate   = new Date(selectedYear, selectedMonth + 1, 0).toISOString().split('T')[0];
       }
       const { data: staffList } = await supabase
         .from('staff_members').select('id, name, color, role')
@@ -257,6 +295,7 @@ export default function ReportsScreen() {
       if (!staffList || staffList.length === 0) { setStaffStats([]); return; }
       let query = supabase.from('appointments').select('staff_id, status').eq('user_id', userId).not('staff_id', 'is', null);
       if (fromDate) query = query.gte('date', fromDate);
+      if (toDate)   query = query.lte('date', toDate);
       const { data: apts } = await query;
       const result: StaffStat[] = staffList.map(m => {
         const mine       = (apts || []).filter((a: any) => a.staff_id === m.id);
@@ -264,7 +303,7 @@ export default function ReportsScreen() {
         const completed  = mine.filter((a: any) => ['Completada', 'Pagado'].includes(a.status)).length;
         const confirmed  = mine.filter((a: any) => a.status === 'Confirmada').length;
         const cancelled  = mine.filter((a: any) => a.status === 'Cancelada').length;
-        const noshow     = mine.filter((a: any) => a.status === 'No asistió').length;
+        const noshow     = mine.filter((a: any) => a.status === 'No asisti\u00f3').length;
         const completionRate = total > 0 ? Math.round((completed / total) * 100) : 0;
         return { id: m.id, name: m.name, color: m.color, role: m.role, total, confirmed, completed, cancelled, noshow, completionRate };
       });
@@ -282,7 +321,7 @@ export default function ReportsScreen() {
   const formatDate = (d: string) =>
     new Date(d + 'T12:00:00').toLocaleDateString('es-MX', { weekday: 'short', day: 'numeric', month: 'short' });
 
-  const tabLabel = activeTab === 'hoy' ? 'hoy' : activeTab === 'semana' ? 'esta semana' : 'este mes';
+  const tabLabel = activeTab === 'hoy' ? 'hoy' : activeTab === 'semana' ? 'esta semana' : `${MONTHS_ES[selectedMonth].toLowerCase()} ${selectedYear}`;
 
   if (planLoading || loading) {
     return (
@@ -299,9 +338,9 @@ export default function ReportsScreen() {
           <View style={[s.paywallIconWrap, { backgroundColor: isDark ? '#1E293B' : '#F1F5F9' }]}>
             <Text style={{ fontSize: 36 }}>📊</Text>
           </View>
-          <Text style={[s.paywallTitle, { color: tc.text }]}>Reportes en Plan Básico</Text>
+          <Text style={[s.paywallTitle, { color: tc.text }]}>Reportes en Plan B\u00e1sico</Text>
           <Text style={[s.paywallDesc, { color: tc.textMuted }]}>
-            Accede a reportes de ingresos, citas completadas y clientes con el Plan Básico o Premium.
+            Accede a reportes de ingresos, citas completadas y clientes con el Plan B\u00e1sico o Premium.
           </Text>
           <TouchableOpacity style={s.paywallBtn} onPress={() => router.push('/settings/subscription')}>
             <Text style={s.paywallBtnText}>Ver planes</Text>
@@ -315,7 +354,7 @@ export default function ReportsScreen() {
   const tabConf = activeTab === 'hoy' ? stats?.confirmedToday  : activeTab === 'semana' ? stats?.confirmedWeek  : stats?.confirmedMonth;
   const tabPend = activeTab === 'hoy' ? stats?.pendingToday    : activeTab === 'semana' ? stats?.pendingWeek    : stats?.pendingMonth;
   const tabCanc = activeTab === 'hoy' ? stats?.cancelledToday  : activeTab === 'semana' ? stats?.cancelledWeek  : stats?.cancelledMonth;
-  const maxStaffTotal = staffStats.length > 0 ? Math.max(...staffStats.map(s => s.total), 1) : 1;
+  const maxStaffTotal = staffStats.length > 0 ? Math.max(...staffStats.map(st => st.total), 1) : 1;
 
   const cpw = stats?.clientsPerWeek || [0, 0, 0, 0];
   const maxCpw = Math.max(...cpw, 1);
@@ -333,10 +372,33 @@ export default function ReportsScreen() {
             tintColor="#10B981" colors={['#10B981']} />
         }
       >
-        {/* Header */}
+        {/* Header con navegador de meses */}
         <View style={[s.header, { backgroundColor: tc.surface, borderBottomColor: tc.border }]}>
           <Text style={[s.headerTitle, { color: tc.text }]}>Reportes</Text>
-          <Text style={[s.headerSubtitle, { color: tc.textMuted }]}>Resumen de tu negocio</Text>
+          {/* Navegador mes */}
+          <View style={s.monthNav}>
+            <TouchableOpacity onPress={goToPrevMonth} style={[s.monthNavBtn, { backgroundColor: tc.inputBg }]} activeOpacity={0.7}>
+              <MaterialIcons name="chevron-left" size={20} color={tc.text} />
+            </TouchableOpacity>
+            <View style={s.monthNavLabel}>
+              <Text style={[s.monthNavText, { color: tc.text }]}>
+                {MONTHS_ES[selectedMonth]} {selectedYear}
+              </Text>
+              {!isCurrentMonth && (
+                <TouchableOpacity onPress={() => { setSelectedYear(now.getFullYear()); setSelectedMonth(now.getMonth()); }} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+                  <Text style={s.monthNavToday}>Hoy</Text>
+                </TouchableOpacity>
+              )}
+            </View>
+            <TouchableOpacity
+              onPress={goToNextMonth}
+              style={[s.monthNavBtn, { backgroundColor: tc.inputBg, opacity: isCurrentMonth ? 0.3 : 1 }]}
+              disabled={isCurrentMonth}
+              activeOpacity={0.7}
+            >
+              <MaterialIcons name="chevron-right" size={20} color={tc.text} />
+            </TouchableOpacity>
+          </View>
         </View>
 
         {/* Tab General / Mi equipo */}
@@ -363,7 +425,7 @@ export default function ReportsScreen() {
               {(['semana', 'mes', 'todo'] as const).map(r => (
                 <TouchableOpacity key={r} style={[s.rangeBtn, { backgroundColor: tc.inputBg }, staffRange === r && { backgroundColor: '#6366F1' }]} onPress={() => handleStaffRangeChange(r)}>
                   <Text style={[s.rangeBtnText, { color: staffRange === r ? '#fff' : tc.textMuted }]}>
-                    {r === 'semana' ? 'Esta semana' : r === 'mes' ? 'Este mes' : 'Todo'}
+                    {r === 'semana' ? 'Esta semana' : r === 'mes' ? `${MONTHS_ES[selectedMonth]}` : 'Todo'}
                   </Text>
                 </TouchableOpacity>
               ))}
@@ -372,7 +434,7 @@ export default function ReportsScreen() {
               <View style={s.staffEmptyWrap}>
                 <MaterialIcons name="group-off" size={40} color={tc.border} />
                 <Text style={[s.staffEmptyTitle, { color: tc.text }]}>Sin datos de equipo</Text>
-                <Text style={[s.staffEmptyDesc, { color: tc.textMuted }]}>Asigna colaboradores a tus citas para ver estadísticas aquí.</Text>
+                <Text style={[s.staffEmptyDesc, { color: tc.textMuted }]}>Asigna colaboradores a tus citas para ver estad\u00edsticas aqu\u00ed.</Text>
               </View>
             ) : (
               <View style={{ padding: 16 }}>
@@ -416,7 +478,7 @@ export default function ReportsScreen() {
                       </View>
                       <View style={[s.metricChip, { backgroundColor: st.color + '15' }]}>
                         <Text style={[s.metricNum, { color: st.color }]}>{st.completionRate}%</Text>
-                        <Text style={[s.metricLabel, { color: st.color }]}>completación</Text>
+                        <Text style={[s.metricLabel, { color: st.color }]}>completaci\u00f3n</Text>
                       </View>
                     </View>
                   </View>
@@ -460,7 +522,7 @@ export default function ReportsScreen() {
                   onPress={() => setActiveTab(tab)}
                 >
                   <Text style={[s.tabText, { color: tc.textMuted }, activeTab === tab && { color: isDark ? '#0F172A' : '#fff' }]}>
-                    {tab === 'hoy' ? 'Hoy' : tab === 'semana' ? 'Semana' : 'Mes'}
+                    {tab === 'hoy' ? 'Hoy' : tab === 'semana' ? 'Semana' : MONTHS_ES[selectedMonth]}
                   </Text>
                 </TouchableOpacity>
               ))}
@@ -490,7 +552,7 @@ export default function ReportsScreen() {
                 <Text style={[s.statLabel, { color: tc.textMuted }]}>Clientes</Text>
                 <View style={s.tapHint}>
                   <MaterialIcons name="bar-chart" size={11} color="#10B981" />
-                  <Text style={[s.tapHintText, { color: '#10B981' }]}>Ver gráfica</Text>
+                  <Text style={[s.tapHintText, { color: '#10B981' }]}>Ver gr\u00e1fica</Text>
                 </View>
               </TouchableOpacity>
 
@@ -501,7 +563,7 @@ export default function ReportsScreen() {
               >
                 <Text style={s.statEmoji}>📅</Text>
                 <Text style={[s.statValue, { color: tc.text }]}>{tabApts}</Text>
-                <Text style={[s.statLabel, { color: tc.textMuted }]}>Citas {activeTab === 'hoy' ? 'hoy' : activeTab === 'semana' ? 'semana' : 'mes'}</Text>
+                <Text style={[s.statLabel, { color: tc.textMuted }]}>Citas {activeTab === 'hoy' ? 'hoy' : activeTab === 'semana' ? 'semana' : MONTHS_ES[selectedMonth]}</Text>
                 <View style={s.tapHint}>
                   <MaterialIcons name="list" size={11} color="#6366F1" />
                   <Text style={[s.tapHintText, { color: '#6366F1' }]}>Ver historial</Text>
@@ -514,17 +576,17 @@ export default function ReportsScreen() {
                 <Text style={s.statEmoji}>✅</Text>
                 <Text style={[s.statValue, { color: tc.text }]}>{stats?.completedAppointments}</Text>
                 <Text style={[s.statLabel, { color: tc.textMuted }]}>Completadas</Text>
-                <Text style={[s.statSub, { color: tc.textMuted }]}>total histórico</Text>
+                <Text style={[s.statSub, { color: tc.textMuted }]}>total hist\u00f3rico</Text>
               </View>
               <View style={[s.statCard, { backgroundColor: tc.surface, borderColor: tc.border, borderLeftColor: '#94A3B8' }]}>
                 <Text style={s.statEmoji}>✂️</Text>
                 <Text style={[s.statValue, { color: tc.text }]}>{stats?.completedAppointments}</Text>
                 <Text style={[s.statLabel, { color: tc.textMuted }]}>Servicios dados</Text>
-                <Text style={[s.statSub, { color: tc.textMuted }]}>total histórico</Text>
+                <Text style={[s.statSub, { color: tc.textMuted }]}>total hist\u00f3rico</Text>
               </View>
             </View>
 
-            <Text style={[s.sectionLabel, { color: tc.textMuted }]}>FINANZAS DEL MES</Text>
+            <Text style={[s.sectionLabel, { color: tc.textMuted }]}>FINANZAS — {MONTHS_ES[selectedMonth].toUpperCase()} {selectedYear}</Text>
             <View style={s.statsRow}>
               <View style={[s.statCard, { backgroundColor: isDark ? '#052E16' : '#ECFDF5', borderLeftColor: '#10B981', borderColor: '#10B981' }]}>
                 <Text style={s.statEmoji}>💰</Text>
@@ -587,7 +649,7 @@ export default function ReportsScreen() {
                       <View style={{ flex: 1, paddingLeft: 12 }}>
                         <Text style={[s.aptClient, { color: tc.text }]}>{apt.client_name}</Text>
                         <Text style={[s.aptService, { color: tc.textMuted }]}>{apt.service_name}</Text>
-                        <Text style={[s.aptDate, { color: tc.textMuted }]}>{formatDate(apt.date)} · {apt.start_time}</Text>
+                        <Text style={[s.aptDate, { color: tc.textMuted }]}>{formatDate(apt.date)} \u00b7 {apt.start_time}</Text>
                       </View>
                       <View style={[s.aptStatusBadge, { backgroundColor: cfg.color + '22' }]}>
                         <Text style={[s.aptStatusText, { color: cfg.color }]}>{cfg.label}</Text>
@@ -603,7 +665,7 @@ export default function ReportsScreen() {
         </View>
       </Modal>
 
-      {/* MODAL: Gráfica de clientes */}
+      {/* MODAL: Gr\u00e1fica de clientes */}
       <Modal visible={clientsModal} animationType="slide" transparent onRequestClose={() => setClientsModal(false)}>
         <View style={s.modalOverlay}>
           <TouchableOpacity style={s.modalBackdrop} activeOpacity={1} onPress={() => setClientsModal(false)} />
@@ -621,7 +683,7 @@ export default function ReportsScreen() {
             <View style={s.clientKpiRow}>
               <View style={[s.clientKpi, { backgroundColor: isDark ? '#0F2D1A' : '#ECFDF5' }]}>
                 <Text style={[s.clientKpiNum, { color: '#10B981' }]}>{stats?.clientsThisMonth || 0}</Text>
-                <Text style={[s.clientKpiLabel, { color: isDark ? '#6EE7B7' : '#065F46' }]}>Nuevos este mes</Text>
+                <Text style={[s.clientKpiLabel, { color: isDark ? '#6EE7B7' : '#065F46' }]}>{MONTHS_ES[selectedMonth]}</Text>
               </View>
               <View style={[s.clientKpi, { backgroundColor: isDark ? '#1E293B' : '#F1F5F9' }]}>
                 <Text style={[s.clientKpiNum, { color: tc.text }]}>{stats?.clientsLastMonth || 0}</Text>
@@ -629,12 +691,12 @@ export default function ReportsScreen() {
               </View>
               <View style={[s.clientKpi, { backgroundColor: (clientGrowth ?? 0) >= 0 ? (isDark ? '#0F2D1A' : '#ECFDF5') : (isDark ? '#2D0F0F' : '#FEF2F2') }]}>
                 <Text style={[s.clientKpiNum, { color: (clientGrowth ?? 0) >= 0 ? '#10B981' : '#EF4444' }]}>
-                  {clientGrowth !== null ? `${clientGrowth >= 0 ? '+' : ''}${clientGrowth}%` : '—'}
+                  {clientGrowth !== null ? `${clientGrowth >= 0 ? '+' : ''}${clientGrowth}%` : '\u2014'}
                 </Text>
-                <Text style={[s.clientKpiLabel, { color: tc.textMuted }]}>Variación</Text>
+                <Text style={[s.clientKpiLabel, { color: tc.textMuted }]}>Variaci\u00f3n</Text>
               </View>
             </View>
-            <Text style={[s.chartTitle, { color: tc.textMuted }]}>CLIENTES NUEVOS POR SEMANA (MES ACTUAL)</Text>
+            <Text style={[s.chartTitle, { color: tc.textMuted }]}>CLIENTES NUEVOS POR SEMANA ({MONTHS_ES[selectedMonth].toUpperCase()} {selectedYear})</Text>
             <View style={s.chartWrap}>
               {cpw.map((val, i) => {
                 const pct = maxCpw > 0 ? (val / maxCpw) : 0;
@@ -666,98 +728,103 @@ export default function ReportsScreen() {
 }
 
 const s = StyleSheet.create({
-  container:       { flex: 1 },
-  loadingWrap:     { flex: 1, justifyContent: 'center', alignItems: 'center' },
-  scroll:          { paddingBottom: 100 },
-  paywall:         { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 36, gap: 16 },
-  paywallIconWrap: { width: 80, height: 80, borderRadius: 24, justifyContent: 'center', alignItems: 'center' },
-  paywallTitle:    { fontSize: 20, fontWeight: '700', textAlign: 'center' },
-  paywallDesc:     { fontSize: 14, textAlign: 'center', lineHeight: 22 },
-  paywallBtn:      { backgroundColor: '#10B981', paddingHorizontal: 28, paddingVertical: 14, borderRadius: 12 },
-  paywallBtnText:  { color: '#fff', fontWeight: '700', fontSize: 15 },
-  header:          { paddingHorizontal: 20, paddingTop: 20, paddingBottom: 16, borderBottomWidth: 1 },
-  headerTitle:     { fontSize: 28, fontWeight: '800', letterSpacing: -0.5 },
-  headerSubtitle:  { fontSize: 14, marginTop: 2 },
-  reportTabRow:    { flexDirection: 'row', padding: 12, gap: 8, borderBottomWidth: 0.5 },
-  reportTab:       { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, paddingVertical: 9, borderRadius: 12, backgroundColor: '#F1F5F9', borderWidth: 1, borderColor: 'transparent' },
-  reportTabActive: { backgroundColor: '#0F172A', borderColor: '#0F172A' },
-  reportTabText:   { fontSize: 14, fontWeight: '600' },
-  rangePicker:     { flexDirection: 'row', padding: 12, gap: 8, borderBottomWidth: 0.5 },
-  rangeBtn:        { flex: 1, paddingVertical: 8, borderRadius: 10, alignItems: 'center' },
-  rangeBtnText:    { fontSize: 12, fontWeight: '600' },
-  tabs:            { flexDirection: 'row', paddingHorizontal: 20, paddingBottom: 16, paddingTop: 12, gap: 8, borderBottomWidth: 1 },
-  tab:             { flex: 1, paddingVertical: 8, borderRadius: 10, alignItems: 'center' },
-  tabText:         { fontSize: 14, fontWeight: '600' },
-  heroCard:        { margin: 20, marginBottom: 12, borderRadius: 20, padding: 24, flexDirection: 'row', alignItems: 'center' },
-  heroLeft:        { flex: 1 },
-  heroLabel:       { fontSize: 13, color: '#94A3B8', marginBottom: 4 },
-  heroValue:       { fontSize: 56, fontWeight: '800', color: '#10B981', lineHeight: 60 },
-  heroRight:       { gap: 10 },
-  heroMini:        { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  heroDot:         { width: 8, height: 8, borderRadius: 4 },
-  heroMiniText:    { fontSize: 13, color: '#CBD5E1' },
-  sectionLabel:    { fontSize: 11, fontWeight: '800', letterSpacing: 1.2, paddingHorizontal: 20, marginBottom: 10, marginTop: 16 },
-  statsRow:        { flexDirection: 'row', paddingHorizontal: 20, gap: 10, marginBottom: 12 },
-  statCard:        { flex: 1, borderRadius: 14, padding: 16, borderLeftWidth: 4, borderWidth: 1, alignItems: 'center' },
+  container:         { flex: 1 },
+  loadingWrap:       { flex: 1, justifyContent: 'center', alignItems: 'center' },
+  scroll:            { paddingBottom: 100 },
+  paywall:           { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 36, gap: 16 },
+  paywallIconWrap:   { width: 80, height: 80, borderRadius: 24, justifyContent: 'center', alignItems: 'center' },
+  paywallTitle:      { fontSize: 20, fontWeight: '700', textAlign: 'center' },
+  paywallDesc:       { fontSize: 14, textAlign: 'center', lineHeight: 22 },
+  paywallBtn:        { backgroundColor: '#10B981', paddingHorizontal: 28, paddingVertical: 14, borderRadius: 12 },
+  paywallBtnText:    { color: '#fff', fontWeight: '700', fontSize: 15 },
+  header:            { paddingHorizontal: 20, paddingTop: 20, paddingBottom: 16, borderBottomWidth: 1 },
+  headerTitle:       { fontSize: 28, fontWeight: '800', letterSpacing: -0.5, marginBottom: 14 },
+  // Navegador de mes
+  monthNav:          { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  monthNavBtn:       { width: 34, height: 34, borderRadius: 10, justifyContent: 'center', alignItems: 'center' },
+  monthNavLabel:     { flex: 1, alignItems: 'center', gap: 4 },
+  monthNavText:      { fontSize: 16, fontWeight: '700' },
+  monthNavToday:     { fontSize: 11, fontWeight: '700', color: '#10B981' },
+  reportTabRow:      { flexDirection: 'row', padding: 12, gap: 8, borderBottomWidth: 0.5 },
+  reportTab:         { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, paddingVertical: 9, borderRadius: 12, backgroundColor: '#F1F5F9', borderWidth: 1, borderColor: 'transparent' },
+  reportTabActive:   { backgroundColor: '#0F172A', borderColor: '#0F172A' },
+  reportTabText:     { fontSize: 14, fontWeight: '600' },
+  rangePicker:       { flexDirection: 'row', padding: 12, gap: 8, borderBottomWidth: 0.5 },
+  rangeBtn:          { flex: 1, paddingVertical: 8, borderRadius: 10, alignItems: 'center' },
+  rangeBtnText:      { fontSize: 12, fontWeight: '600' },
+  tabs:              { flexDirection: 'row', paddingHorizontal: 20, paddingBottom: 16, paddingTop: 12, gap: 8, borderBottomWidth: 1 },
+  tab:               { flex: 1, paddingVertical: 8, borderRadius: 10, alignItems: 'center' },
+  tabText:           { fontSize: 14, fontWeight: '600' },
+  heroCard:          { margin: 20, marginBottom: 12, borderRadius: 20, padding: 24, flexDirection: 'row', alignItems: 'center' },
+  heroLeft:          { flex: 1 },
+  heroLabel:         { fontSize: 13, color: '#94A3B8', marginBottom: 4 },
+  heroValue:         { fontSize: 56, fontWeight: '800', color: '#10B981', lineHeight: 60 },
+  heroRight:         { gap: 10 },
+  heroMini:          { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  heroDot:           { width: 8, height: 8, borderRadius: 4 },
+  heroMiniText:      { fontSize: 13, color: '#CBD5E1' },
+  sectionLabel:      { fontSize: 11, fontWeight: '800', letterSpacing: 1.2, paddingHorizontal: 20, marginBottom: 10, marginTop: 16 },
+  statsRow:          { flexDirection: 'row', paddingHorizontal: 20, gap: 10, marginBottom: 12 },
+  statCard:          { flex: 1, borderRadius: 14, padding: 16, borderLeftWidth: 4, borderWidth: 1, alignItems: 'center' },
   statCardTouchable: { shadowOpacity: 0.06, shadowRadius: 6, elevation: 2 },
-  statEmoji:       { fontSize: 20, marginBottom: 6 },
-  statValue:       { fontSize: 28, fontWeight: '800', marginTop: 4 },
-  statLabel:       { fontSize: 12, marginTop: 4, fontWeight: '500' },
-  statSub:         { fontSize: 10, marginTop: 3 },
-  tapHint:         { flexDirection: 'row', alignItems: 'center', gap: 3, marginTop: 6 },
-  tapHintText:     { fontSize: 10, fontWeight: '600' },
-  modalOverlay:    { flex: 1, justifyContent: 'flex-end' },
-  modalBackdrop:   { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(0,0,0,0.5)' },
-  modalBox:        { borderTopLeftRadius: 24, borderTopRightRadius: 24, padding: 24, paddingBottom: 8 },
-  modalHandle:     { width: 36, height: 4, borderRadius: 2, backgroundColor: '#D1D5DB', alignSelf: 'center', marginBottom: 16 },
-  modalHeader:     { flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: 16 },
-  modalTitle:      { fontSize: 18, fontWeight: '800' },
-  modalSub:        { fontSize: 13, marginTop: 2 },
-  aptRow:          { flexDirection: 'row', alignItems: 'center', paddingVertical: 12, borderBottomWidth: 0.5 },
-  aptAccent:       { width: 3, height: '100%', borderRadius: 2, minHeight: 48 },
-  aptClient:       { fontSize: 14, fontWeight: '700' },
-  aptService:      { fontSize: 12, marginTop: 2 },
-  aptDate:         { fontSize: 11, marginTop: 3 },
-  aptStatusBadge:  { paddingHorizontal: 8, paddingVertical: 4, borderRadius: 8 },
-  aptStatusText:   { fontSize: 11, fontWeight: '600' },
-  clientKpiRow:    { flexDirection: 'row', gap: 8, marginBottom: 20 },
-  clientKpi:       { flex: 1, borderRadius: 12, padding: 12, alignItems: 'center' },
-  clientKpiNum:    { fontSize: 22, fontWeight: '800' },
-  clientKpiLabel:  { fontSize: 10, fontWeight: '600', marginTop: 4, textAlign: 'center' },
-  chartTitle:      { fontSize: 10, fontWeight: '800', letterSpacing: 1, marginBottom: 12 },
-  chartWrap:       { flexDirection: 'row', alignItems: 'flex-end', gap: 8, height: 160, paddingBottom: 4, marginBottom: 20 },
-  barCol:          { flex: 1, alignItems: 'center', justifyContent: 'flex-end', gap: 4 },
-  barVal:          { fontSize: 13, fontWeight: '800' },
-  barBg:           { width: '100%', height: 120, borderRadius: 8, justifyContent: 'flex-end', overflow: 'hidden' },
-  barFill:         { width: '100%', borderRadius: 8, minHeight: 4 },
-  barLabel:        { fontSize: 11, fontWeight: '600', marginTop: 2 },
-  goClientsBtn:    { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, backgroundColor: '#10B981', borderRadius: 14, padding: 14, marginTop: 4 },
-  goClientsBtnText:{ color: '#fff', fontWeight: '700', fontSize: 14 },
+  statEmoji:         { fontSize: 20, marginBottom: 6 },
+  statValue:         { fontSize: 28, fontWeight: '800', marginTop: 4 },
+  statLabel:         { fontSize: 12, marginTop: 4, fontWeight: '500' },
+  statSub:           { fontSize: 10, marginTop: 3 },
+  tapHint:           { flexDirection: 'row', alignItems: 'center', gap: 3, marginTop: 6 },
+  tapHintText:       { fontSize: 10, fontWeight: '600' },
+  modalOverlay:      { flex: 1, justifyContent: 'flex-end' },
+  modalBackdrop:     { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(0,0,0,0.5)' },
+  modalBox:          { borderTopLeftRadius: 24, borderTopRightRadius: 24, padding: 24, paddingBottom: 8 },
+  modalHandle:       { width: 36, height: 4, borderRadius: 2, backgroundColor: '#D1D5DB', alignSelf: 'center', marginBottom: 16 },
+  modalHeader:       { flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: 16 },
+  modalTitle:        { fontSize: 18, fontWeight: '800' },
+  modalSub:          { fontSize: 13, marginTop: 2 },
+  aptRow:            { flexDirection: 'row', alignItems: 'center', paddingVertical: 12, borderBottomWidth: 0.5 },
+  aptAccent:         { width: 3, height: '100%', borderRadius: 2, minHeight: 48 },
+  aptClient:         { fontSize: 14, fontWeight: '700' },
+  aptService:        { fontSize: 12, marginTop: 2 },
+  aptDate:           { fontSize: 11, marginTop: 3 },
+  aptStatusBadge:    { paddingHorizontal: 8, paddingVertical: 4, borderRadius: 8 },
+  aptStatusText:     { fontSize: 11, fontWeight: '600' },
+  clientKpiRow:      { flexDirection: 'row', gap: 8, marginBottom: 20 },
+  clientKpi:         { flex: 1, borderRadius: 12, padding: 12, alignItems: 'center' },
+  clientKpiNum:      { fontSize: 22, fontWeight: '800' },
+  clientKpiLabel:    { fontSize: 10, fontWeight: '600', marginTop: 4, textAlign: 'center' },
+  chartTitle:        { fontSize: 10, fontWeight: '800', letterSpacing: 1, marginBottom: 12 },
+  chartWrap:         { flexDirection: 'row', alignItems: 'flex-end', gap: 8, height: 160, paddingBottom: 4, marginBottom: 20 },
+  barCol:            { flex: 1, alignItems: 'center', justifyContent: 'flex-end', gap: 4 },
+  barVal:            { fontSize: 13, fontWeight: '800' },
+  barBg:             { width: '100%', height: 120, borderRadius: 8, justifyContent: 'flex-end', overflow: 'hidden' },
+  barFill:           { width: '100%', borderRadius: 8, minHeight: 4 },
+  barLabel:          { fontSize: 11, fontWeight: '600', marginTop: 2 },
+  goClientsBtn:      { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, backgroundColor: '#10B981', borderRadius: 14, padding: 14, marginTop: 4 },
+  goClientsBtnText:  { color: '#fff', fontWeight: '700', fontSize: 14 },
   staffSectionLabel: { fontSize: 11, fontWeight: '800', letterSpacing: 1.2, marginBottom: 12, marginTop: 4 },
-  staffEmptyWrap:  { alignItems: 'center', justifyContent: 'center', padding: 48, gap: 12 },
-  staffEmptyTitle: { fontSize: 18, fontWeight: '700' },
-  staffEmptyDesc:  { fontSize: 14, textAlign: 'center', lineHeight: 22 },
-  staffCard:       { borderRadius: 18, padding: 16, marginBottom: 12, shadowOpacity: 0.04, shadowRadius: 6, elevation: 1 },
-  staffCardHeader: { flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 12 },
-  rankBadge:       { width: 28, height: 28, borderRadius: 8, justifyContent: 'center', alignItems: 'center' },
-  rankNum:         { fontSize: 11, fontWeight: '900' },
-  staffAvatar:     { width: 42, height: 42, borderRadius: 12, justifyContent: 'center', alignItems: 'center', borderWidth: 2 },
-  staffAvatarText: { fontSize: 14, fontWeight: '800' },
-  staffName:       { fontSize: 15, fontWeight: '700' },
-  staffRole:       { fontSize: 12, marginTop: 1 },
-  staffTotalNum:   { fontSize: 28, fontWeight: '900', lineHeight: 30 },
-  staffTotalLabel: { fontSize: 11 },
-  staffBarBg:      { height: 6, borderRadius: 3, overflow: 'hidden', marginBottom: 12 },
-  staffBarFill:    { height: '100%', borderRadius: 3 },
-  staffMetrics:    { flexDirection: 'row', flexWrap: 'wrap', gap: 6 },
-  metricChip:      { flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 8, paddingVertical: 5, borderRadius: 8 },
-  metricDot:       { width: 6, height: 6, borderRadius: 3 },
-  metricNum:       { fontSize: 13, fontWeight: '800' },
-  metricLabel:     { fontSize: 11, fontWeight: '500' },
-  teamTotalsCard:  { borderRadius: 18, padding: 20, marginTop: 4, marginBottom: 16 },
-  teamTotalsTitle: { fontSize: 13, color: '#94A3B8', marginBottom: 14 },
-  teamTotalsRow:   { flexDirection: 'row', justifyContent: 'space-between' },
-  teamTotalItem:   { alignItems: 'center' },
-  teamTotalNum:    { fontSize: 24, fontWeight: '800', color: '#F8FAFC' },
-  teamTotalLabel:  { fontSize: 11, color: '#64748B', marginTop: 4 },
+  staffEmptyWrap:    { alignItems: 'center', justifyContent: 'center', padding: 48, gap: 12 },
+  staffEmptyTitle:   { fontSize: 18, fontWeight: '700' },
+  staffEmptyDesc:    { fontSize: 14, textAlign: 'center', lineHeight: 22 },
+  staffCard:         { borderRadius: 18, padding: 16, marginBottom: 12, shadowOpacity: 0.04, shadowRadius: 6, elevation: 1 },
+  staffCardHeader:   { flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 12 },
+  rankBadge:         { width: 28, height: 28, borderRadius: 8, justifyContent: 'center', alignItems: 'center' },
+  rankNum:           { fontSize: 11, fontWeight: '900' },
+  staffAvatar:       { width: 42, height: 42, borderRadius: 12, justifyContent: 'center', alignItems: 'center', borderWidth: 2 },
+  staffAvatarText:   { fontSize: 14, fontWeight: '800' },
+  staffName:         { fontSize: 15, fontWeight: '700' },
+  staffRole:         { fontSize: 12, marginTop: 1 },
+  staffTotalNum:     { fontSize: 28, fontWeight: '900', lineHeight: 30 },
+  staffTotalLabel:   { fontSize: 11 },
+  staffBarBg:        { height: 6, borderRadius: 3, overflow: 'hidden', marginBottom: 12 },
+  staffBarFill:      { height: '100%', borderRadius: 3 },
+  staffMetrics:      { flexDirection: 'row', flexWrap: 'wrap', gap: 6 },
+  metricChip:        { flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 8, paddingVertical: 5, borderRadius: 8 },
+  metricDot:         { width: 6, height: 6, borderRadius: 3 },
+  metricNum:         { fontSize: 13, fontWeight: '800' },
+  metricLabel:       { fontSize: 11, fontWeight: '500' },
+  teamTotalsCard:    { borderRadius: 18, padding: 20, marginTop: 4, marginBottom: 16 },
+  teamTotalsTitle:   { fontSize: 13, color: '#94A3B8', marginBottom: 14 },
+  teamTotalsRow:     { flexDirection: 'row', justifyContent: 'space-between' },
+  teamTotalItem:     { alignItems: 'center' },
+  teamTotalNum:      { fontSize: 24, fontWeight: '800', color: '#F8FAFC' },
+  teamTotalLabel:    { fontSize: 11, color: '#64748B', marginTop: 4 },
 });

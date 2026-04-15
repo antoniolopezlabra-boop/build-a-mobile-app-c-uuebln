@@ -45,10 +45,6 @@ function normalizePlanType(raw: string): string {
   return 'Gratuito';
 }
 
-const ADMIN_USER_IDS = [
-  '406d3777-edab-410c-8807-5d21228bb27b',
-];
-
 const PlanContext = createContext<PlanContextType>({} as PlanContextType);
 
 export function PlanProvider({ children }: { children: React.ReactNode }) {
@@ -58,12 +54,6 @@ export function PlanProvider({ children }: { children: React.ReactNode }) {
   const lastLoadedUserId = useRef<string | null>(null);
 
   const loadPlan = async (userId: string) => {
-    if (ADMIN_USER_IDS.includes(userId)) {
-      logger.log('[PlanContext] Admin user — skipping plan check');
-      setPlan({ planType: 'Premium', status: 'active', trialEndsAt: null, price: '0' });
-      setLoading(false);
-      return;
-    }
     logger.log('[PlanContext] Loading plan for user:', userId);
     setLoading(true);
     try {

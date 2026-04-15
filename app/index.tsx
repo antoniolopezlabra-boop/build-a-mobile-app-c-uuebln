@@ -2,13 +2,12 @@ import { useEffect, useRef } from 'react';
 import { useRouter } from 'expo-router';
 import { View, ActivityIndicator, StyleSheet, Text } from 'react-native';
 import { useAuth } from '@/contexts/AuthContext';
-import AsyncStorage from '@react-native-async-storage/async-storage';
 import { supabase } from '@/lib/supabase';
 import { colors } from '@/styles/commonStyles';
 
 export default function Index() {
   const router = useRouter();
-  const { user, loading } = useAuth();
+  const { user, loading, isStaffAccount } = useAuth();
   const hasNavigated = useRef(false);
 
   useEffect(() => {
@@ -20,14 +19,15 @@ export default function Index() {
 
     const navigate = async () => {
       if (user) {
-        // Esperar a que la sesión de Supabase esté activa
-        let authUser = null;
-        for (let i = 0; i < 10; i++) {
-          const { data } = await supabase.auth.getUser();
-          if (data?.user) { authUser = data.user; break; }
-          await new Promise(resolve => setTimeout(resolve, 300));
-        }
+        const { data: { session } } = await supabase.auth.getSession();
+        const authUser = session?.user;
         if (!authUser) { router.replace('/auth/onboarding'); return; }
+
+        // Colaborador → su propia app
+        if (isStaffAccount) {
+          router.replace('/staff-app');
+          return;
+        }
 
         console.log('[Index] Auth UUID:', authUser.id);
 
@@ -39,7 +39,6 @@ export default function Index() {
           .single();
 
         console.log('[Index] Admin check:', JSON.stringify(adminData));
-        console.log('[Index] Auth UUID:', authUser.id);
 
         if (adminData) {
           router.replace('/admin');

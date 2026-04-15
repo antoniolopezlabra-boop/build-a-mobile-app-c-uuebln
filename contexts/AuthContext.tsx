@@ -11,6 +11,12 @@ interface AppUser {
   name: string;
 }
 
+export interface StaffMemberData {
+  id: string;
+  name: string;
+  organizationUserId: string;
+}
+
 interface BusinessProfile {
   id: string;
   userId: string;
@@ -28,6 +34,8 @@ interface AuthContextType {
   businessProfile: BusinessProfile | null;
   loading: boolean;
   authLoading: boolean;
+  isStaffAccount: boolean;
+  staffMemberData: StaffMemberData | null;
   register: (params: { email: string; password: string; name: string; businessName: string; businessType: string }) => Promise<void>;
   login: (email: string, password: string) => Promise<void>;
   signOut: () => Promise<void>;
@@ -42,6 +50,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [businessProfile, setBusinessProfile] = useState<BusinessProfile | null>(null);
   const [loading, setLoading] = useState(true);
   const [authLoading, setAuthLoading] = useState(false);
+  const [isStaffAccount, setIsStaffAccount] = useState(false);
+  const [staffMemberData, setStaffMemberData] = useState<StaffMemberData | null>(null);
 
   useEffect(() => {
     const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
@@ -73,7 +83,27 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         { user_id: userId, last_seen_at: new Date().toISOString() },
         { onConflict: 'user_id' }
       );
-    } catch (e) {}
+    } catch (e) {
+      logger.warn('[Auth] trackSession failed:', e);
+    }
+  };
+
+  const checkStaffAccount = async (userId: string): Promise<StaffMemberData | null> => {
+    try {
+      const { data } = await supabase
+        .from('staff_accounts')
+        .select('staff_member_id, organization_user_id, staff_members(name)')
+        .eq('user_id', userId)
+        .single();
+      if (!data) return null;
+      return {
+        id: data.staff_member_id,
+        name: (data.staff_members as any)?.name ?? '',
+        organizationUserId: data.organization_user_id,
+      };
+    } catch {
+      return null;
+    }
   };
 
   const loadUserData = async (supabaseUser: User) => {
@@ -85,7 +115,20 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         name: supabaseUser.user_metadata?.name || supabaseUser.email || '',
       };
       setUser(appUser);
-      await loadBusinessProfile(supabaseUser.id);
+
+      // Detectar si es una cuenta de colaborador (en paralelo con el perfil)
+      const [staffData] = await Promise.all([
+        checkStaffAccount(supabaseUser.id),
+        loadBusinessProfile(supabaseUser.id),
+      ]);
+
+      if (staffData) {
+        setIsStaffAccount(true);
+        setStaffMemberData(staffData);
+      } else {
+        setIsStaffAccount(false);
+        setStaffMemberData(null);
+      }
     } catch (error) {
       logger.error('[Auth] Error loading user data:', error);
     } finally {
@@ -159,9 +202,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const signOut = async () => {
     try {
       setAuthLoading(true);
-      // FIX: limpiar TODO el cache antes de cerrar sesión
-      // Evita que el próximo usuario vea datos del usuario anterior
       invalidateCache();
+      setIsStaffAccount(false);
+      setStaffMemberData(null);
       await supabase.auth.signOut();
       router.replace('/auth/login');
     } catch (error) {
@@ -182,7 +225,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   return (
-    <AuthContext.Provider value={{ user, businessProfile, loading, authLoading, register, login, signOut, fetchUser, refreshBusinessProfile }}>
+    <AuthContext.Provider value={{
+      user, businessProfile, loading, authLoading,
+      isStaffAccount, staffMemberData,
+      register, login, signOut, fetchUser, refreshBusinessProfile,
+    }}>
       {children}
     </AuthContext.Provider>
   );

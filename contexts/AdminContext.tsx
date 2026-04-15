@@ -59,7 +59,8 @@ export function AdminProvider({ children }: { children: React.ReactNode }) {
           name: data.name,
         });
       }
-    } catch {
+    } catch (e) {
+      console.warn('[AdminContext] Error checking admin access:', e);
       setAdminUser(null);
     } finally {
       setLoading(false);

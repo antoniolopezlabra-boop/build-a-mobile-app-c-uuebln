@@ -28,7 +28,7 @@ function ThemeUserSync() {
 }
 
 function NavigationGuard() {
-  const { user, loading: authLoading } = useAuth();
+  const { user, loading: authLoading, isStaffAccount } = useAuth();
   const { isAdmin, loading: adminLoading } = useAdmin();
   const router = useRouter();
   const segments = useSegments();
@@ -71,6 +71,7 @@ function NavigationGuard() {
 
     const inAuthScreen  = segments[0] === 'auth';
     const inAdminScreen = segments[0] === 'admin';
+    const inStaffApp    = segments[0] === 'staff-app';
     const inOnboarding  = segments[1] === 'onboarding';
 
     const navigate = (path: string) => {
@@ -81,6 +82,12 @@ function NavigationGuard() {
 
     if (!user && !inAuthScreen) {
       navigate(hasSeenOnboarding ? '/auth/login' : '/auth/onboarding');
+      return;
+    }
+
+    // Colaboradores: redirigir a su app, nunca al onboarding ni al admin
+    if (user && isStaffAccount) {
+      if (!inStaffApp) navigate('/staff-app');
       return;
     }
 

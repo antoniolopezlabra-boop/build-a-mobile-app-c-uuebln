@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity,
   TextInput, Switch, ActivityIndicator, Alert,
+  KeyboardAvoidingView, Platform,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useAuth } from '@/contexts/AuthContext';
@@ -39,9 +40,10 @@ interface Props {
   staffId?: string;
   onSaved: () => void;
   onCancel: () => void;
+  renderExtraSection?: () => React.ReactNode;
 }
 
-export default function StaffFormScreen({ mode, staffId, onSaved, onCancel }: Props) {
+export default function StaffFormScreen({ mode, staffId, onSaved, onCancel, renderExtraSection }: Props) {
   const { user } = useAuth();
   const { colors: tc } = useTheme();
 
@@ -181,7 +183,8 @@ export default function StaffFormScreen({ mode, staffId, onSaved, onCancel }: Pr
         </TouchableOpacity>
       </View>
 
-      <ScrollView contentContainerStyle={s.scroll} showsVerticalScrollIndicator={false}>
+      <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
+      <ScrollView contentContainerStyle={s.scroll} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
 
         {/* Preview avatar */}
         <View style={s.previewRow}>
@@ -321,8 +324,12 @@ export default function StaffFormScreen({ mode, staffId, onSaved, onCancel }: Pr
           </TouchableOpacity>
         )}
 
+        {/* Sección extra inyectada por el padre (ej: acceso a la app) */}
+        {renderExtraSection?.()}
+
         <View style={{ height: 40 }} />
       </ScrollView>
+      </KeyboardAvoidingView>
 
       {timePicker && (
         <TimePickerModal
