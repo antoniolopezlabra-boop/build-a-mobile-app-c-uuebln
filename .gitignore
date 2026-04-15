@@ -35,3 +35,4 @@ ios/
 pnpm-lock.yaml
 package-lock.json
 
+.env
