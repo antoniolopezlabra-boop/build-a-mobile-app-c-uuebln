@@ -1,3 +1,4 @@
+import { getMonthStartString, getDateStringDaysFromNow } from '@/utils/dateUtils';
 import React, { useEffect, useState } from 'react';
 import { View, Text, ScrollView, StyleSheet, TouchableOpacity, ActivityIndicator, Dimensions } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -42,13 +43,15 @@ export default function StatsCitasScreen() {
 
   const loadStats = async () => {
     try {
-      const monthStart = new Date(); monthStart.setDate(1);
-      const monthStartStr = monthStart.toISOString().split('T')[0];
+      // Primer día del mes actual en timezone local
+      const monthStartStr = getMonthStartString();
+      // Hace 60 días en timezone local (cubre 6 meses gráfica + buffer)
+      const sixtyDaysAgoStr = getDateStringDaysFromNow(-60);
 
       const [{ count: total }, { count: month }, { data: apts }] = await Promise.all([
         supabase.from('appointments').select('*', { count: 'exact', head: true }),
         supabase.from('appointments').select('*', { count: 'exact', head: true }).gte('date', monthStartStr),
-        supabase.from('appointments').select('date').gte('date', new Date(Date.now() - 60 * 86400000).toISOString().split('T')[0]).order('date'),
+        supabase.from('appointments').select('date').gte('date', sixtyDaysAgoStr).order('date'),
       ]);
 
       setTotalAll(total || 0);
