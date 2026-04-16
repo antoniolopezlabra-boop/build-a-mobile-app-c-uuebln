@@ -1,3 +1,4 @@
+import { getDateStringDaysFromNow } from '@/utils/dateUtils';
 import React, { useState, useEffect } from 'react';
 import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity,
@@ -59,8 +60,9 @@ export default function NewCampaignScreen() {
         .neq('email', '');
       if (segment === 'activos') query = query.eq('is_active', true);
       else if (segment === 'inactivos') {
-        const d90 = new Date(); d90.setDate(d90.getDate() - 90);
-        query = query.lt('last_visit', d90.toISOString().split('T')[0]);
+        // Hace 90 días en timezone local
+        const d90Str = getDateStringDaysFromNow(-90);
+        query = query.lt('last_visit', d90Str);
       }
       const { count } = await query;
       setRecipientCount(count || 0);
