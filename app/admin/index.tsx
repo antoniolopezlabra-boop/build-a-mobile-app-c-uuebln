@@ -1,3 +1,4 @@
+import { getMonthStartString, getDateStringDaysFromNow } from '@/utils/dateUtils';
 import React, { useState, useCallback, useRef, useEffect } from 'react';
 import {
   View, Text, ScrollView, StyleSheet, TouchableOpacity,
@@ -134,8 +135,10 @@ export default function AdminDashboard() {
   const loadData = async (isPullRefresh = false) => {
     if (isPullRefresh) setRefreshing(true); else setLoading(true);
     try {
-      const monthStart = new Date(); monthStart.setDate(1);
-      const monthStartStr = monthStart.toISOString().split('T')[0];
+      // Primer día del mes actual en timezone local
+      const monthStartStr = getMonthStartString();
+      // Hace 14 días en timezone local
+      const fourteenDaysAgoStr = getDateStringDaysFromNow(-14);
       const thirtyDaysAgo = new Date(Date.now() - 30 * 86400000);
       const [
         { count: totalTenants },
@@ -150,7 +153,7 @@ export default function AdminDashboard() {
         supabase.from('appointments').select('*', { count: 'exact', head: true }),
         supabase.from('appointments').select('*', { count: 'exact', head: true }).gte('date', monthStartStr),
         supabase.from('user_sessions').select('user_id').gte('last_seen_at', thirtyDaysAgo.toISOString()),
-        supabase.from('appointments').select('date').gte('date', new Date(Date.now() - 14 * 86400000).toISOString().split('T')[0]).order('date'),
+        supabase.from('appointments').select('date').gte('date', fourteenDaysAgoStr).order('date'),
         supabase.from('business_profiles').select('created_at').gte('created_at', new Date(Date.now() - 56 * 86400000).toISOString()).order('created_at'),
         supabase.rpc('get_all_subscription_plans'),
       ]);
