@@ -1,4 +1,5 @@
 
+import { toLocalDateString } from '@/utils/dateUtils';
 import React, { useState, useRef } from 'react';
 import {
   View,
@@ -63,7 +64,9 @@ export default function NewClientScreen() {
         name:     fullName.trim(),
         phone:    phone.trim(),
         email:    email.trim() || undefined,
-        birthday: birthday ? birthday.toISOString().split('T')[0] : undefined,
+        // FIX timezone: el DatePicker devuelve Date local. toISOString() convertía a UTC
+        // y en UTC-6 (México) quedaba 1 día antes. Usar toLocalDateString preserva la fecha local.
+        birthday: birthday ? toLocalDateString(birthday) : undefined,
         notes:    notes.trim() || undefined,
       };
       await apiPost('/api/clients', body);
