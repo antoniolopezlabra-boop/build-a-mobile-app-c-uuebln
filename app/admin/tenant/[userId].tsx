@@ -1,3 +1,4 @@
+import { getTodayString } from '@/utils/dateUtils';
 import React, { useEffect, useState } from 'react';
 import { View, Text, ScrollView, StyleSheet, TouchableOpacity, ActivityIndicator, Linking } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -23,7 +24,7 @@ export default function TenantDetailScreen() {
         supabase.from('business_profiles').select('*').eq('user_id', userId).single(),
         supabase.from('clients').select('*', { count: 'exact', head: true }).eq('user_id', userId),
         supabase.from('appointments').select('*', { count: 'exact', head: true }).eq('user_id', userId),
-        supabase.from('appointments').select('*', { count: 'exact', head: true }).eq('user_id', userId).eq('date', new Date().toISOString().split('T')[0]),
+        supabase.from('appointments').select('*', { count: 'exact', head: true }).eq('user_id', userId).eq('date', getTodayString()),
       ]);
 
       setData({ profile, totalClients, totalAppointments, todayAppointments });
