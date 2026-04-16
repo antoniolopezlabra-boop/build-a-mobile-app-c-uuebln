@@ -1,4 +1,4 @@
-import { getTodayString } from '@/utils/dateUtils';
+import { getTodayString, toLocalDateString, getMonthStartString, getMonthEndString } from '@/utils/dateUtils';
 import React, { useState, useCallback, useRef } from 'react';
 import { useFocusEffect } from '@react-navigation/native';
 import { useRouter } from 'expo-router';
@@ -64,7 +64,7 @@ const STATUS_CONFIG: Record<string, { color: string; label: string }> = {
   'Pendiente':  { color: '#F59E0B', label: 'Pendiente' },
   'Completada': { color: '#6366F1', label: 'Completada' },
   'Cancelada':  { color: '#EF4444', label: 'Cancelada' },
-  'No asisti\u00f3':{ color: '#9CA3AF', label: 'No asisti\u00f3' },
+  'No asistió':{ color: '#9CA3AF', label: 'No asistió' },
   'Reagendada': { color: '#3B82F6', label: 'Reagendada' },
   'Pagado':     { color: '#10B981', label: 'Pagado' },
 };
@@ -153,23 +153,19 @@ export default function ReportsScreen() {
       const userId = await getCurrentUserId();
       const today  = getTodayString();
 
-      // Semana actual (siempre desde hoy, no cambia con el mes)
+      // Semana actual (siempre desde hoy, no cambia con el mes) — timezone local del dispositivo
       const weekStart = new Date();
       const dow = weekStart.getDay();
       weekStart.setDate(weekStart.getDate() - (dow === 0 ? 6 : dow - 1));
-      const weekStartStr = weekStart.toISOString().split('T')[0];
+      const weekStartStr = toLocalDateString(weekStart);
 
       // Mes seleccionado
-      const mStart    = new Date(selectedYear, selectedMonth, 1);
-      const mEnd      = new Date(selectedYear, selectedMonth + 1, 0);
-      const monthStartStr = mStart.toISOString().split('T')[0];
-      const monthEndStr   = mEnd.toISOString().split('T')[0];
+      const monthStartStr = getMonthStartString(selectedYear, selectedMonth);
+      const monthEndStr   = getMonthEndString(selectedYear, selectedMonth);
 
       // Mes anterior al seleccionado (para comparativa)
-      const prevMStart = new Date(selectedYear, selectedMonth - 1, 1);
-      const prevMEnd   = new Date(selectedYear, selectedMonth, 0);
-      const lastMonthStartStr = prevMStart.toISOString().split('T')[0];
-      const lastMonthEndStr   = prevMEnd.toISOString().split('T')[0];
+      const lastMonthStartStr = getMonthStartString(selectedYear, selectedMonth - 1);
+      const lastMonthEndStr   = getMonthEndString(selectedYear, selectedMonth - 1);
 
       const [{ data: tA }, { data: wA }, { data: mA }, { count: tC }, { count: tAC }, { count: cC }] =
         await Promise.all([
@@ -240,8 +236,8 @@ export default function ReportsScreen() {
     try {
       const userId = await getCurrentUserId();
       const today  = getTodayString();
-      const mStart = new Date(selectedYear, selectedMonth, 1).toISOString().split('T')[0];
-      const mEnd   = new Date(selectedYear, selectedMonth + 1, 0).toISOString().split('T')[0];
+      const mStart = getMonthStartString(selectedYear, selectedMonth);
+      const mEnd   = getMonthEndString(selectedYear, selectedMonth);
 
       let query = supabase
         .from('appointments')
@@ -256,7 +252,7 @@ export default function ReportsScreen() {
         const weekStart = new Date();
         const dow = weekStart.getDay();
         weekStart.setDate(weekStart.getDate() - (dow === 0 ? 6 : dow - 1));
-        query = query.gte('date', weekStart.toISOString().split('T')[0]);
+        query = query.gte('date', toLocalDateString(weekStart));
       } else {
         query = query.gte('date', mStart).lte('date', mEnd);
       }
@@ -284,10 +280,10 @@ export default function ReportsScreen() {
       if (range === 'semana') {
         const d = new Date(); const dow = d.getDay();
         d.setDate(d.getDate() - (dow === 0 ? 6 : dow - 1));
-        fromDate = d.toISOString().split('T')[0];
+        fromDate = toLocalDateString(d);
       } else if (range === 'mes') {
-        fromDate = new Date(selectedYear, selectedMonth, 1).toISOString().split('T')[0];
-        toDate   = new Date(selectedYear, selectedMonth + 1, 0).toISOString().split('T')[0];
+        fromDate = getMonthStartString(selectedYear, selectedMonth);
+        toDate   = getMonthEndString(selectedYear, selectedMonth);
       }
       const { data: staffList } = await supabase
         .from('staff_members').select('id, name, color, role')
@@ -303,7 +299,7 @@ export default function ReportsScreen() {
         const completed  = mine.filter((a: any) => ['Completada', 'Pagado'].includes(a.status)).length;
         const confirmed  = mine.filter((a: any) => a.status === 'Confirmada').length;
         const cancelled  = mine.filter((a: any) => a.status === 'Cancelada').length;
-        const noshow     = mine.filter((a: any) => a.status === 'No asisti\u00f3').length;
+        const noshow     = mine.filter((a: any) => a.status === 'No asistió').length;
         const completionRate = total > 0 ? Math.round((completed / total) * 100) : 0;
         return { id: m.id, name: m.name, color: m.color, role: m.role, total, confirmed, completed, cancelled, noshow, completionRate };
       });
@@ -338,9 +334,9 @@ export default function ReportsScreen() {
           <View style={[s.paywallIconWrap, { backgroundColor: isDark ? '#1E293B' : '#F1F5F9' }]}>
             <Text style={{ fontSize: 36 }}>📊</Text>
           </View>
-          <Text style={[s.paywallTitle, { color: tc.text }]}>Reportes en Plan B\u00e1sico</Text>
+          <Text style={[s.paywallTitle, { color: tc.text }]}>Reportes en Plan Básico</Text>
           <Text style={[s.paywallDesc, { color: tc.textMuted }]}>
-            Accede a reportes de ingresos, citas completadas y clientes con el Plan B\u00e1sico o Premium.
+            Accede a reportes de ingresos, citas completadas y clientes con el Plan Básico o Premium.
           </Text>
           <TouchableOpacity style={s.paywallBtn} onPress={() => router.push('/settings/subscription')}>
             <Text style={s.paywallBtnText}>Ver planes</Text>
@@ -434,7 +430,7 @@ export default function ReportsScreen() {
               <View style={s.staffEmptyWrap}>
                 <MaterialIcons name="group-off" size={40} color={tc.border} />
                 <Text style={[s.staffEmptyTitle, { color: tc.text }]}>Sin datos de equipo</Text>
-                <Text style={[s.staffEmptyDesc, { color: tc.textMuted }]}>Asigna colaboradores a tus citas para ver estad\u00edsticas aqu\u00ed.</Text>
+                <Text style={[s.staffEmptyDesc, { color: tc.textMuted }]}>Asigna colaboradores a tus citas para ver estadísticas aquí.</Text>
               </View>
             ) : (
               <View style={{ padding: 16 }}>
@@ -478,7 +474,7 @@ export default function ReportsScreen() {
                       </View>
                       <View style={[s.metricChip, { backgroundColor: st.color + '15' }]}>
                         <Text style={[s.metricNum, { color: st.color }]}>{st.completionRate}%</Text>
-                        <Text style={[s.metricLabel, { color: st.color }]}>completaci\u00f3n</Text>
+                        <Text style={[s.metricLabel, { color: st.color }]}>completación</Text>
                       </View>
                     </View>
                   </View>
@@ -552,7 +548,7 @@ export default function ReportsScreen() {
                 <Text style={[s.statLabel, { color: tc.textMuted }]}>Clientes</Text>
                 <View style={s.tapHint}>
                   <MaterialIcons name="bar-chart" size={11} color="#10B981" />
-                  <Text style={[s.tapHintText, { color: '#10B981' }]}>Ver gr\u00e1fica</Text>
+                  <Text style={[s.tapHintText, { color: '#10B981' }]}>Ver gráfica</Text>
                 </View>
               </TouchableOpacity>
 
@@ -576,13 +572,13 @@ export default function ReportsScreen() {
                 <Text style={s.statEmoji}>✅</Text>
                 <Text style={[s.statValue, { color: tc.text }]}>{stats?.completedAppointments}</Text>
                 <Text style={[s.statLabel, { color: tc.textMuted }]}>Completadas</Text>
-                <Text style={[s.statSub, { color: tc.textMuted }]}>total hist\u00f3rico</Text>
+                <Text style={[s.statSub, { color: tc.textMuted }]}>total histórico</Text>
               </View>
               <View style={[s.statCard, { backgroundColor: tc.surface, borderColor: tc.border, borderLeftColor: '#94A3B8' }]}>
                 <Text style={s.statEmoji}>✂️</Text>
                 <Text style={[s.statValue, { color: tc.text }]}>{stats?.completedAppointments}</Text>
                 <Text style={[s.statLabel, { color: tc.textMuted }]}>Servicios dados</Text>
-                <Text style={[s.statSub, { color: tc.textMuted }]}>total hist\u00f3rico</Text>
+                <Text style={[s.statSub, { color: tc.textMuted }]}>total histórico</Text>
               </View>
             </View>
 
@@ -649,7 +645,7 @@ export default function ReportsScreen() {
                       <View style={{ flex: 1, paddingLeft: 12 }}>
                         <Text style={[s.aptClient, { color: tc.text }]}>{apt.client_name}</Text>
                         <Text style={[s.aptService, { color: tc.textMuted }]}>{apt.service_name}</Text>
-                        <Text style={[s.aptDate, { color: tc.textMuted }]}>{formatDate(apt.date)} \u00b7 {apt.start_time}</Text>
+                        <Text style={[s.aptDate, { color: tc.textMuted }]}>{formatDate(apt.date)} · {apt.start_time}</Text>
                       </View>
                       <View style={[s.aptStatusBadge, { backgroundColor: cfg.color + '22' }]}>
                         <Text style={[s.aptStatusText, { color: cfg.color }]}>{cfg.label}</Text>
@@ -665,7 +661,7 @@ export default function ReportsScreen() {
         </View>
       </Modal>
 
-      {/* MODAL: Gr\u00e1fica de clientes */}
+      {/* MODAL: Gráfica de clientes */}
       <Modal visible={clientsModal} animationType="slide" transparent onRequestClose={() => setClientsModal(false)}>
         <View style={s.modalOverlay}>
           <TouchableOpacity style={s.modalBackdrop} activeOpacity={1} onPress={() => setClientsModal(false)} />
@@ -691,9 +687,9 @@ export default function ReportsScreen() {
               </View>
               <View style={[s.clientKpi, { backgroundColor: (clientGrowth ?? 0) >= 0 ? (isDark ? '#0F2D1A' : '#ECFDF5') : (isDark ? '#2D0F0F' : '#FEF2F2') }]}>
                 <Text style={[s.clientKpiNum, { color: (clientGrowth ?? 0) >= 0 ? '#10B981' : '#EF4444' }]}>
-                  {clientGrowth !== null ? `${clientGrowth >= 0 ? '+' : ''}${clientGrowth}%` : '\u2014'}
+                  {clientGrowth !== null ? `${clientGrowth >= 0 ? '+' : ''}${clientGrowth}%` : '—'}
                 </Text>
-                <Text style={[s.clientKpiLabel, { color: tc.textMuted }]}>Variaci\u00f3n</Text>
+                <Text style={[s.clientKpiLabel, { color: tc.textMuted }]}>Variación</Text>
               </View>
             </View>
             <Text style={[s.chartTitle, { color: tc.textMuted }]}>CLIENTES NUEVOS POR SEMANA ({MONTHS_ES[selectedMonth].toUpperCase()} {selectedYear})</Text>
