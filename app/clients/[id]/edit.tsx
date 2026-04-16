@@ -1,4 +1,5 @@
 
+import { toLocalDateString, parseLocalDate } from '@/utils/dateUtils';
 import React, { useState, useEffect } from 'react';
 import {
   View,
@@ -27,6 +28,14 @@ interface Client {
   isActive?: boolean;
 }
 
+const extraStyles = {
+  datePickerModal: { position: 'absolute' as const, bottom: 0, left: 0, right: 0, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-end' as const, zIndex: 999 },
+  datePickerContainer: { backgroundColor: '#fff', borderTopLeftRadius: 20, borderTopRightRadius: 20, padding: 20 },
+  datePickerTitle: { fontSize: 17, fontWeight: '600' as const, color: '#0F172A', textAlign: 'center' as const, marginBottom: 8 },
+  datePickerConfirm: { backgroundColor: '#10B981', borderRadius: 12, padding: 14, alignItems: 'center' as const, marginTop: 8 },
+  datePickerConfirmText: { color: '#fff', fontSize: 16, fontWeight: '600' as const },
+};
+
 export default function EditClientScreen() {
   const router = useRouter();
   const params = useLocalSearchParams();
@@ -39,13 +48,6 @@ export default function EditClientScreen() {
     message: '',
   });
 
-const extraStyles = {
-  datePickerModal: { position: 'absolute' as const, bottom: 0, left: 0, right: 0, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-end' as const, zIndex: 999 },
-  datePickerContainer: { backgroundColor: '#fff', borderTopLeftRadius: 20, borderTopRightRadius: 20, padding: 20 },
-  datePickerTitle: { fontSize: 17, fontWeight: '600' as const, color: '#0F172A', textAlign: 'center' as const, marginBottom: 8 },
-  datePickerConfirm: { backgroundColor: '#10B981', borderRadius: 12, padding: 14, alignItems: 'center' as const, marginTop: 8 },
-  datePickerConfirmText: { color: '#fff', fontSize: 16, fontWeight: '600' as const },
-};
   const [successModal, setSuccessModal] = useState(false);
 
   // Form state
@@ -78,7 +80,10 @@ const extraStyles = {
       setNotes(data.notes || '');
       setIsActive(data.isActive !== false);
       if (data.birthday) {
-        setBirthday(new Date(data.birthday));
+        // FIX timezone: new Date('YYYY-MM-DD') se interpreta como UTC medianoche
+        // y en UTC-6 (México) sale 1 día antes. parseLocalDate construye la fecha
+        // en hora local (mediodía) preservando el día correcto.
+        setBirthday(parseLocalDate(data.birthday));
       }
       console.log('[EditClient] Client loaded');
     } catch (error) {
@@ -107,7 +112,9 @@ const extraStyles = {
         name: fullName.trim(),
         phone: phone.trim(),
         email: email.trim() || undefined,
-        birthday: birthday ? birthday.toISOString().split('T')[0] : undefined,
+        // FIX timezone: el DatePicker devuelve Date local. toISOString() convertía a UTC
+        // y en UTC-6 (México) quedaba 1 día antes. toLocalDateString preserva la fecha local.
+        birthday: birthday ? toLocalDateString(birthday) : undefined,
         notes: notes.trim() || undefined,
         isActive,
       });
