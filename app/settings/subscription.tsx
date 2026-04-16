@@ -14,7 +14,7 @@ import { PLAN_PRICES } from '@/services/stripe';
 import MaterialIcons from '@expo/vector-icons/MaterialIcons';
 
 // ──────────────────────────────────────────────────
-// PLAN GRATUITO: solo para explorar la app, sin funciones operativas
+// PLAN GRATUITO: hasta 10 citas/mes vía link público (enforced en Edge Function)
 // PLAN BÁSICO: operación completa para un negocio de 1 persona
 // PLAN PREMIUM: equipo, marketing y reportes avanzados
 // ──────────────────────────────────────────────────
@@ -23,15 +23,17 @@ const PLAN_FEATURES = {
     'Perfil del negocio',
     'Configuración de horarios',
     'Catálogo de servicios (visualización)',
-    'Sin citas (requiere Plan Básico)',
-    'Sin link de citas público',
+    'Link de citas público',
+    'Hasta 10 citas al mes vía link público',
+    'Gestión básica de clientes',
+    'Sin citas creadas desde la app',
     'Sin recordatorios WhatsApp',
     'Sin soporte con IA',
     'Sin reportes',
   ],
   Basico: [
-    'Citas ilimitadas desde la app',
-    'Link de citas público para clientes',
+    'Todo lo del Plan Gratuito',
+    'Citas ilimitadas desde la app y link público',
     'Catálogo de servicios ilimitado',
     'Recordatorios WhatsApp automáticos',
     'Confirmación al agendar (WhatsApp)',
@@ -164,7 +166,7 @@ export default function SubscriptionScreen() {
           {isGratuito && (
             <View style={s.upgradeBanner}>
               <Text style={s.upgradeBannerText}>
-                ⚠️ El plan Gratuito es solo para explorar la app. Activa el Plan Básico para empezar a agendar citas y usar todas las funciones.
+                💡 Tu plan Gratuito permite hasta 10 citas al mes vía tu link público. Activa el Plan Básico para citas ilimitadas, recordatorios de WhatsApp y reportes.
               </Text>
             </View>
           )}
@@ -186,7 +188,7 @@ export default function SubscriptionScreen() {
             {isGratuito && <View style={s.activeBadge}><Text style={s.activeBadgeText}>Tu plan actual</Text></View>}
           </View>
           <Text style={s.planPrice}>Gratis</Text>
-          <Text style={s.planPeriod}>solo para explorar</Text>
+          <Text style={s.planPeriod}>hasta 10 citas al mes</Text>
           <View style={s.features}>
             {PLAN_FEATURES.Gratuito.map((f, i) => {
               const isLimit = f.startsWith('Sin');
