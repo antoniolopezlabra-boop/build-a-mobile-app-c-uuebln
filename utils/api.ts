@@ -1,6 +1,12 @@
-import { getTodayString } from '@/utils/dateUtils';
+import { getTodayString, getTomorrowString, getDateStringDaysFromNow, toLocalDateString, addDays } from '@/utils/dateUtils';
 import { supabase } from '@/lib/supabase';
 import { logger } from '@/utils/logger';
+
+// Estados que NO cuentan como "cita del día/semana/mes" (citas descartadas)
+const EXCLUDED_STATUSES = ['Cancelada', 'No asistió', 'Rechazada'];
+
+// Estados que SÍ cuentan como "ocupando el slot" (para availability check)
+const ACTIVE_STATUSES = ['Pendiente', 'Confirmada', 'Completada', 'Pagado', 'Reagendada', 'En espera', 'Solicitud'];
 
 export async function getCurrentUserId(): Promise<string> {
   const { data: { user } } = await supabase.auth.getUser();
@@ -8,7 +14,7 @@ export async function getCurrentUserId(): Promise<string> {
   return user.id;
 }
 
-// FIX: mapAppointment ahora incluye staff_id
+// mapAppointment incluye staff_id y serviceCost
 const mapAppointment = (a: any) => ({
   id: a.id,
   clientId: a.client_id,
@@ -24,9 +30,34 @@ const mapAppointment = (a: any) => ({
   clientNameTemp: a.client_name_temp || null,
   clientPhone: a.client_phone_temp || null,
   source: a.source || null,
-  staff_id: a.staff_id || null,           // FIX: incluido
+  staff_id: a.staff_id || null,
   serviceCost: a.service_cost || null,
 });
+
+// Calcula endTime a partir de startTime y una duración en minutos
+function calcEndTime(startTime: string, durationMinutes: number): string {
+  const [h, m] = startTime.split(':').map(Number);
+  const totalMin = h * 60 + m + durationMinutes;
+  return `${Math.floor(totalMin/60).toString().padStart(2,'0')}:${(totalMin%60).toString().padStart(2,'0')}`;
+}
+
+// Calcula la duración (en minutos) entre dos HH:MM. Si no puede, devuelve fallback.
+function calcDurationMinutes(startTime: string | null | undefined, endTime: string | null | undefined, fallback = 30): number {
+  if (!startTime || !endTime) return fallback;
+  const [sh, sm] = startTime.split(':').map(Number);
+  const [eh, em] = endTime.split(':').map(Number);
+  const diff = (eh * 60 + em) - (sh * 60 + sm);
+  return diff > 0 ? diff : fallback;
+}
+
+// Extrae el {id} de un path tipo /api/recurso/{id} validando que no esté vacío
+function extractIdFromPath(path: string): string {
+  const id = path.split('/').pop();
+  if (!id || id.trim() === '') {
+    throw new Error(`Invalid path: missing ID in ${path}`);
+  }
+  return id;
+}
 
 export async function apiGet<T>(path: string): Promise<T> {
   const userId = await getCurrentUserId();
@@ -50,10 +81,16 @@ export async function apiGet<T>(path: string): Promise<T> {
   }
 
   if (path === '/api/appointments') {
+    // FIX performance: limitar a los últimos 90 días + los próximos 180 días.
+    // Un negocio con 3 años de historia NO debe descargar todo en el dispositivo móvil.
+    const fromDate = getDateStringDaysFromNow(-90);
+    const toDate   = getDateStringDaysFromNow(180);
     const { data, error } = await supabase
       .from('appointments')
       .select('*, client:clients(name, phone)')
       .eq('user_id', userId)
+      .gte('date', fromDate)
+      .lte('date', toDate)
       .order('start_time');
     if (error) throw error;
     return (data?.map(mapAppointment) || []) as T;
@@ -72,14 +109,15 @@ export async function apiGet<T>(path: string): Promise<T> {
   }
 
   if (path === '/api/appointments/week') {
-    const tomorrow = new Date(); tomorrow.setDate(tomorrow.getDate() + 1);
-    const weekEnd = new Date(); weekEnd.setDate(weekEnd.getDate() + 7);
+    // FIX timezone: usar toLocalDateString, no toISOString() (daba el día siguiente a partir de las 6pm en MX)
+    const tomorrowStr = getTomorrowString();
+    const weekEndStr  = getDateStringDaysFromNow(7);
     const { data, error } = await supabase
       .from('appointments')
       .select('*, client:clients(name, phone)')
       .eq('user_id', userId)
-      .gte('date', tomorrow.toISOString().split('T')[0])
-      .lte('date', weekEnd.toISOString().split('T')[0])
+      .gte('date', tomorrowStr)
+      .lte('date', weekEndStr)
       .order('date')
       .order('start_time');
     if (error) throw error;
@@ -93,25 +131,35 @@ export async function apiGet<T>(path: string): Promise<T> {
       .select('*, client:clients(name, phone)')
       .eq('user_id', userId)
       .eq('date', dateStr)
-      .not('status', 'in', '("Cancelada","No asisti\xF3")')
+      .not('status', 'in', `("${EXCLUDED_STATUSES.join('","')}")`)
       .order('start_time');
     if (error) throw error;
     return (data?.map(mapAppointment) || []) as T;
   }
 
   if (path === '/api/stats/dashboard') {
-    const today = getTodayString();
-    const week = new Date(); week.setDate(week.getDate() + 7);
-    const weekEnd = week.toISOString().split('T')[0];
-    const tomorrow = new Date(); tomorrow.setDate(tomorrow.getDate() + 1);
-    const tomorrowStr = tomorrow.toISOString().split('T')[0];
+    const today       = getTodayString();
+    const tomorrowStr = getTomorrowString();
+    const weekEndStr  = getDateStringDaysFromNow(7);
+    // FIX: contar SOLO citas activas (excluir canceladas/no asistió) en todayAppointments y weekAppointments
     const [{ data: todayApts }, { data: weekApts }, { count: totalClients }, { count: totalAppointments }] = await Promise.all([
       supabase.from('appointments').select('status').eq('user_id', userId).eq('date', today),
-      supabase.from('appointments').select('status').eq('user_id', userId).gte('date', tomorrowStr).lte('date', weekEnd),
+      supabase.from('appointments').select('status').eq('user_id', userId).gte('date', tomorrowStr).lte('date', weekEndStr),
       supabase.from('clients').select('*', { count: 'exact', head: true }).eq('user_id', userId),
       supabase.from('appointments').select('*', { count: 'exact', head: true }).eq('user_id', userId),
     ]);
-    return { todayAppointments: todayApts?.length || 0, confirmedToday: todayApts?.filter((a: any) => a.status === 'Confirmada').length || 0, unconfirmedToday: todayApts?.filter((a: any) => a.status === 'Pendiente').length || 0, weekAppointments: weekApts?.length || 0, confirmedWeek: weekApts?.filter((a: any) => a.status === 'Confirmada').length || 0, unconfirmedWeek: weekApts?.filter((a: any) => a.status === 'Pendiente').length || 0, totalClients: totalClients || 0, totalAppointments: totalAppointments || 0 } as T;
+    const activeTodayApts = (todayApts || []).filter((a: any) => !EXCLUDED_STATUSES.includes(a.status));
+    const activeWeekApts  = (weekApts  || []).filter((a: any) => !EXCLUDED_STATUSES.includes(a.status));
+    return {
+      todayAppointments:  activeTodayApts.length,
+      confirmedToday:     activeTodayApts.filter((a: any) => a.status === 'Confirmada').length,
+      unconfirmedToday:   activeTodayApts.filter((a: any) => a.status === 'Pendiente').length,
+      weekAppointments:   activeWeekApts.length,
+      confirmedWeek:      activeWeekApts.filter((a: any) => a.status === 'Confirmada').length,
+      unconfirmedWeek:    activeWeekApts.filter((a: any) => a.status === 'Pendiente').length,
+      totalClients:       totalClients || 0,
+      totalAppointments:  totalAppointments || 0,
+    } as T;
   }
 
   if (path === '/api/business-hours') {
@@ -121,8 +169,9 @@ export async function apiGet<T>(path: string): Promise<T> {
   }
 
   if (path.startsWith('/api/clients/inactive')) {
-    const ninetyDaysAgo = new Date(); ninetyDaysAgo.setDate(ninetyDaysAgo.getDate() - 90);
-    const { data, error } = await supabase.from('clients').select('*').eq('user_id', userId).lt('last_visit', ninetyDaysAgo.toISOString().split('T')[0]);
+    // FIX timezone: usar toLocalDateString
+    const ninetyDaysAgoStr = getDateStringDaysFromNow(-90);
+    const { data, error } = await supabase.from('clients').select('*').eq('user_id', userId).lt('last_visit', ninetyDaysAgoStr);
     if (error) throw error;
     return (data || []) as T;
   }
@@ -134,7 +183,7 @@ export async function apiGet<T>(path: string): Promise<T> {
     if (error) throw error;
     const total = apts?.length || 0;
     const attended = apts?.filter((a: any) => ['Confirmada', 'Completada', 'Pagado'].includes(a.status)).length || 0;
-    const noShows = apts?.filter((a: any) => a.status === 'No asisti\xF3').length || 0;
+    const noShows = apts?.filter((a: any) => a.status === 'No asistió').length || 0;
     const attendanceRate = total > 0 ? Math.round((attended / total) * 100) : 0;
     const lastVisit = apts && apts.length > 0 ? apts[0].date : null;
     return { totalAppointments: total, attendanceRate, lastVisit, noShowCount: noShows } as T;
@@ -149,8 +198,7 @@ export async function apiGet<T>(path: string): Promise<T> {
   }
 
   if (path.startsWith('/api/appointments/')) {
-    const id = path.split('/').pop();
-    // FIX: incluir staff_id en el detalle de cita
+    const id = extractIdFromPath(path);
     const { data, error } = await supabase
       .from('appointments')
       .select('*, client:clients(*)')
@@ -165,12 +213,12 @@ export async function apiGet<T>(path: string): Promise<T> {
       clientNameTemp: data.client_name_temp || null,
       clientPhone: data.client_phone_temp || null,
       source: data.source || null,
-      staff_id: data.staff_id || null,   // FIX: incluido
+      staff_id: data.staff_id || null,
     } as T;
   }
 
   if (path.startsWith('/api/clients/')) {
-    const id = path.split('/').pop();
+    const id = extractIdFromPath(path);
     const { data, error } = await supabase.from('clients').select('*').eq('id', id).eq('user_id', userId).single();
     if (error) throw error;
     return data as T;
@@ -196,11 +244,9 @@ export async function apiPost<T>(path: string, body: any): Promise<T> {
 
   if (path === '/api/appointments') {
     const startTime = body.time;
-    const endTime = body.endTime || (() => {
-      const [h, m] = startTime.split(':').map(Number);
-      const endMin = h * 60 + m + 30;
-      return `${Math.floor(endMin/60).toString().padStart(2,'0')}:${(endMin%60).toString().padStart(2,'0')}`;
-    })();
+    // FIX duración: respetar body.endTime. Si no viene, fallback 30 min.
+    // La duración correcta debe venir del servicio elegido (pasada en body.endTime).
+    const endTime = body.endTime || calcEndTime(startTime, 30);
     const { data, error } = await supabase.from('appointments').insert({
       user_id: userId,
       client_id: body.clientId,
@@ -212,7 +258,7 @@ export async function apiPost<T>(path: string, body: any): Promise<T> {
       notes: body.notes || null,
       service_cost: body.service_cost || 0,
       whatsapp_notification: body.sendWhatsApp || false,
-      staff_id: body.staff_id || null,   // FIX: guardar staff_id al crear cita
+      staff_id: body.staff_id || null,
     }).select().single();
     if (error) throw error;
     return { ...data, service: data.service_name, time: data.start_time } as T;
@@ -231,7 +277,7 @@ export async function apiPost<T>(path: string, body: any): Promise<T> {
   }
 
   if (path.startsWith('/api/clients/')) {
-    const id = path.split('/').pop();
+    const id = extractIdFromPath(path);
     const { data, error } = await supabase.from('clients').update({ name: body.name, phone: body.phone, email: body.email || null, notes: body.notes || null, birthday: body.birthday || null, updated_at: new Date().toISOString() }).eq('id', id).eq('user_id', userId).select().single();
     if (error) throw error;
     return data as T;
@@ -243,9 +289,29 @@ export async function apiPost<T>(path: string, body: any): Promise<T> {
 export async function apiPatch<T>(path: string, body: any): Promise<T> {
   const userId = await getCurrentUserId();
 
-  if (path.startsWith('/api/appointments/') && !path.includes('/reschedule')) {
-    const id = path.split('/').pop();
-    // FIX: permitir actualizar staff_id ademas del status
+  // FIX orden de rutas: /status y /reschedule ANTES de la ruta genérica /api/appointments/:id
+  // (la regla anterior las interceptaba y quedaban inalcanzables)
+  if (path.includes('/reschedule')) {
+    const parts = path.split('/');
+    const id = parts[3]; // /api/appointments/{id}/reschedule
+    if (!id) throw new Error(`Invalid path: missing ID in ${path}`);
+    const { data, error } = await supabase.from('appointments').update({ date: body.date, start_time: body.time, status: 'Reagendada', updated_at: new Date().toISOString() }).eq('id', id).eq('user_id', userId).select().single();
+    if (error) throw error;
+    return data as T;
+  }
+
+  if (path.includes('/status')) {
+    const parts = path.split('/');
+    const id = parts[3]; // /api/appointments/{id}/status
+    if (!id) throw new Error(`Invalid path: missing ID in ${path}`);
+    const { data, error } = await supabase.from('appointments').update({ status: body.status, updated_at: new Date().toISOString() }).eq('id', id).eq('user_id', userId).select().single();
+    if (error) throw error;
+    return data as T;
+  }
+
+  if (path.startsWith('/api/appointments/')) {
+    const id = extractIdFromPath(path);
+    // Permite actualizar status y/o staff_id
     const updateFields: any = { updated_at: new Date().toISOString() };
     if (body.status !== undefined)   updateFields.status   = body.status;
     if (body.staff_id !== undefined) updateFields.staff_id = body.staff_id;
@@ -254,29 +320,15 @@ export async function apiPatch<T>(path: string, body: any): Promise<T> {
     return data as T;
   }
 
-  if (path.includes('/status')) {
-    const id = path.split('/')[3];
-    const { data, error } = await supabase.from('appointments').update({ status: body.status, updated_at: new Date().toISOString() }).eq('id', id).eq('user_id', userId).select().single();
-    if (error) throw error;
-    return data as T;
-  }
-
-  if (path.includes('/reschedule')) {
-    const id = path.split('/')[3];
-    const { data, error } = await supabase.from('appointments').update({ date: body.date, start_time: body.time, status: 'Reagendada', updated_at: new Date().toISOString() }).eq('id', id).eq('user_id', userId).select().single();
-    if (error) throw error;
-    return data as T;
-  }
-
   if (path.startsWith('/api/services/')) {
-    const id = path.split('/').pop();
+    const id = extractIdFromPath(path);
     const { data, error } = await supabase.from('services').update({ name: body.name, description: body.description || null, price: body.price, duration_minutes: body.durationMinutes, updated_at: new Date().toISOString() }).eq('id', id).eq('user_id', userId).select().single();
     if (error) throw error;
     return { id: data.id, name: data.name, description: data.description, price: data.price, durationMinutes: data.duration_minutes, isActive: data.is_active } as T;
   }
 
   if (path.startsWith('/api/clients/')) {
-    const id = path.split('/').pop();
+    const id = extractIdFromPath(path);
     const { data, error } = await supabase.from('clients').update({ ...body, updated_at: new Date().toISOString() }).eq('id', id).eq('user_id', userId).select().single();
     if (error) throw error;
     return data as T;
@@ -295,21 +347,21 @@ export async function apiDelete<T>(path: string): Promise<T> {
   const userId = await getCurrentUserId();
 
   if (path.startsWith('/api/appointments/')) {
-    const id = path.split('/').pop();
+    const id = extractIdFromPath(path);
     const { error } = await supabase.from('appointments').delete().eq('id', id).eq('user_id', userId);
     if (error) throw error;
     return { success: true } as T;
   }
 
   if (path.startsWith('/api/clients/')) {
-    const id = path.split('/').pop();
+    const id = extractIdFromPath(path);
     const { error } = await supabase.from('clients').delete().eq('id', id).eq('user_id', userId);
     if (error) throw error;
     return { success: true } as T;
   }
 
   if (path.startsWith('/api/services/')) {
-    const id = path.split('/').pop();
+    const id = extractIdFromPath(path);
     const { error } = await supabase.from('services').update({ is_active: false, updated_at: new Date().toISOString() }).eq('id', id).eq('user_id', userId);
     if (error) throw error;
     return { success: true } as T;
@@ -343,11 +395,36 @@ export async function apiPut<T>(path: string, body: any): Promise<T> {
   }
 
   if (path.startsWith('/api/appointments/')) {
-    const id = path.split('/').pop();
-    const t = body.time ? body.time.split(':').map(Number) : [9, 0];
-    const endMin = t[0] * 60 + t[1] + 30;
-    const endTime = `${Math.floor(endMin/60).toString().padStart(2,'0')}:${(endMin%60).toString().padStart(2,'0')}`;
-    const { data, error } = await supabase.from('appointments').update({ date: body.date, start_time: body.time, end_time: endTime, status: 'Reagendada', updated_at: new Date().toISOString() }).eq('id', id).eq('user_id', userId).select().single();
+    const id = extractIdFromPath(path);
+    // FIX: preservar duración original de la cita al reagendar (no hardcodear a 30min)
+    // FIX: solo cambiar status a 'Reagendada' si venía de un estado de "por llegar"
+    const { data: existing, error: fetchErr } = await supabase
+      .from('appointments')
+      .select('start_time, end_time, status')
+      .eq('id', id)
+      .eq('user_id', userId)
+      .single();
+    if (fetchErr) throw fetchErr;
+
+    const duration = calcDurationMinutes(existing.start_time, existing.end_time, 30);
+    const endTime  = body.time ? calcEndTime(body.time, duration) : existing.end_time;
+
+    // Solo marcar como "Reagendada" si la cita NO había sido confirmada/pagada ya
+    // (preservar estados finales como Pagado, Completada, Cancelada)
+    const updateFields: any = {
+      date: body.date,
+      start_time: body.time,
+      end_time: endTime,
+      updated_at: new Date().toISOString(),
+    };
+    if (['Pendiente', 'Confirmada', 'En espera', 'Solicitud'].includes(existing.status)) {
+      updateFields.status = 'Reagendada';
+    }
+
+    const { data, error } = await supabase.from('appointments')
+      .update(updateFields)
+      .eq('id', id).eq('user_id', userId)
+      .select().single();
     if (error) throw error;
     return data as T;
   }
@@ -359,7 +436,7 @@ export async function apiPut<T>(path: string, body: any): Promise<T> {
   }
 
   if (path.startsWith('/api/clients/')) {
-    const id = path.split('/').pop();
+    const id = extractIdFromPath(path);
     const { data, error } = await supabase.from('clients').update({ name: body.name, phone: body.phone, email: body.email || null, notes: body.notes || null, birthday: body.birthday || null, updated_at: new Date().toISOString() }).eq('id', id).eq('user_id', userId).select().single();
     if (error) throw error;
     return data as T;
