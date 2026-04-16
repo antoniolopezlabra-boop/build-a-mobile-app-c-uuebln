@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useEffect, ReactNode } from "react";
+import React, { createContext, useContext, useState, useEffect, useRef, ReactNode } from "react";
 import { router } from 'expo-router';
 import { supabase } from "@/lib/supabase";
 import { Session, User } from "@supabase/supabase-js";
@@ -53,28 +53,49 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [isStaffAccount, setIsStaffAccount] = useState(false);
   const [staffMemberData, setStaffMemberData] = useState<StaffMemberData | null>(null);
 
+  // FIX race condition: los dos listeners (onAuthStateChange + getSession) podían
+  // cargar datos dos veces al arranque. Este ref detecta si ya cargamos para el usuario actual.
+  const loadedUserIdRef = useRef<string | null>(null);
+
   useEffect(() => {
+    let mounted = true;
+
     const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
+      if (!mounted) return;
       logger.log("[Auth] State change:", event);
       if (event === "USER_UPDATED") return;
+
       if (session?.user) {
+        // Si ya cargamos este usuario, no volvemos a cargar (evita double-fetch al arranque)
+        if (loadedUserIdRef.current === session.user.id) return;
+        loadedUserIdRef.current = session.user.id;
         await loadUserData(session.user);
       } else {
+        loadedUserIdRef.current = null;
         setUser(null);
         setBusinessProfile(null);
+        setIsStaffAccount(false);
+        setStaffMemberData(null);
         setLoading(false);
       }
     });
 
+    // Carga inicial: solo si onAuthStateChange no se disparó primero
     supabase.auth.getSession().then(async ({ data: { session } }) => {
+      if (!mounted) return;
       if (session?.user) {
+        if (loadedUserIdRef.current === session.user.id) return;
+        loadedUserIdRef.current = session.user.id;
         await loadUserData(session.user);
       } else {
         setLoading(false);
       }
     });
 
-    return () => subscription.unsubscribe();
+    return () => {
+      mounted = false;
+      subscription.unsubscribe();
+    };
   }, []);
 
   const trackSession = async (userId: string) => {
@@ -203,6 +224,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     try {
       setAuthLoading(true);
       invalidateCache();
+      loadedUserIdRef.current = null;
       setIsStaffAccount(false);
       setStaffMemberData(null);
       await supabase.auth.signOut();
@@ -216,7 +238,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const fetchUser = async () => {
     const { data: { user: supabaseUser } } = await supabase.auth.getUser();
-    if (supabaseUser) await loadUserData(supabaseUser);
+    if (supabaseUser) {
+      // Forzar recarga
+      loadedUserIdRef.current = null;
+      await loadUserData(supabaseUser);
+      loadedUserIdRef.current = supabaseUser.id;
+    }
   };
 
   const refreshBusinessProfile = async () => {
