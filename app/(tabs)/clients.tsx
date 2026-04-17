@@ -1,4 +1,4 @@
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useMemo } from 'react';
 import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity,
   ActivityIndicator, TextInput, RefreshControl,
@@ -111,22 +111,42 @@ export default function ClientsScreen() {
     loadClients(true);
   }, []);
 
-  const filteredClients = allClients.filter(c => {
-    const matchesSearch =
-      !searchQuery ||
-      c.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      c.phone.includes(searchQuery) ||
-      (c.email || '').toLowerCase().includes(searchQuery.toLowerCase());
-    const matchesFilter =
-      filter === 'Todos'   ? true :
-      filter === 'Activos' ? c.isActive !== false :
-      c.isActive === false;
-    return matchesSearch && matchesFilter;
-  });
+  // PERFORMANCE FIX (Abr 2026): useMemo para evitar recalcular estas derivaciones
+  // en CADA keystroke de búsqueda. Antes: con 200 clientes, se iteraba 3x la lista
+  // en cada tecla (1x filter, 1x activeCount, 1x inactiveCount).
+  // Ahora: solo se recalcula cuando cambian sus dependencias reales.
 
-  const activeCount   = allClients.filter(c => c.isActive !== false).length;
-  const inactiveCount = allClients.filter(c => c.isActive === false).length;
-  const hasClients    = allClients.length > 0;
+  // searchQuery en minúsculas — se memoiza aparte para no lowercasear en cada item del filter
+  const normalizedSearch = useMemo(() => searchQuery.toLowerCase(), [searchQuery]);
+
+  const filteredClients = useMemo(() => {
+    return allClients.filter(c => {
+      const matchesSearch =
+        !normalizedSearch ||
+        c.name.toLowerCase().includes(normalizedSearch) ||
+        c.phone.includes(searchQuery) ||
+        (c.email || '').toLowerCase().includes(normalizedSearch);
+      const matchesFilter =
+        filter === 'Todos'   ? true :
+        filter === 'Activos' ? c.isActive !== false :
+        c.isActive === false;
+      return matchesSearch && matchesFilter;
+    });
+  }, [allClients, normalizedSearch, searchQuery, filter]);
+
+  const { activeCount, inactiveCount, hasClients } = useMemo(() => {
+    let active = 0;
+    let inactive = 0;
+    for (const c of allClients) {
+      if (c.isActive === false) inactive++;
+      else active++;
+    }
+    return {
+      activeCount: active,
+      inactiveCount: inactive,
+      hasClients: allClients.length > 0,
+    };
+  }, [allClients]);
 
   const renderEmptyState = () => {
     if (searchQuery) return (
