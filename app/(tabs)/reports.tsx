@@ -1,5 +1,5 @@
 import { getTodayString, toLocalDateString, getMonthStartString, getMonthEndString } from '@/utils/dateUtils';
-import React, { useState, useCallback, useRef } from 'react';
+import React, { useState, useCallback, useRef, useEffect } from 'react';
 import { useFocusEffect } from '@react-navigation/native';
 import { useRouter } from 'expo-router';
 import { usePlan } from '@/contexts/PlanContext';
@@ -97,7 +97,72 @@ export default function ReportsScreen() {
   const [aptsList, setAptsList]         = useState<AppointmentItem[]>([]);
   const [clientsModal, setClientsModal] = useState(false);
 
+  // Límite navegable — mes más antiguo que el usuario puede ver.
+  // Se calcula a partir de la cita más antigua o la fecha de registro del negocio.
+  // null = aún no calculado. { year, month } = calculado.
+  const [earliestMonth, setEarliestMonth] = useState<{ year: number; month: number } | null>(null);
+
   const isCurrentMonth = selectedYear === now.getFullYear() && selectedMonth === now.getMonth();
+
+  // Calcula si el mes seleccionado ya es el más antiguo permitido
+  // (o anterior, que no debería pasar pero cubrimos el caso).
+  const isEarliestMonth = earliestMonth !== null && (
+    selectedYear < earliestMonth.year ||
+    (selectedYear === earliestMonth.year && selectedMonth <= earliestMonth.month)
+  );
+
+  // Carga el límite inferior una sola vez cuando se monta el componente.
+  // Estrategia: usa la fecha de la cita más antigua del usuario. Si no tiene citas,
+  // usa la fecha de creación del business_profile (fecha de registro). Fallback: mes actual.
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const userId = await getCurrentUserId();
+
+        // Query 1: fecha de la cita más antigua (1 fila, query barata con el índice user_date)
+        const { data: oldestApt } = await supabase
+          .from('appointments')
+          .select('date')
+          .eq('user_id', userId)
+          .order('date', { ascending: true })
+          .limit(1)
+          .maybeSingle();
+
+        let refDateStr: string | null = oldestApt?.date ?? null;
+
+        // Si no hay citas, usar la fecha de creación del perfil del negocio
+        if (!refDateStr) {
+          const { data: profile } = await supabase
+            .from('business_profiles')
+            .select('created_at')
+            .eq('user_id', userId)
+            .maybeSingle();
+          if (profile?.created_at) refDateStr = profile.created_at;
+        }
+
+        if (cancelled) return;
+
+        if (refDateStr) {
+          // refDateStr puede ser 'YYYY-MM-DD' (date) o ISO timestamp. Parsear seguro.
+          const d = new Date(refDateStr.length === 10 ? refDateStr + 'T12:00:00' : refDateStr);
+          setEarliestMonth({ year: d.getFullYear(), month: d.getMonth() });
+        } else {
+          // Fallback: mes actual — no permite retroceder
+          setEarliestMonth({ year: now.getFullYear(), month: now.getMonth() });
+        }
+      } catch (e) {
+        // En error: permite al menos 12 meses atrás para no bloquear al usuario
+        if (cancelled) return;
+        const d = new Date();
+        d.setMonth(d.getMonth() - 12);
+        setEarliestMonth({ year: d.getFullYear(), month: d.getMonth() });
+      }
+    })();
+    return () => { cancelled = true; };
+    // Solo depende de user.id — si cambia el usuario recalcula
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user?.id]);
 
   useFocusEffect(
     useCallback(() => {
@@ -108,8 +173,9 @@ export default function ReportsScreen() {
     }, [])
   );
 
-  // Navegar al mes anterior
+  // Navegar al mes anterior (respetando límite del registro del usuario)
   const goToPrevMonth = () => {
+    if (isEarliestMonth) return;
     if (selectedMonth === 0) {
       setSelectedYear(y => y - 1);
       setSelectedMonth(11);
@@ -373,7 +439,12 @@ export default function ReportsScreen() {
           <Text style={[s.headerTitle, { color: tc.text }]}>Reportes</Text>
           {/* Navegador mes */}
           <View style={s.monthNav}>
-            <TouchableOpacity onPress={goToPrevMonth} style={[s.monthNavBtn, { backgroundColor: tc.inputBg }]} activeOpacity={0.7}>
+            <TouchableOpacity
+              onPress={goToPrevMonth}
+              style={[s.monthNavBtn, { backgroundColor: tc.inputBg, opacity: isEarliestMonth ? 0.3 : 1 }]}
+              disabled={isEarliestMonth}
+              activeOpacity={0.7}
+            >
               <MaterialIcons name="chevron-left" size={20} color={tc.text} />
             </TouchableOpacity>
             <View style={s.monthNavLabel}>
