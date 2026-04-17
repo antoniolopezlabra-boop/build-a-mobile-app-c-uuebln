@@ -400,9 +400,10 @@ export default function ReportsScreen() {
           <View style={[s.paywallIconWrap, { backgroundColor: isDark ? '#1E293B' : '#F1F5F9' }]}>
             <Text style={{ fontSize: 36 }}>📊</Text>
           </View>
-          <Text style={[s.paywallTitle, { color: tc.text }]}>Reportes en Plan Básico</Text>
+          {/* REBRANDING Abr 2026: plan interno 'Basico' ahora se muestra como 'Premium'. */}
+          <Text style={[s.paywallTitle, { color: tc.text }]}>Reportes en Plan Premium</Text>
           <Text style={[s.paywallDesc, { color: tc.textMuted }]}>
-            Accede a reportes de ingresos, citas completadas y clientes con el Plan Básico o Premium.
+            Accede a reportes de ingresos, citas completadas y clientes con el Plan Premium o Luxury.
           </Text>
           <TouchableOpacity style={s.paywallBtn} onPress={() => router.push('/settings/subscription')}>
             <Text style={s.paywallBtnText}>Ver planes</Text>
