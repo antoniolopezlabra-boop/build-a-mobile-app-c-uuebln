@@ -51,6 +51,11 @@ const STATUS_META: Record<string, { color: string; label: string }> = {
   'En espera':  { color: '#0EA5E9', label: 'En espera' },
 };
 
+// Altura aproximada del FloatingTabBar (sin incluir insets.bottom).
+// Deriva de: paddingTop 8 + iconSize 24 + marginTop 2 label + ~14 line-height label + 4 paddingVertical tab = ~52px.
+// Usamos 56 para dejar un poco de margen de seguridad.
+const TAB_BAR_HEIGHT = 56;
+
 export default function AppointmentsScreen() {
   const router  = useRouter();
   const { user } = useAuth();
@@ -140,10 +145,6 @@ export default function AppointmentsScreen() {
   }, [appointments, selectedDate, hasStaff, staffMembers]);
 
   // PERFORMANCE FIX (Abr 2026): useMemo en conteos derivados.
-  // Antes: allDayAppts, confirmedCount, pendingCount se recalculaban en CADA render
-  // (ej. al scrollear o al cambiar cualquier estado). Además allDayAppts recorría
-  // TODAS las citas por fecha, y los conteos recorrían las ya filtradas.
-  // Ahora: solo recalcula cuando cambian appointments/selectedDate/dateAppointments.
   const allDayAppts = useMemo(
     () => appointments.filter(a => a.date === selectedDate),
     [appointments, selectedDate]
@@ -169,13 +170,11 @@ export default function AppointmentsScreen() {
     return map;
   }, [appointments, selectedDate]);
 
-  // PERFORMANCE FIX: activeStaff con useMemo para evitar .find() en cada render
   const activeStaff = useMemo(
     () => staffMembers.find(m => m.id === selectedStaffId),
     [staffMembers, selectedStaffId]
   );
 
-  // Fecha formateada — se recalcula solo cuando cambia selectedDate
   const { formattedDate, monthYear } = useMemo(() => {
     const selectedDateObj = new Date(selectedDate + 'T12:00:00');
     return {
@@ -184,11 +183,6 @@ export default function AppointmentsScreen() {
     };
   }, [selectedDate]);
 
-  // PERFORMANCE FIX CRÍTICO: calTheme memoizado.
-  // El componente <Calendar> de react-native-calendars es PESADO (grilla 7x6).
-  // Antes: calTheme se creaba como objeto nuevo en cada render → Calendar detectaba
-  // cambio de prop y se re-renderaba aunque el contenido fuera idéntico.
-  // Ahora: solo cambia cuando cambia el tema (light/dark) realmente.
   const calTheme = useMemo(() => ({
     backgroundColor:            tc.surface,
     calendarBackground:         tc.surface,
@@ -218,8 +212,10 @@ export default function AppointmentsScreen() {
     );
   }
 
-  // FIX #8: FAB bottom usa insets.bottom para respetar home indicator
-  const fabBottom = insets.bottom + 16;
+  // UI FIX (17 abr 2026): el FAB quedaba escondido detrás del FloatingTabBar.
+  // Antes: insets.bottom + 16 (solo dejaba espacio del home indicator, no del tab bar).
+  // Ahora: insets.bottom + TAB_BAR_HEIGHT + 16 para que flote claramente encima del menú.
+  const fabBottom = insets.bottom + TAB_BAR_HEIGHT + 16;
 
   return (
     <SafeAreaView style={[s.container, { backgroundColor: tc.bg }]} edges={['top']}>
@@ -416,7 +412,7 @@ export default function AppointmentsScreen() {
         </View>
       </ScrollView>
 
-      {/* FIX #8: FAB con bottom dinámico usando useSafeAreaInsets */}
+      {/* FIX UI (17 abr 2026): FAB encima del FloatingTabBar, no escondido detrás */}
       <TouchableOpacity
         style={[s.fab, { bottom: fabBottom }, !canSchedule && s.fabDisabled]}
         onPress={() => {
@@ -482,7 +478,7 @@ const s = StyleSheet.create({
   pillText:           { fontSize: 10, fontWeight: '700', color: '#3B82F6' },
   statusBadge:        { paddingHorizontal: 10, paddingVertical: 5, borderRadius: 10, marginRight: 6 },
   statusText:         { fontSize: 11, fontWeight: '700' },
-  // FIX #8: bottom se aplica inline con insets — solo right y tamaño aquí
-  fab:                { position: 'absolute', right: 20, width: 56, height: 56, borderRadius: 28, backgroundColor: colors.primary, justifyContent: 'center', alignItems: 'center', elevation: 4, shadowColor: '#000', shadowOpacity: 0.2, shadowRadius: 8 },
+  // FIX UI: bottom se aplica inline con insets + TAB_BAR_HEIGHT — solo right y tamaño aquí
+  fab:                { position: 'absolute', right: 20, width: 56, height: 56, borderRadius: 28, backgroundColor: colors.primary, justifyContent: 'center', alignItems: 'center', elevation: 8, shadowColor: '#000', shadowOpacity: 0.25, shadowRadius: 8, zIndex: 101 },
   fabDisabled:        { backgroundColor: '#94A3B8' },
 });
