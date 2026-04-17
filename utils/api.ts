@@ -1,4 +1,4 @@
-import { getTodayString, getTomorrowString, getDateStringDaysFromNow, toLocalDateString, addDays } from '@/utils/dateUtils';
+import { getTodayString, getTomorrowString, getDateStringDaysFromNow, toLocalDateString, addDays, getMonthStartString, getMonthEndString } from '@/utils/dateUtils';
 import { supabase } from '@/lib/supabase';
 import { logger } from '@/utils/logger';
 
@@ -7,6 +7,9 @@ const EXCLUDED_STATUSES = ['Cancelada', 'No asistió', 'Rechazada'];
 
 // Estados que SÍ cuentan como "ocupando el slot" (para availability check)
 const ACTIVE_STATUSES = ['Pendiente', 'Confirmada', 'Completada', 'Pagado', 'Reagendada', 'En espera', 'Solicitud'];
+
+// Límite mensual del plan Gratuito (debe coincidir con create-booking-request Edge Function)
+const GRATUITO_MONTHLY_LIMIT = 10;
 
 export async function getCurrentUserId(): Promise<string> {
   const { data: { user } } = await supabase.auth.getUser();
@@ -57,6 +60,40 @@ function extractIdFromPath(path: string): string {
     throw new Error(`Invalid path: missing ID in ${path}`);
   }
   return id;
+}
+
+// Valida si un usuario Gratuito ha alcanzado su límite mensual.
+// Usado tanto en apiPost /api/appointments como referenciado por create-booking-request.
+// Cuenta TODAS las citas del mes (app + link público combinadas), excluyendo canceladas.
+async function enforceGratuitoMonthlyLimit(userId: string): Promise<void> {
+  const { data: sub } = await supabase
+    .from('subscription_plans')
+    .select('plan_type')
+    .eq('user_id', userId)
+    .single();
+
+  const planType = sub?.plan_type?.toLowerCase() ?? 'gratuito';
+  if (planType !== 'gratuito') return;
+
+  const now = new Date();
+  const monthStart = getMonthStartString(now.getFullYear(), now.getMonth());
+  const monthEnd   = getMonthEndString(now.getFullYear(), now.getMonth());
+
+  const { count } = await supabase
+    .from('appointments')
+    .select('id', { count: 'exact', head: true })
+    .eq('user_id', userId)
+    .gte('date', monthStart)
+    .lte('date', monthEnd)
+    .not('status', 'in', `("${EXCLUDED_STATUSES.join('","')}")`);
+
+  if ((count ?? 0) >= GRATUITO_MONTHLY_LIMIT) {
+    const err: any = new Error(
+      `Alcanzaste el límite de ${GRATUITO_MONTHLY_LIMIT} citas del plan Gratuito este mes. Actualiza al Plan Premium para citas ilimitadas.`
+    );
+    err.code = 'PLAN_LIMIT_REACHED';
+    throw err;
+  }
 }
 
 export async function apiGet<T>(path: string): Promise<T> {
@@ -243,6 +280,11 @@ export async function apiPost<T>(path: string, body: any): Promise<T> {
   const userId = await getCurrentUserId();
 
   if (path === '/api/appointments') {
+    // ── Validar límite del plan Gratuito (server-side) ──
+    // Si el usuario es Gratuito y ya tiene 10+ citas activas este mes, rechazar.
+    // Este conteo incluye TODAS las citas (app + link público combinadas).
+    await enforceGratuitoMonthlyLimit(userId);
+
     const startTime = body.time;
     // FIX duración: respetar body.endTime. Si no viene, fallback 30 min.
     // La duración correcta debe venir del servicio elegido (pasada en body.endTime).
