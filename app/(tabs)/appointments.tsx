@@ -44,7 +44,7 @@ const STATUS_META: Record<string, { color: string; label: string }> = {
   Pendiente:    { color: '#F59E0B', label: 'Pendiente' },
   Cancelada:    { color: '#EF4444', label: 'Cancelada' },
   Completada:   { color: '#6B7280', label: 'Completada' },
-  'No asisti\xF3': { color: '#F97316', label: 'No asisti\xF3' },
+  'No asistió': { color: '#F97316', label: 'No asistió' },
   Reagendada:   { color: '#3B82F6', label: 'Reagendada' },
   Pagado:       { color: '#8B5CF6', label: 'Pagado' },
   Solicitud:    { color: '#3B82F6', label: 'Solicitud' },
@@ -139,9 +139,25 @@ export default function AppointmentsScreen() {
     return marked;
   }, [appointments, selectedDate, hasStaff, staffMembers]);
 
-  const allDayAppts    = appointments.filter(a => a.date === selectedDate);
-  const confirmedCount = dateAppointments.filter(a => a.status === 'Confirmada').length;
-  const pendingCount   = dateAppointments.filter(a => a.status === 'Pendiente').length;
+  // PERFORMANCE FIX (Abr 2026): useMemo en conteos derivados.
+  // Antes: allDayAppts, confirmedCount, pendingCount se recalculaban en CADA render
+  // (ej. al scrollear o al cambiar cualquier estado). Además allDayAppts recorría
+  // TODAS las citas por fecha, y los conteos recorrían las ya filtradas.
+  // Ahora: solo recalcula cuando cambian appointments/selectedDate/dateAppointments.
+  const allDayAppts = useMemo(
+    () => appointments.filter(a => a.date === selectedDate),
+    [appointments, selectedDate]
+  );
+
+  const { confirmedCount, pendingCount } = useMemo(() => {
+    let confirmed = 0;
+    let pending = 0;
+    for (const a of dateAppointments) {
+      if (a.status === 'Confirmada') confirmed++;
+      else if (a.status === 'Pendiente') pending++;
+    }
+    return { confirmedCount: confirmed, pendingCount: pending };
+  }, [dateAppointments]);
 
   const countByStaff = useMemo(() => {
     const byDate = appointments.filter(a => a.date === selectedDate);
@@ -153,11 +169,27 @@ export default function AppointmentsScreen() {
     return map;
   }, [appointments, selectedDate]);
 
-  const selectedDateObj = new Date(selectedDate + 'T12:00:00');
-  const formattedDate   = selectedDateObj.toLocaleDateString('es-MX', { weekday: 'long', month: 'long', day: 'numeric' });
-  const monthYear       = selectedDateObj.toLocaleDateString('es-MX', { month: 'long', year: 'numeric' });
+  // PERFORMANCE FIX: activeStaff con useMemo para evitar .find() en cada render
+  const activeStaff = useMemo(
+    () => staffMembers.find(m => m.id === selectedStaffId),
+    [staffMembers, selectedStaffId]
+  );
 
-  const calTheme = {
+  // Fecha formateada — se recalcula solo cuando cambia selectedDate
+  const { formattedDate, monthYear } = useMemo(() => {
+    const selectedDateObj = new Date(selectedDate + 'T12:00:00');
+    return {
+      formattedDate: selectedDateObj.toLocaleDateString('es-MX', { weekday: 'long', month: 'long', day: 'numeric' }),
+      monthYear:     selectedDateObj.toLocaleDateString('es-MX', { month: 'long', year: 'numeric' }),
+    };
+  }, [selectedDate]);
+
+  // PERFORMANCE FIX CRÍTICO: calTheme memoizado.
+  // El componente <Calendar> de react-native-calendars es PESADO (grilla 7x6).
+  // Antes: calTheme se creaba como objeto nuevo en cada render → Calendar detectaba
+  // cambio de prop y se re-renderaba aunque el contenido fuera idéntico.
+  // Ahora: solo cambia cuando cambia el tema (light/dark) realmente.
+  const calTheme = useMemo(() => ({
     backgroundColor:            tc.surface,
     calendarBackground:         tc.surface,
     textSectionTitleColor:      tc.textMuted,
@@ -176,7 +208,7 @@ export default function AppointmentsScreen() {
     textDayFontSize:            15,
     textMonthFontSize:          17,
     textDayHeaderFontSize:      13,
-  };
+  }), [tc.surface, tc.textMuted, tc.text, tc.border]);
 
   if (loading) {
     return (
@@ -185,8 +217,6 @@ export default function AppointmentsScreen() {
       </SafeAreaView>
     );
   }
-
-  const activeStaff = staffMembers.find(m => m.id === selectedStaffId);
 
   // FIX #8: FAB bottom usa insets.bottom para respetar home indicator
   const fabBottom = insets.bottom + 16;
