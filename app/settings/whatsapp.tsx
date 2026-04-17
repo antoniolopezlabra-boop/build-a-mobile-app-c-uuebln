@@ -48,57 +48,13 @@ const wb = StyleSheet.create({
   time:       { fontSize: 10, color: '#94A3B8', textAlign: 'right', marginTop: 6 },
 });
 
-// ─── Pantalla Gratuito: upgrade CTA ──────────────────────────────────────────
-function GratuitoScreen() {
-  const router = useRouter();
-  return (
-    <ScrollView contentContainerStyle={s.scroll} showsVerticalScrollIndicator={false}>
-      <View style={s.heroCard}>
-        <Text style={s.heroEmoji}>💬</Text>
-        <Text style={s.heroTitle}>Automatiza tus recordatorios</Text>
-        <Text style={s.heroDesc}>
-          Con VYLTA tus clientes reciben mensajes de WhatsApp automáticos al agendar su cita y antes de que llegue el día. Tú no tienes que hacer nada.
-        </Text>
-      </View>
-
-      <Text style={s.sectionLabel}>LO QUE INCLUYE</Text>
-      {[
-        { icon: 'check-circle', color: '#10B981', bg: '#ECFDF5', title: 'Confirmación al agendar', desc: 'Tu cliente recibe un WhatsApp en cuanto registras su cita.' },
-        { icon: 'schedule',     color: '#3B82F6', bg: '#EFF6FF', title: 'Recordatorio 24 horas antes', desc: 'Un mensaje el día anterior para que no se le olvide.' },
-        { icon: 'alarm',        color: '#F59E0B', bg: '#FFFBEB', title: 'Recordatorio 2 horas antes', desc: 'Un segundo aviso el mismo día de la cita.' },
-      ].map((item, i) => (
-        <View key={i} style={s.featureRow}>
-          <View style={[s.featureIcon, { backgroundColor: item.bg }]}>
-            <MaterialIcons name={item.icon as any} size={20} color={item.color} />
-          </View>
-          <View style={s.featureText}>
-            <Text style={s.featureTitle}>{item.title}</Text>
-            <Text style={s.featureDesc}>{item.desc}</Text>
-          </View>
-        </View>
-      ))}
-
-      <View style={s.upgradeCta}>
-        <Text style={s.upgradeCtaLabel}>DISPONIBLE DESDE</Text>
-        <Text style={s.upgradeCtaPrice}>Plan Básico — $990 MXN/mes</Text>
-        <Text style={s.upgradeCtaDesc}>
-          Activa el Plan Básico y VYLTA enviará todos estos mensajes por ti desde un número verificado por Meta.
-        </Text>
-        <TouchableOpacity style={s.upgradeCtaBtn} onPress={() => router.push('/settings/subscription')}>
-          <Text style={s.upgradeCtaBtnText}>Ver planes y activar →</Text>
-        </TouchableOpacity>
-      </View>
-      <View style={{ height: 40 }} />
-    </ScrollView>
-  );
-}
-
-// ─── Pantalla Básico y Premium: toggles + explicación ────────────────────────
-// Con la nueva arquitectura ambos planes usan el número compartido de VYLTA.
-// La pantalla Premium ya no tiene flujo de "conecta tu número propio".
-function ActiveScreen({ config, onToggle }: {
+// ─── Pantalla ACTIVA (todos los planes) ──────────────────────────────────────
+// WhatsApp está incluido en todos los planes (Básico, Premium, Luxury).
+// Los mensajes salen desde el número compartido VYLTA verificado por Meta.
+function ActiveScreen({ config, onToggle, isGratuito }: {
   config: WhatsAppConfig;
   onToggle: (field: keyof WhatsAppConfig, value: boolean) => void;
+  isGratuito: boolean;
 }) {
   return (
     <ScrollView contentContainerStyle={s.scroll} showsVerticalScrollIndicator={false}>
@@ -152,9 +108,19 @@ function ActiveScreen({ config, onToggle }: {
       <View style={s.noteBox}>
         <MaterialIcons name="info-outline" size={18} color="#3B82F6" />
         <Text style={s.noteText}>
-          Los mensajes salen desde el número oficial de VYLTA — el mismo para todos los negocios en la plataforma. Esto nos permite mantener el servicio incluido en tu plan sin costo adicional.
+          Los mensajes salen desde el número oficial de VYLTA — el mismo para todos los negocios en la plataforma. Esto nos permite mantener el servicio incluido en tu plan.
         </Text>
       </View>
+
+      {/* Aviso del límite 10/mes para Plan Básico (ex-Gratuito) */}
+      {isGratuito && (
+        <View style={s.limitNoteBox}>
+          <MaterialIcons name="info" size={18} color="#0369A1" />
+          <Text style={s.limitNoteText}>
+            Los recordatorios se envían para tus citas dentro del límite mensual de 10 citas del Plan Básico.
+          </Text>
+        </View>
+      )}
 
       {/* Toggles */}
       <Text style={s.sectionLabel}>ACTIVAR / DESACTIVAR MENSAJES</Text>
@@ -255,16 +221,15 @@ export default function WhatsAppSettingsScreen() {
         <View style={s.headerMid}>
           <Text style={[s.title, { color: tc.text }]}>WhatsApp Business</Text>
           <Text style={[s.subtitle, { color: tc.textMuted }]}>
-            {isGratuito ? 'Disponible desde Plan Básico' : 'Número compartido VYLTA · Mensajes automáticos'}
+            Número compartido VYLTA · Mensajes automáticos
           </Text>
         </View>
         <View style={{ width: 32 }} />
       </View>
 
-      {isGratuito
-        ? <GratuitoScreen />
-        : <ActiveScreen config={config} onToggle={handleToggle} />
-      }
+      {/* Todos los planes tienen acceso a la pantalla con toggles.
+          isGratuito se pasa solo para mostrar el aviso del límite de 10 citas/mes. */}
+      <ActiveScreen config={config} onToggle={handleToggle} isGratuito={isGratuito} />
     </SafeAreaView>
   );
 }
@@ -280,24 +245,7 @@ const s = StyleSheet.create({
   scroll:           { padding: 16 },
   sectionLabel:     { fontSize: 11, fontWeight: '800', letterSpacing: 1.2, color: '#94A3B8', marginBottom: 10, marginTop: 20 },
 
-  // Gratuito
-  heroCard:         { backgroundColor: '#ECFDF5', borderRadius: 20, padding: 24, alignItems: 'center', borderWidth: 0.5, borderColor: '#BBF7D0', marginBottom: 4 },
-  heroEmoji:        { fontSize: 48, marginBottom: 12 },
-  heroTitle:        { fontSize: 20, fontWeight: '800', color: '#065F46', marginBottom: 8, textAlign: 'center' },
-  heroDesc:         { fontSize: 14, color: '#047857', textAlign: 'center', lineHeight: 22 },
-  featureRow:       { flexDirection: 'row', gap: 14, alignItems: 'flex-start', backgroundColor: '#fff', borderRadius: 14, padding: 14, marginBottom: 8, shadowColor: '#000', shadowOpacity: 0.04, shadowRadius: 6, elevation: 1 },
-  featureIcon:      { width: 40, height: 40, borderRadius: 12, justifyContent: 'center', alignItems: 'center' },
-  featureText:      { flex: 1 },
-  featureTitle:     { fontSize: 14, fontWeight: '700', color: '#0F172A', marginBottom: 3 },
-  featureDesc:      { fontSize: 12, color: '#64748B', lineHeight: 18 },
-  upgradeCta:       { backgroundColor: '#0F172A', borderRadius: 20, padding: 24, alignItems: 'center', marginTop: 8 },
-  upgradeCtaLabel:  { fontSize: 10, fontWeight: '800', color: '#64748B', letterSpacing: 1.5, marginBottom: 6 },
-  upgradeCtaPrice:  { fontSize: 22, fontWeight: '800', color: '#fff', marginBottom: 10 },
-  upgradeCtaDesc:   { fontSize: 13, color: '#94A3B8', textAlign: 'center', lineHeight: 20, marginBottom: 20 },
-  upgradeCtaBtn:    { backgroundColor: '#10B981', borderRadius: 14, paddingVertical: 14, paddingHorizontal: 28 },
-  upgradeCtaBtnText:{ color: '#fff', fontWeight: '800', fontSize: 15 },
-
-  // Activo (Básico + Premium)
+  // Banner activo
   activeBanner:      { backgroundColor: '#F0FDF4', borderRadius: 16, padding: 16, borderWidth: 0.5, borderColor: '#BBF7D0', marginBottom: 4 },
   activeBannerTop:   { flexDirection: 'row', alignItems: 'center', gap: 12, marginBottom: 10 },
   activeBannerIcon:  { width: 48, height: 48, borderRadius: 14, backgroundColor: '#DCFCE7', justifyContent: 'center', alignItems: 'center' },
@@ -319,6 +267,9 @@ const s = StyleSheet.create({
 
   noteBox:          { flexDirection: 'row', gap: 10, backgroundColor: '#EFF6FF', borderRadius: 12, padding: 12, borderWidth: 0.5, borderColor: '#BFDBFE', marginBottom: 4 },
   noteText:         { flex: 1, fontSize: 12, color: '#1E40AF', lineHeight: 18 },
+
+  limitNoteBox:     { flexDirection: 'row', gap: 10, backgroundColor: '#E0F2FE', borderRadius: 12, padding: 12, borderWidth: 0.5, borderColor: '#7DD3FC', marginTop: 10 },
+  limitNoteText:    { flex: 1, fontSize: 12, color: '#0369A1', lineHeight: 18 },
 
   togglesCard:      { backgroundColor: '#fff', borderRadius: 16, overflow: 'hidden', shadowColor: '#000', shadowOpacity: 0.04, shadowRadius: 6, elevation: 1, marginBottom: 4 },
   toggleRow:        { flexDirection: 'row', alignItems: 'center', padding: 16, gap: 14 },
