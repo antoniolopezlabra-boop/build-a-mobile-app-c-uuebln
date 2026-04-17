@@ -17,12 +17,12 @@ interface PlanContextType {
   loading: boolean;
   canSchedule: boolean;
   canViewReports: boolean;
-  canUseWhatsApp: boolean;       // Básico+ — recordatorios salientes número VYLTA
-  canOverlap: boolean;           // Premium — citas simultáneas
-  canUseCollaborators: boolean;  // Premium
-  canRunCampaigns: boolean;      // Premium — email marketing + reactivación
-  canExportCSV: boolean;         // Premium
-  canUseBookingLink: boolean;    // Básico+ — link público de citas
+  canUseWhatsApp: boolean;       // Todos los planes — recordatorios salientes número VYLTA
+  canOverlap: boolean;           // Luxury (ex-Premium) — citas simultáneas
+  canUseCollaborators: boolean;  // Luxury (ex-Premium)
+  canRunCampaigns: boolean;      // Luxury (ex-Premium) — email marketing + reactivación
+  canExportCSV: boolean;         // Luxury (ex-Premium)
+  canUseBookingLink: boolean;    // Todos los planes — link público de citas
   isGratuito: boolean;
   isBasico: boolean;
   isPremium: boolean;
@@ -115,15 +115,20 @@ export function PlanProvider({ children }: { children: React.ReactNode }) {
     : 0;
   const isTrialActive = plan.status === 'trial' && daysLeftInTrial > 0;
 
-  // Permisos por plan — arquitectura simplificada Mar 2026
-  const canSchedule         = isBasico || isPremium || isTrialActive;
-  const canViewReports      = isBasico || isPremium || isTrialActive;
-  const canUseWhatsApp      = isBasico || isPremium || isTrialActive; // recordatorios salientes
-  const canOverlap          = isPremium;   // citas simultáneas
-  const canUseCollaborators = isPremium;
-  const canRunCampaigns     = isPremium;   // email marketing + reactivación inactivos
-  const canExportCSV        = isPremium;
-  const canUseBookingLink   = isBasico || isPremium || isTrialActive;
+  // ══════════════════════════════════════════════════════════
+  // Permisos por plan — rebranding visual Abr 2026 (Camino A)
+  // Los NOMBRES INTERNOS siguen igual (Gratuito/Basico/Premium)
+  // pero ahora Gratuito tiene acceso a más funciones, limitado a 10 citas/mes
+  // (límite enforced server-side en create-booking-request + apiPost /appointments)
+  // ══════════════════════════════════════════════════════════
+  const canSchedule         = true;  // Todos pueden agendar (Gratuito limitado a 10/mes server-side)
+  const canUseWhatsApp      = true;  // Todos pueden usar recordatorios WhatsApp
+  const canUseBookingLink   = true;  // Todos tienen link público
+  const canViewReports      = isBasico || isPremium || isTrialActive; // Básico+ only
+  const canOverlap          = isPremium;   // Luxury (ex-Premium) — citas simultáneas
+  const canUseCollaborators = isPremium;   // Luxury (ex-Premium)
+  const canRunCampaigns     = isPremium;   // Luxury (ex-Premium) — email marketing + reactivación
+  const canExportCSV        = isPremium;   // Luxury (ex-Premium)
 
   return (
     <PlanContext.Provider value={{
