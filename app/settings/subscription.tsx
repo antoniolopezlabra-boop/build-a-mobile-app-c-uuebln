@@ -18,7 +18,7 @@ import MaterialIcons from '@expo/vector-icons/MaterialIcons';
 // Los nombres internos (Gratuito/Basico/Premium) siguen igual en DB, Stripe, webhooks.
 // Solo cambian las etiquetas que ve el usuario.
 //
-// Interno Gratuito → Visible "Básico"   (10 citas/mes vía link + app)
+// Interno Gratuito → Visible "Básico"   ($0 MXN, 10 citas/mes vía link + app)
 // Interno Basico   → Visible "Premium"  (citas ilimitadas + WhatsApp + reportes)
 // Interno Premium  → Visible "Luxury"   (+ equipo + marketing + cumpleaños)
 // ──────────────────────────────────────────────────
@@ -71,7 +71,7 @@ const PLAN_LABEL: Record<string, string> = {
 };
 
 const PLAN_PRICE: Record<string, string> = {
-  Gratuito: 'Gratis',
+  Gratuito: '$0 MXN',
   Basico:   '$990 MXN / mes',
   Básico:   '$990 MXN / mes',
   Premium:  '$1,490 MXN / mes',
@@ -96,7 +96,7 @@ export default function SubscriptionScreen() {
 
   const currentPlan      = plan.planType;
   const currentPlanLabel = PLAN_LABEL[currentPlan] || 'Básico';
-  const priceLabel       = PLAN_PRICE[currentPlan] || 'Gratis';
+  const priceLabel       = PLAN_PRICE[currentPlan] || '$0 MXN';
   const emoji            = PLAN_EMOJI[currentPlan] || '🌱';
 
   const handleActivatePlan = (target: PlanTarget) => {
@@ -180,7 +180,7 @@ export default function SubscriptionScreen() {
           {isGratuito && (
             <View style={s.upgradeBanner}>
               <Text style={s.upgradeBannerText}>
-                💡 Tu plan Básico permite hasta 10 citas al mes (app + link público combinadas). Actualiza al Plan Premium para citas ilimitadas y más funciones.
+                💡 Tu Plan Básico permite hasta 10 citas al mes (app + link público combinadas). Actualiza al Plan Premium para citas ilimitadas y más funciones.
               </Text>
             </View>
           )}
@@ -201,7 +201,7 @@ export default function SubscriptionScreen() {
             <Text style={s.planName}>🌱 Básico</Text>
             {isGratuito && <View style={s.activeBadge}><Text style={s.activeBadgeText}>Tu plan actual</Text></View>}
           </View>
-          <Text style={s.planPrice}>Gratis</Text>
+          <Text style={s.planPrice}>$0 MXN</Text>
           <Text style={s.planPeriod}>hasta 10 citas al mes</Text>
           <View style={s.features}>
             {PLAN_FEATURES.Gratuito.map((f, i) => {
