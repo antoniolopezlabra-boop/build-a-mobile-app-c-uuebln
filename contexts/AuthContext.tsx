@@ -2,7 +2,7 @@ import React, { createContext, useContext, useState, useEffect, useRef, ReactNod
 import { router } from 'expo-router';
 import { supabase } from "@/lib/supabase";
 import { Session, User } from "@supabase/supabase-js";
-import { invalidateCache } from "@/utils/cache";
+import { invalidateCache, setCacheUserId } from "@/utils/cache";
 import { logger } from "@/utils/logger";
 
 interface AppUser {
@@ -69,9 +69,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         // Si ya cargamos este usuario, no volvemos a cargar (evita double-fetch al arranque)
         if (loadedUserIdRef.current === session.user.id) return;
         loadedUserIdRef.current = session.user.id;
+        // PERF+SEC (Abr 2026): registrar userId en el cache para aislamiento automático
+        setCacheUserId(session.user.id);
         await loadUserData(session.user);
       } else {
         loadedUserIdRef.current = null;
+        setCacheUserId(null);
         setUser(null);
         setBusinessProfile(null);
         setIsStaffAccount(false);
@@ -86,6 +89,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       if (session?.user) {
         if (loadedUserIdRef.current === session.user.id) return;
         loadedUserIdRef.current = session.user.id;
+        // PERF+SEC: registrar userId en el cache al arranque con sesión existente
+        setCacheUserId(session.user.id);
         await loadUserData(session.user);
       } else {
         setLoading(false);
@@ -224,6 +229,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     try {
       setAuthLoading(true);
       invalidateCache();
+      setCacheUserId(null); // Limpiar el userId registrado en el cache
       loadedUserIdRef.current = null;
       setIsStaffAccount(false);
       setStaffMemberData(null);
@@ -241,6 +247,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     if (supabaseUser) {
       // Forzar recarga
       loadedUserIdRef.current = null;
+      setCacheUserId(supabaseUser.id);
       await loadUserData(supabaseUser);
       loadedUserIdRef.current = supabaseUser.id;
     }
