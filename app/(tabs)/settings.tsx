@@ -16,6 +16,7 @@ import { useTheme, ThemeMode } from '@/contexts/ThemeContext';
 import { apiGet } from '@/utils/api';
 import { supabase } from '@/lib/supabase';
 import MaterialIcons from '@expo/vector-icons/MaterialIcons';
+import { getPlanDisplayName, getPlanPrice, getPlanEmoji } from '@/utils/planLabels';
 
 interface WhatsAppConfig {
   isConnected: boolean;
@@ -96,7 +97,7 @@ const grp = StyleSheet.create({
 export default function SettingsScreen() {
   const router = useRouter();
   const { user, businessProfile, signOut } = useAuth();
-  const { canOverlap, isPremium, isBasico, isGratuito, canUseBookingLink, canUseWhatsApp, canUseCollaborators } = usePlan();
+  const { canOverlap, isPremium, isBasico, isGratuito, canUseBookingLink, canUseWhatsApp, canUseCollaborators, plan } = usePlan();
   const { colors: tc, mode, setMode, isDark } = useTheme();
 
   const [logoutModal, setLogoutModal]           = useState(false);
@@ -111,7 +112,7 @@ export default function SettingsScreen() {
   const [loading, setLoading]                   = useState(true);
   const [staffCount, setStaffCount]             = useState(0);
 
-  // El chat con IA está disponible solo para Básico y Premium
+  // El chat con IA está disponible solo para planes de pago (Basico y Premium internos = Premium y Luxury visibles)
   const canUseAISupport = isBasico || isPremium;
 
   useEffect(() => { loadSettings(); }, []);
@@ -177,11 +178,17 @@ export default function SettingsScreen() {
     } catch { alert('Error al eliminar la cuenta. Intenta de nuevo.'); } finally { setDeleting(false); }
   };
 
+  // REBRANDING Abr 2026: nombres visibles derivan del helper central.
+  // Interno: Gratuito/Basico/Premium → Visible: Básico/Premium/Luxury
+  // Ver utils/planLabels.ts
+  const planDisplay = getPlanDisplayName(plan.planType);
+  const planPrice   = getPlanPrice(plan.planType);
+  const planEmoji   = getPlanEmoji(plan.planType);
+
+  // Colores del plan: Premium visible (interno Basico) = verde, Luxury visible (interno Premium) = morado
   const planColor   = isPremium ? '#6366F1' : isBasico ? '#10B981' : '#94A3B8';
   const planBg      = isPremium ? '#EDE9FE' : isBasico ? '#ECFDF5' : '#F1F5F9';
-  const planPrice   = isPremium ? '$1,490 MXN/mes' : isBasico ? '$990 MXN/mes' : 'Gratis';
-  const planEmoji   = isPremium ? '⭐' : isBasico ? '🚀' : '🌱';
-  const planDisplay = isPremium ? 'Premium' : isBasico ? 'Básico' : 'Gratuito';
+
   const initials = user?.name?.split(' ').map((w: string) => w[0]).slice(0, 2).join('').toUpperCase() || 'U';
 
   const waActive = canUseWhatsApp && (
@@ -190,13 +197,13 @@ export default function SettingsScreen() {
     whatsappConfig?.reminder2h
   );
   const waSubLabel = isGratuito
-    ? 'Disponible en Plan Básico'
+    ? 'Disponible en Plan Premium'
     : waActive
       ? 'Recordatorios activos · Número VYLTA'
       : 'Recordatorios desactivados';
 
   const staffSublabel = !canUseCollaborators
-    ? 'Solo disponible en Plan Premium'
+    ? 'Solo disponible en Plan Luxury'
     : staffCount > 0
       ? `${staffCount} colaborador${staffCount !== 1 ? 'es' : ''} activo${staffCount !== 1 ? 's' : ''} (máx. 5)`
       : 'Sin colaboradores — toca para agregar';
@@ -311,7 +318,7 @@ export default function SettingsScreen() {
             sublabel={staffSublabel}
             badge={
               !canUseCollaborators
-                ? <View style={s.premiumChip}><Text style={s.premiumChipText}>PREMIUM</Text></View>
+                ? <View style={s.luxuryChip}><Text style={s.luxuryChipText}>LUXURY</Text></View>
                 : undefined
             }
             disabled={!canUseCollaborators}
@@ -328,11 +335,11 @@ export default function SettingsScreen() {
             sublabel={
               canOverlap
                 ? 'Permite atender más de una cita al mismo tiempo'
-                : 'Solo disponible en Plan Premium'
+                : 'Solo disponible en Plan Luxury'
             }
             badge={
               !canOverlap
-                ? <View style={s.premiumChip}><Text style={s.premiumChipText}>PREMIUM</Text></View>
+                ? <View style={s.luxuryChip}><Text style={s.luxuryChipText}>LUXURY</Text></View>
                 : undefined
             }
             disabled={!canOverlap}
@@ -356,9 +363,9 @@ export default function SettingsScreen() {
             sublabel={
               canUseBookingLink
                 ? (bookingLinkActive ? 'Activo — clientes pueden agendar en línea' : 'Inactivo — toca para configurar')
-                : 'Disponible en Plan Básico'
+                : 'Disponible en Plan Premium'
             }
-            badge={!canUseBookingLink ? <View style={s.basicoChip}><Text style={s.basicoChipText}>BÁSICO</Text></View> : undefined}
+            badge={!canUseBookingLink ? <View style={s.premiumChip}><Text style={s.premiumChipText}>PREMIUM</Text></View> : undefined}
             right={
               canUseBookingLink ? (
                 <View style={[s.waBadge, { backgroundColor: bookingLinkActive ? '#ECFDF5' : '#F1F5F9' }]}>
@@ -379,7 +386,7 @@ export default function SettingsScreen() {
             iconName="cake" iconColor="#EC4899" iconBg="#FDF2F8"
             label="Cumpleaños automáticos"
             sublabel={birthdayEnabled ? 'Activado — envía WhatsApp el día del cumpleaños' : 'Desactivado'}
-            badge={!isPremium ? <View style={s.premiumChip}><Text style={s.premiumChipText}>PREMIUM</Text></View> : undefined}
+            badge={!isPremium ? <View style={s.luxuryChip}><Text style={s.luxuryChipText}>LUXURY</Text></View> : undefined}
             right={
               <View style={s.statusRight}>
                 {birthdayEnabled && <View style={[s.statusDot, { backgroundColor: '#EC4899' }]} />}
@@ -392,14 +399,14 @@ export default function SettingsScreen() {
             iconName="email" iconColor="#6366F1" iconBg="#EEF2FF"
             label="Email Marketing"
             sublabel="Envía campañas y promociones a tus clientes"
-            badge={!isPremium ? <View style={s.premiumChip}><Text style={s.premiumChipText}>PREMIUM</Text></View> : undefined}
+            badge={!isPremium ? <View style={s.luxuryChip}><Text style={s.luxuryChipText}>LUXURY</Text></View> : undefined}
             onPress={() => isPremium ? router.push('/marketing') : router.push('/settings/subscription')}
           />
           <SettingRow
             iconName="person-search" iconColor="#F59E0B" iconBg="#FFFBEB"
             label="Recuperar clientes inactivos"
             sublabel="Detecta y reactiva clientes sin visita reciente"
-            badge={!isPremium ? <View style={s.premiumChip}><Text style={s.premiumChipText}>PREMIUM</Text></View> : undefined}
+            badge={!isPremium ? <View style={s.luxuryChip}><Text style={s.luxuryChipText}>LUXURY</Text></View> : undefined}
             onPress={() => isPremium ? router.push('/clients/inactive') : router.push('/settings/subscription')}
           />
         </SettingGroup>
@@ -410,7 +417,7 @@ export default function SettingsScreen() {
             iconName="message" iconColor="#25D366" iconBg="#F0FDF4"
             label="Recordatorios automáticos"
             sublabel={waSubLabel}
-            badge={isGratuito ? <View style={s.basicoChip}><Text style={s.basicoChipText}>BÁSICO</Text></View> : undefined}
+            badge={isGratuito ? <View style={s.premiumChip}><Text style={s.premiumChipText}>PREMIUM</Text></View> : undefined}
             right={
               !isGratuito ? (
                 <View style={[s.waBadge, { backgroundColor: waActive ? '#ECFDF5' : '#FEF3C7' }]}>
@@ -472,11 +479,11 @@ export default function SettingsScreen() {
             sublabel={
               canUseAISupport
                 ? 'Pregunta lo que quieras sobre VYLTA'
-                : 'Disponible en Plan Básico y Premium'
+                : 'Disponible en Plan Premium y Luxury'
             }
             badge={
               !canUseAISupport
-                ? <View style={s.basicoChip}><Text style={s.basicoChipText}>BÁSICO</Text></View>
+                ? <View style={s.premiumChip}><Text style={s.premiumChipText}>PREMIUM</Text></View>
                 : undefined
             }
             right={
@@ -540,10 +547,12 @@ const s = StyleSheet.create({
   waBadge:            { flexDirection: 'row', alignItems: 'center', gap: 5, paddingHorizontal: 10, paddingVertical: 5, borderRadius: 20 },
   waDot:              { width: 7, height: 7, borderRadius: 4 },
   waText:             { fontSize: 12, fontWeight: '700' },
-  premiumChip:        { backgroundColor: '#FFFBEB', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 5 },
-  premiumChipText:    { fontSize: 9, fontWeight: '800', color: '#92400E' },
-  basicoChip:         { backgroundColor: '#ECFDF5', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 5 },
-  basicoChipText:     { fontSize: 9, fontWeight: '800', color: '#065F46' },
+  // CHIP LUXURY (interno 'Premium', visible 'Luxury') — morado/dorado, el más premium
+  luxuryChip:         { backgroundColor: '#FFFBEB', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 5 },
+  luxuryChipText:     { fontSize: 9, fontWeight: '800', color: '#92400E' },
+  // CHIP PREMIUM (interno 'Basico', visible 'Premium') — verde
+  premiumChip:        { backgroundColor: '#ECFDF5', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 5 },
+  premiumChipText:    { fontSize: 9, fontWeight: '800', color: '#065F46' },
   statusRight:        { flexDirection: 'row', alignItems: 'center', gap: 6 },
   statusDot:          { width: 8, height: 8, borderRadius: 4 },
   themeToggleWrap:    { flexDirection: 'row', gap: 6 },
