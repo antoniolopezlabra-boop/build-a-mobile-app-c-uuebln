@@ -1,6 +1,6 @@
 
 import React from 'react';
-import { Href, Stack } from 'expo-router';
+import { Href, Tabs } from 'expo-router';
 import FloatingTabBar from '@/components/FloatingTabBar';
 import { colors } from '@/styles/commonStyles';
 
@@ -38,16 +38,31 @@ export default function TabLayout() {
     },
   ];
 
+  // PERFORMANCE FIX (Abr 2026): cambio de Stack a Tabs
+  // Motivo: Stack montaba/desmontaba cada pantalla en cada cambio de tab,
+  // causando re-render completo de Reportes (826 líneas) y lag visible.
+  // Con Tabs las pantallas se montan 1 vez y quedan en memoria, solo se
+  // (ocultan/muestran). useFocusEffect sigue disparándose para revalidar datos.
+  //
+  // Conservamos el FloatingTabBar custom ocultando el tabBar nativo con display:'none'.
   return (
     <>
-      <Stack screenOptions={{ headerShown: false }}>
-        <Stack.Screen name="(home)" options={{ headerShown: false }} />
-        <Stack.Screen name="appointments" options={{ headerShown: false }} />
-        <Stack.Screen name="clients" options={{ headerShown: false }} />
-        <Stack.Screen name="reports" options={{ headerShown: false }} />
-        <Stack.Screen name="settings" options={{ headerShown: false }} />
-        <Stack.Screen name="profile" options={{ headerShown: false }} />
-      </Stack>
+      <Tabs
+        screenOptions={{
+          headerShown: false,
+          tabBarStyle: { display: 'none' }, // Ocultar tab bar nativo — usamos FloatingTabBar
+          // Keep screens mounted when switching tabs (la razón principal del cambio)
+          lazy: false,
+          animation: 'none', // Sin animación nativa — el feel es instantáneo
+        }}
+      >
+        <Tabs.Screen name="(home)" />
+        <Tabs.Screen name="appointments" />
+        <Tabs.Screen name="clients" />
+        <Tabs.Screen name="reports" />
+        <Tabs.Screen name="settings" />
+        <Tabs.Screen name="profile" options={{ href: null }} />
+      </Tabs>
       <FloatingTabBar tabs={tabs} />
     </>
   );
