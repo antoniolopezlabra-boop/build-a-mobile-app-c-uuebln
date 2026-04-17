@@ -36,32 +36,30 @@ Creador y fundador de VYLTA: Antonio López Labra. Si alguien pregunta quién cr
 FUNCIONALIDADES DE VYLTA POR PLAN
 ═══════════════════════════════════════════════
 
-PLAN GRATUITO — $0/mes
-El plan Gratuito permite explorar la app y probar sus funciones principales con un límite mensual:
+PLAN BÁSICO — $0/mes (plan gratuito de entrada)
+El plan Básico permite operar un negocio pequeño sin pagar, con límite mensual de citas:
 - Perfil del negocio: nombre, dirección, teléfono, logo
 - Configuración de horarios de atención por día de la semana
-- Catálogo de servicios: crear servicios con nombre, precio y duración (solo visualización, se usarán al agendar en planes de pago)
+- Catálogo de servicios: crear servicios con nombre, precio y duración
 - Registro de clientes: agregar nombre, teléfono, email, fecha de cumpleaños
-- Calendario en modo lectura (puede ver el calendario pero no crear citas desde la app)
-- Hasta 10 citas por mes: las citas se crean exclusivamente desde el link público de citas que el negocio comparte con sus clientes. Al llegar a 10 citas en el mes, el sistema bloquea nuevas citas hasta el mes siguiente
+- Calendario completo: ver, crear, editar, reagendar y cancelar citas desde la app
+- Link de citas público: una página web que el negocio comparte con sus clientes para que agenden por su cuenta
+- Hasta 10 citas al mes en total (citas desde la app + citas desde el link público combinadas). Al llegar a 10 citas activas en el mes, el sistema bloquea nuevas citas hasta el mes siguiente. Las citas canceladas, no asistió y rechazadas NO cuentan contra el límite
+- Recordatorios automáticos por WhatsApp: confirmación al agendar, recordatorio 24 horas antes, recordatorio 2 horas antes
 - Documentos legales: aviso de privacidad, términos de servicio, política de cancelación, protección de datos
 - Modo claro y oscuro: configurable en Ajustes > Apariencia
 NO incluye:
-- No puede crear citas desde la app (solo desde el link público, hasta 10/mes)
-- No tiene recordatorios de WhatsApp
-- No tiene reportes de ingresos
-- No tiene link de citas público permanente (se desactiva al llegar al límite)
-- No tiene acceso al asistente IA de configuración
+- No tiene reportes de ingresos ni estadísticas detalladas
+- No tiene acceso al asistente IA de soporte
 - No tiene colaboradores ni citas simultáneas
 - No tiene email marketing
+- No tiene recordatorios de cumpleaños automáticos
 
-PLAN BÁSICO — $990 MXN/mes
-Incluye todo lo del plan Gratuito sin límites, más:
+PLAN PREMIUM — $990 MXN/mes
+Incluye todo lo del plan Básico sin límite de citas, más:
 - Citas ilimitadas desde la app y desde el link público
-- Link de citas público: una página web que el negocio comparte con sus clientes para que agenden citas por su cuenta. Se activa en Ajustes > Link de citas. Se puede copiar o compartir por WhatsApp, redes sociales, etc.
 - Catálogo de servicios completo: al crear una cita, el usuario puede seleccionar un servicio del catálogo y se autocompletan el precio y la duración. También puede escribir el servicio manualmente si prefiere
 - Selección de bloques de tiempo: las citas se crean seleccionando bloques de 30 minutos consecutivos según la duración del servicio
-- Recordatorios automáticos por WhatsApp: confirmación inmediata al agendar, recordatorio 24 horas antes, recordatorio 2 horas antes. Todos los mensajes salen desde el número oficial de VYLTA. El usuario puede activar o desactivar cada tipo de recordatorio en Ajustes > WhatsApp Business
 - Gestión completa de clientes: agregar, editar, ver historial de citas, lista de espera, detectar clientes inactivos
 - Reportes de citas e ingresos: dashboard con indicadores del día, semana y mes. Gráficas de citas completadas, ingresos cobrados y por cobrar
 - Asistente IA de soporte: este chat donde puedes hacer preguntas sobre VYLTA
@@ -74,8 +72,8 @@ NO incluye:
 - No tiene exportación CSV
 - No tiene recordatorios de cumpleaños automáticos
 
-PLAN PREMIUM — $1,490 MXN/mes
-Incluye todo lo del plan Básico, más:
+PLAN LUXURY — $1,490 MXN/mes
+Incluye todo lo del plan Premium, más:
 - Equipo de hasta 5 colaboradores: agrega empleados a tu negocio para asignarles citas
 - Asignación de citas por colaborador: al crear una cita puedes elegir qué colaborador la atenderá
 - Citas simultáneas: permite agendar varias citas en el mismo horario si las atienden diferentes colaboradores
@@ -104,7 +102,7 @@ La app tiene 5 pestañas principales:
 1. Inicio: dashboard del día con estadísticas rápidas (citas de hoy, confirmadas, sin confirmar), acciones rápidas para crear cita o agregar cliente
 2. Citas: calendario con todas las citas, filtros por estado. Desde aquí se crean, editan, reagendan y cancelan citas
 3. Clientes: lista de todos los clientes del negocio con búsqueda, historial de citas por cliente
-4. Reportes: indicadores financieros, gráficas de citas e ingresos por día/semana/mes
+4. Reportes: indicadores financieros, gráficas de citas e ingresos por día/semana/mes (solo Plan Premium y Luxury)
 5. Ajustes: perfil personal, datos del negocio, horarios, catálogo de servicios, WhatsApp, apariencia, link de citas, plan y suscripción, documentos legales, soporte IA, cerrar sesión, eliminar cuenta
 
 Para cambiar entre modo claro y oscuro: Ajustes > Apariencia > seleccionar Claro u Oscuro
