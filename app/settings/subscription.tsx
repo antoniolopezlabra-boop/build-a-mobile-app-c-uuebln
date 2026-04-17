@@ -14,9 +14,13 @@ import { PLAN_PRICES } from '@/services/stripe';
 import MaterialIcons from '@expo/vector-icons/MaterialIcons';
 
 // ──────────────────────────────────────────────────
-// PLAN GRATUITO: hasta 10 citas/mes vía link público (enforced en Edge Function)
-// PLAN BÁSICO: operación completa para un negocio de 1 persona
-// PLAN PREMIUM: equipo, marketing y reportes avanzados
+// REBRANDING VISUAL — Camino A (Abr 2026)
+// Los nombres internos (Gratuito/Basico/Premium) siguen igual en DB, Stripe, webhooks.
+// Solo cambian las etiquetas que ve el usuario.
+//
+// Interno Gratuito → Visible "Básico"   (10 citas/mes vía link + app)
+// Interno Basico   → Visible "Premium"  (citas ilimitadas + WhatsApp + reportes)
+// Interno Premium  → Visible "Luxury"   (+ equipo + marketing + cumpleaños)
 // ──────────────────────────────────────────────────
 const PLAN_FEATURES = {
   Gratuito: [
@@ -24,15 +28,15 @@ const PLAN_FEATURES = {
     'Configuración de horarios',
     'Catálogo de servicios (visualización)',
     'Link de citas público',
-    'Hasta 10 citas al mes vía link público',
+    'Citas desde la app y desde el link',
+    'Hasta 10 citas al mes (combinadas)',
+    'Recordatorios WhatsApp automáticos',
     'Gestión básica de clientes',
-    'Sin citas creadas desde la app',
-    'Sin recordatorios WhatsApp',
+    'Sin reportes de ingresos',
     'Sin soporte con IA',
-    'Sin reportes',
   ],
   Basico: [
-    'Todo lo del Plan Gratuito',
+    'Todo lo del Plan Básico',
     'Citas ilimitadas desde la app y link público',
     'Catálogo de servicios ilimitado',
     'Recordatorios WhatsApp automáticos',
@@ -45,7 +49,7 @@ const PLAN_FEATURES = {
     'Soporte por email',
   ],
   Premium: [
-    'Todo lo del Plan Básico',
+    'Todo lo del Plan Premium',
     'Equipo de hasta 5 colaboradores',
     'Asignación de citas por colaborador',
     'Citas simultáneas (atención en paralelo)',
@@ -56,6 +60,14 @@ const PLAN_FEATURES = {
     'Asistente IA de soporte y configuración',
     'Soporte prioritario',
   ],
+};
+
+// Label visible para cada plan interno
+const PLAN_LABEL: Record<string, string> = {
+  Gratuito: 'Básico',
+  Basico:   'Premium',
+  Básico:   'Premium',
+  Premium:  'Luxury',
 };
 
 const PLAN_PRICE: Record<string, string> = {
@@ -82,9 +94,10 @@ export default function SubscriptionScreen() {
   });
   const [errorModal, setErrorModal] = useState({ visible: false, message: '' });
 
-  const currentPlan = plan.planType;
-  const priceLabel  = PLAN_PRICE[currentPlan] || 'Gratis';
-  const emoji       = PLAN_EMOJI[currentPlan] || '🌱';
+  const currentPlan      = plan.planType;
+  const currentPlanLabel = PLAN_LABEL[currentPlan] || 'Básico';
+  const priceLabel       = PLAN_PRICE[currentPlan] || 'Gratis';
+  const emoji            = PLAN_EMOJI[currentPlan] || '🌱';
 
   const handleActivatePlan = (target: PlanTarget) => {
     setConfirmModal({ visible: true, target });
@@ -112,7 +125,8 @@ export default function SubscriptionScreen() {
     );
   }
 
-  const targetName  = confirmModal.target === 'Premium' ? 'Premium' : 'Básico';
+  // Labels para el modal de confirmación de activación de plan
+  const targetName  = confirmModal.target === 'Premium' ? 'Luxury'  : 'Premium';
   const targetPrice = confirmModal.target === 'Premium' ? '$1,490 MXN/mes' : '$990 MXN/mes';
 
   return (
@@ -158,7 +172,7 @@ export default function SubscriptionScreen() {
               <Text style={[s.currentName, {
                 color: isPremium ? '#6366F1' : isBasico ? '#10B981' : '#64748B',
               }]}>
-                {isPremium ? 'Premium' : isBasico ? 'Básico' : 'Gratuito'}
+                {currentPlanLabel}
               </Text>
               <Text style={s.currentPrice}>{priceLabel}</Text>
             </View>
@@ -166,14 +180,14 @@ export default function SubscriptionScreen() {
           {isGratuito && (
             <View style={s.upgradeBanner}>
               <Text style={s.upgradeBannerText}>
-                💡 Tu plan Gratuito permite hasta 10 citas al mes vía tu link público. Activa el Plan Básico para citas ilimitadas, recordatorios de WhatsApp y reportes.
+                💡 Tu plan Básico permite hasta 10 citas al mes (app + link público combinadas). Actualiza al Plan Premium para citas ilimitadas y más funciones.
               </Text>
             </View>
           )}
           {isBasico && (
             <View style={[s.upgradeBanner, { backgroundColor: '#EEF2FF', borderColor: '#6366F1' }]}>
               <Text style={[s.upgradeBannerText, { color: '#3730A3' }]}>
-                Mejora al Plan Premium para activar tu equipo de colaboradores, email marketing y reportes avanzados.
+                Mejora al Plan Luxury para activar tu equipo de colaboradores, email marketing y reportes avanzados.
               </Text>
             </View>
           )}
@@ -181,10 +195,10 @@ export default function SubscriptionScreen() {
 
         <Text style={s.sectionLabel}>PLANES DISPONIBLES</Text>
 
-        {/* Plan Gratuito */}
+        {/* Plan Básico (interno: Gratuito) */}
         <View style={[s.planCard, isGratuito && s.planCardActive]}>
           <View style={s.planHeader}>
-            <Text style={s.planName}>🌱 Gratuito</Text>
+            <Text style={s.planName}>🌱 Básico</Text>
             {isGratuito && <View style={s.activeBadge}><Text style={s.activeBadgeText}>Tu plan actual</Text></View>}
           </View>
           <Text style={s.planPrice}>Gratis</Text>
@@ -206,10 +220,10 @@ export default function SubscriptionScreen() {
           </View>
         </View>
 
-        {/* Plan Básico */}
+        {/* Plan Premium (interno: Basico) */}
         <View style={[s.planCard, isBasico && s.planCardActive]}>
           <View style={s.planHeader}>
-            <Text style={s.planName}>🚀 Básico</Text>
+            <Text style={s.planName}>🚀 Premium</Text>
             {isBasico && <View style={s.activeBadge}><Text style={s.activeBadgeText}>Tu plan actual</Text></View>}
           </View>
           <Text style={s.planPrice}>$990 MXN</Text>
@@ -234,16 +248,16 @@ export default function SubscriptionScreen() {
           {isGratuito && (
             <TouchableOpacity style={s.ctaBtn} onPress={() => handleActivatePlan('Basico')}>
               <MaterialIcons name="lock-open" size={18} color="#fff" />
-              <Text style={s.ctaBtnText}>Activar Plan Básico</Text>
+              <Text style={s.ctaBtnText}>Activar Plan Premium</Text>
             </TouchableOpacity>
           )}
         </View>
 
-        {/* Plan Premium */}
+        {/* Plan Luxury (interno: Premium) */}
         <View style={[s.planCard, s.planCardPremium, isPremium && s.planCardPremiumActive]}>
           <View style={s.premiumBadge}><Text style={s.premiumBadgeText}>⭐ RECOMENDADO</Text></View>
           <View style={s.planHeader}>
-            <Text style={[s.planName, { color: '#6366F1' }]}>Premium</Text>
+            <Text style={[s.planName, { color: '#6366F1' }]}>Luxury</Text>
             {isPremium && <View style={[s.activeBadge, { backgroundColor: '#6366F1' }]}><Text style={s.activeBadgeText}>Tu plan actual</Text></View>}
           </View>
           <Text style={[s.planPrice, { color: '#6366F1' }]}>$1,490 MXN</Text>
@@ -268,7 +282,7 @@ export default function SubscriptionScreen() {
           {!isPremium && (
             <TouchableOpacity style={[s.ctaBtn, { backgroundColor: '#6366F1' }]} onPress={() => handleActivatePlan('Premium')}>
               <MaterialIcons name="lock-open" size={18} color="#fff" />
-              <Text style={s.ctaBtnText}>Activar Plan Premium</Text>
+              <Text style={s.ctaBtnText}>Activar Plan Luxury</Text>
             </TouchableOpacity>
           )}
         </View>
