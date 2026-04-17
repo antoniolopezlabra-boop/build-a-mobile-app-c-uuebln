@@ -54,7 +54,7 @@ const { height: SCREEN_HEIGHT } = Dimensions.get('window');
 export default function NewAppointmentScreen() {
   const router = useRouter();
   const { user } = useAuth();
-  const { canSchedule, isGratuito } = usePlan();
+  const { isGratuito } = usePlan();
   const [loading, setLoading] = useState(false);
   const saveLockRef = useRef(false); // FIX: guard contra doble-submit
 
@@ -273,9 +273,6 @@ export default function NewAppointmentScreen() {
     if (saveLockRef.current) return;
 
     Keyboard.dismiss();
-    if (!canSchedule) {
-      setErrorModal({ visible: true, message: '⚠️ Tu plan Gratuito no permite agendar citas. Actualiza a Plan Básico.' }); return;
-    }
     if (!selectedClient) { setErrorModal({ visible: true, message: 'Por favor selecciona un cliente' }); return; }
     if (!service.trim())  { setErrorModal({ visible: true, message: 'Por favor ingresa el servicio' }); return; }
     const lastBlock = selectedBlocks.length > 0 ? selectedBlocks[selectedBlocks.length-1] : time;
@@ -313,6 +310,7 @@ export default function NewAppointmentScreen() {
       // Solo desbloquear en error — en éxito el router.back() desmonta el componente
       saveLockRef.current = false;
       setLoading(false);
+      // El mensaje de PLAN_LIMIT_REACHED viene del server-side en apiPost
       setErrorModal({ visible: true, message: error?.message || 'Error al crear la cita' });
     }
   };
@@ -346,6 +344,16 @@ export default function NewAppointmentScreen() {
           keyboardDismissMode="on-drag"
           scrollEnabled={!showDatePanel}
         >
+          {/* Aviso plan Básico (ex-Gratuito) */}
+          {isGratuito && (
+            <View style={styles.planNoticeBanner}>
+              <MaterialIcons name="info" size={16} color="#0369A1" />
+              <Text style={styles.planNoticeText}>
+                Plan Básico: hasta 10 citas al mes (app + link público combinadas). Actualiza al Plan Premium para citas ilimitadas.
+              </Text>
+            </View>
+          )}
+
           {/* Cliente */}
           <View style={styles.section}>
             <Text style={styles.label}>Cliente *</Text>
@@ -821,6 +829,8 @@ const styles = StyleSheet.create({
   title:                  { fontSize: 20, fontWeight: '600', color: colors.text },
   placeholder:            { width: 32 },
   content:                { flex: 1, padding: 20 },
+  planNoticeBanner:       { flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: '#E0F2FE', borderRadius: 10, padding: 12, marginBottom: 20, borderWidth: 0.5, borderColor: '#7DD3FC' },
+  planNoticeText:         { flex: 1, fontSize: 12, color: '#0369A1', lineHeight: 16 },
   section:                { marginBottom: 24 },
   inputGroup:             { marginBottom: 24 },
   labelRow:               { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 },
