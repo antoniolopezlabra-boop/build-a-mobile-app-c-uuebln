@@ -72,9 +72,9 @@ const PLAN_LABEL: Record<string, string> = {
 
 const PLAN_PRICE: Record<string, string> = {
   Gratuito: '$0 MXN',
-  Basico:   '$990 MXN / mes',
-  Básico:   '$990 MXN / mes',
-  Premium:  '$1,490 MXN / mes',
+  Basico:   '$399 MXN / mes',  // ACTUALIZADO — era $990
+  Básico:   '$399 MXN / mes',  // ACTUALIZADO — era $990
+  Premium:  '$799 MXN / mes',  // ACTUALIZADO — era $1,490
 };
 
 const PLAN_EMOJI: Record<string, string> = {
@@ -127,7 +127,7 @@ export default function SubscriptionScreen() {
 
   // Labels para el modal de confirmación de activación de plan
   const targetName  = confirmModal.target === 'Premium' ? 'Luxury'  : 'Premium';
-  const targetPrice = confirmModal.target === 'Premium' ? '$1,490 MXN/mes' : '$990 MXN/mes';
+  const targetPrice = confirmModal.target === 'Premium' ? '$799 MXN/mes' : '$399 MXN/mes';  // ACTUALIZADO
 
   return (
     <SafeAreaView style={s.container}>
@@ -226,7 +226,7 @@ export default function SubscriptionScreen() {
             <Text style={s.planName}>🚀 Premium</Text>
             {isBasico && <View style={s.activeBadge}><Text style={s.activeBadgeText}>Tu plan actual</Text></View>}
           </View>
-          <Text style={s.planPrice}>$990 MXN</Text>
+          <Text style={s.planPrice}>$399 MXN</Text>
           <Text style={s.planPeriod}>por mes</Text>
           <View style={s.features}>
             {PLAN_FEATURES.Basico.map((f, i) => {
@@ -260,7 +260,7 @@ export default function SubscriptionScreen() {
             <Text style={[s.planName, { color: '#6366F1' }]}>Luxury</Text>
             {isPremium && <View style={[s.activeBadge, { backgroundColor: '#6366F1' }]}><Text style={s.activeBadgeText}>Tu plan actual</Text></View>}
           </View>
-          <Text style={[s.planPrice, { color: '#6366F1' }]}>$1,490 MXN</Text>
+          <Text style={[s.planPrice, { color: '#6366F1' }]}>$799 MXN</Text>
           <Text style={s.planPeriod}>por mes</Text>
           <View style={s.features}>
             {PLAN_FEATURES.Premium.map((f, i) => {

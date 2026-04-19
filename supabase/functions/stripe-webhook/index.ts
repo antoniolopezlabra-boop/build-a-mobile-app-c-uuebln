@@ -29,7 +29,10 @@ Deno.serve(async (req: Request) => {
     if (!userId) return new Response('No user ID', { status: 400 });
 
     const amountTotal = session.amount_total;
-    const planType = amountTotal >= 149000 ? 'Premium' : 'Básico';
+    // Nuevos precios (ABRIL 2026):
+    // $799 MXN = 79900 centavos → Premium (Luxury)
+    // $399 MXN = 39900 centavos → Basico (Premium)
+    const planType = amountTotal >= 79900 ? 'Premium' : 'Basico';
 
     await supabase.from('subscription_plans').upsert({
       user_id: userId,
