@@ -161,7 +161,8 @@ export default function AdminDashboard() {
       const basicCount    = plans?.filter((p: any) => ['basico','básico'].includes((p.plan_type||'').toLowerCase().trim())).length || 0;
       const premiumCount  = plans?.filter((p: any) => (p.plan_type||'').toLowerCase().trim() === 'premium').length || 0;
       const gratuitoCount = plans?.filter((p: any) => (p.plan_type||'').toLowerCase().trim() === 'gratuito').length || 0;
-      const mrr = basicCount * 990 + premiumCount * 1490;
+      // MRR actualizado Abr 2026: Basico=$399 (Premium visible), Premium=$799 (Luxury visible)
+      const mrr = basicCount * 399 + premiumCount * 799;
       const activeTenants = sessions?.length || 0;
       const retentionRate = totalTenants ? Math.round((activeTenants / (totalTenants||1)) * 100) : 0;
 
@@ -250,17 +251,17 @@ export default function AdminDashboard() {
             <View style={s.mrrSubRow}>
               <View style={s.mrrSubItem}>
                 <Text style={[s.mrrSubVal, { color: C.green }]}>{data?.basicCount}</Text>
-                <Text style={s.mrrSubLabel}>BÁSICO</Text>
-              </View>
-              <View style={s.mrrDivider} />
-              <View style={s.mrrSubItem}>
-                <Text style={[s.mrrSubVal, { color: C.purple }]}>{data?.premiumCount}</Text>
                 <Text style={s.mrrSubLabel}>PREMIUM</Text>
               </View>
               <View style={s.mrrDivider} />
               <View style={s.mrrSubItem}>
+                <Text style={[s.mrrSubVal, { color: C.purple }]}>{data?.premiumCount}</Text>
+                <Text style={s.mrrSubLabel}>LUXURY</Text>
+              </View>
+              <View style={s.mrrDivider} />
+              <View style={s.mrrSubItem}>
                 <Text style={[s.mrrSubVal, { color: C.soft }]}>{data?.gratuitoCount}</Text>
-                <Text style={s.mrrSubLabel}>GRATUITO</Text>
+                <Text style={s.mrrSubLabel}>BÁSICO</Text>
               </View>
             </View>
           </View>
