@@ -6,6 +6,11 @@
  *
  * IMPORTANTE: Nunca hardcodear 'Premium', 'Básico', 'Gratuito' en UI.
  * Siempre usar getPlanDisplayName() o los helpers de este archivo.
+ *
+ * PRECIOS ACTUALIZADOS 21 ABR 2026:
+ *   Gratuito → "Básico"   $0 MXN/mes
+ *   Basico   → "Premium"  $399 MXN/mes (antes $990)
+ *   Premium  → "Luxury"   $799 MXN/mes (antes $1,490)
  */
 
 // Tipo de plan tal como se guarda en BD (tabla subscription_plans, columna plan_type)
@@ -19,8 +24,8 @@ export type DisplayPlanName = 'Básico' | 'Premium' | 'Luxury';
  *
  * Mapeo:
  *   'Gratuito' → 'Básico'    ($0 MXN/mes, 10 citas/mes)
- *   'Basico'   → 'Premium'   ($990 MXN/mes, citas ilimitadas + WhatsApp + reportes)
- *   'Premium'  → 'Luxury'    ($1,490 MXN/mes, todo + colaboradores + email marketing)
+ *   'Basico'   → 'Premium'   ($399 MXN/mes, citas ilimitadas + WhatsApp + reportes)
+ *   'Premium'  → 'Luxury'    ($799 MXN/mes, todo + colaboradores + email marketing)
  */
 export function getPlanDisplayName(internalType: string | null | undefined): DisplayPlanName {
   const normalized = (internalType || '').toLowerCase().trim();
@@ -40,11 +45,16 @@ export function getPlanBadgeLabel(internalType: string | null | undefined): stri
 /**
  * Devuelve el precio formateado del plan según el nombre interno.
  * Centralizado aquí para evitar precios hardcoded distintos en cada pantalla.
+ *
+ * PRECIOS ACTUALES (21 ABR 2026):
+ *   Gratuito → $0 MXN/mes
+ *   Basico   → $399 MXN/mes
+ *   Premium  → $799 MXN/mes
  */
 export function getPlanPrice(internalType: string | null | undefined): string {
   const normalized = (internalType || '').toLowerCase().trim();
-  if (normalized === 'premium') return '$1,490 MXN/mes';
-  if (normalized === 'basico' || normalized === 'básico') return '$990 MXN/mes';
+  if (normalized === 'premium') return '$799 MXN/mes';
+  if (normalized === 'basico' || normalized === 'básico') return '$399 MXN/mes';
   return '$0 MXN/mes'; // Gratuito — NO usar la palabra "Gratis" (riesgo App Store)
 }
 
