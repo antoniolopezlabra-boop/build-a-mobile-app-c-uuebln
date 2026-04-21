@@ -14,15 +14,13 @@ import { useAuth } from '@/contexts/AuthContext';
 import { openStripePaymentLink } from '@/services/stripe';
 import MaterialIcons from '@expo/vector-icons/MaterialIcons';
 
-// ──────────────────────────────────────────────────
-// REBRANDING VISUAL — Camino A (Abr 2026)
-// Los nombres internos (Gratuito/Basico/Premium) siguen igual en DB, Stripe, webhooks.
-// Solo cambian las etiquetas que ve el usuario.
-//
-// Interno Gratuito → Visible "Básico"   ($0 MXN, 10 citas/mes vía link + app)
-// Interno Basico   → Visible "Premium"  (citas ilimitadas + WhatsApp + reportes)
-// Interno Premium  → Visible "Luxury"   (+ equipo + marketing + cumpleaños)
-// ──────────────────────────────────────────────────
+// ══════════════════════════════════════════════════════════════════
+// PLANES VYLTA — ACTUALIZADO 21 ABRIL 2026
+// ══════════════════════════════════════════════════════════════════
+// Visible al usuario (UI):  Básico ($0) / Premium ($399) / Luxury ($799)
+// Interno en BD:            Gratuito   / Basico      / Premium
+// ══════════════════════════════════════════════════════════════════
+
 const PLAN_FEATURES = {
   Gratuito: [
     'Perfil del negocio',
@@ -63,7 +61,7 @@ const PLAN_FEATURES = {
   ],
 };
 
-// Label visible para cada plan interno
+// MAPEO: nombre interno BD → etiqueta visible
 const PLAN_LABEL: Record<string, string> = {
   Gratuito: 'Básico',
   Basico:   'Premium',
@@ -71,6 +69,7 @@ const PLAN_LABEL: Record<string, string> = {
   Premium:  'Luxury',
 };
 
+// MAPEO: nombre interno BD → precio visible
 const PLAN_PRICE: Record<string, string> = {
   Gratuito: '$0 MXN',
   Basico:   '$399 MXN / mes',
@@ -115,8 +114,6 @@ export default function SubscriptionScreen() {
       return;
     }
 
-    // CRÍTICO: openStripePaymentLink agrega ?client_reference_id=USER_ID a la URL
-    // Esto permite que el webhook sepa a qué usuario asignar el plan
     openStripePaymentLink(target === 'Premium' ? 'premium' : 'basico', user.id);
   };
 
@@ -128,7 +125,6 @@ export default function SubscriptionScreen() {
     );
   }
 
-  // Labels para el modal de confirmación de activación de plan
   const targetName  = confirmModal.target === 'Premium' ? 'Luxury'  : 'Premium';
   const targetPrice = confirmModal.target === 'Premium' ? '$799 MXN/mes' : '$399 MXN/mes';
 
@@ -198,7 +194,7 @@ export default function SubscriptionScreen() {
 
         <Text style={s.sectionLabel}>PLANES DISPONIBLES</Text>
 
-        {/* Plan Básico (interno: Gratuito) */}
+        {/* Plan Básico ($0) — internal: Gratuito */}
         <View style={[s.planCard, isGratuito && s.planCardActive]}>
           <View style={s.planHeader}>
             <Text style={s.planName}>🌱 Básico</Text>
@@ -223,7 +219,7 @@ export default function SubscriptionScreen() {
           </View>
         </View>
 
-        {/* Plan Premium (interno: Basico) */}
+        {/* Plan Premium ($399) — internal: Basico */}
         <View style={[s.planCard, isBasico && s.planCardActive]}>
           <View style={s.planHeader}>
             <Text style={s.planName}>🚀 Premium</Text>
@@ -256,7 +252,7 @@ export default function SubscriptionScreen() {
           )}
         </View>
 
-        {/* Plan Luxury (interno: Premium) */}
+        {/* Plan Luxury ($799) — internal: Premium */}
         <View style={[s.planCard, s.planCardPremium, isPremium && s.planCardPremiumActive]}>
           <View style={s.premiumBadge}><Text style={s.premiumBadgeText}>⭐ RECOMENDADO</Text></View>
           <View style={s.planHeader}>
