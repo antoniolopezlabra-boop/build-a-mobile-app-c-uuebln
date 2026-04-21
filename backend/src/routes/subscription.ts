@@ -3,9 +3,13 @@ import type { FastifyRequest, FastifyReply } from 'fastify';
 import { eq } from 'drizzle-orm';
 import * as schema from '../db/schema/schema.js';
 
+// Precios actualizados Abr 2026:
+//   Básico (interno: Gratuito) → $0 MXN
+//   Premium (interno: Basico) → $399 MXN
+//   Luxury (interno: Premium) → $799 MXN
 const PLANS = {
   Básico: {
-    price: '990.00',
+    price: '399.00',
     features: {
       appointmentsPerMonth: 'Unlimited',
       clients: 50,
@@ -15,7 +19,7 @@ const PLANS = {
     },
   },
   Premium: {
-    price: '1490.00',
+    price: '799.00',
     features: {
       appointmentsPerMonth: 'Unlimited',
       clients: 'Unlimited',
