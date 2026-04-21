@@ -13,7 +13,7 @@ export default function TermsScreen() {
         <View style={{ width: 60 }} />
       </View>
       <ScrollView contentContainerStyle={styles.scroll}>
-        <Text style={styles.updated}>Última actualización: marzo de 2026</Text>
+        <Text style={styles.updated}>Última actualización: abril de 2026</Text>
 
         <Text style={styles.section}>1. ACEPTACIÓN DE LOS TÉRMINOS</Text>
         <Text style={styles.body}>Al registrarse y utilizar VYLTA, usted acepta los presentes Términos y Condiciones de Uso. Si no está de acuerdo con alguna de las condiciones aquí establecidas, le rogamos no utilizar el servicio.</Text>
@@ -32,8 +32,9 @@ export default function TermsScreen() {
 
         <Text style={styles.section}>4. PLANES Y PAGOS</Text>
         <Text style={styles.body}>VYLTA ofrece los siguientes planes de suscripción mensual:{'\n\n'}
-          • Plan Básico: $990 MXN/mes.{'\n'}
-          • Plan Premium: $1,490 MXN/mes.{'\n\n'}
+          • Plan Básico: $0 MXN/mes (hasta 10 citas al mes).{'\n'}
+          • Plan Premium: $399 MXN/mes.{'\n'}
+          • Plan Luxury: $799 MXN/mes.{'\n\n'}
           Los pagos se procesan a través de Stripe Inc. de forma segura. Las tarifas son en pesos mexicanos e incluyen IVA cuando aplique. VYLTA se reserva el derecho de modificar los precios con un aviso previo de 30 días naturales.
         </Text>
 
