@@ -2,7 +2,7 @@
 import React, { useState } from 'react';
 import {
   View, Text, StyleSheet, ScrollView,
-  TouchableOpacity, ActivityIndicator, Linking,
+  TouchableOpacity, ActivityIndicator,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
@@ -10,7 +10,8 @@ import { colors } from '@/styles/commonStyles';
 import { IconSymbol } from '@/components/IconSymbol';
 import { ConfirmModal } from '@/components/button';
 import { usePlan } from '@/contexts/PlanContext';
-import { PLAN_PRICES } from '@/services/stripe';
+import { useAuth } from '@/contexts/AuthContext';
+import { openStripePaymentLink } from '@/services/stripe';
 import MaterialIcons from '@expo/vector-icons/MaterialIcons';
 
 // ──────────────────────────────────────────────────
@@ -72,9 +73,9 @@ const PLAN_LABEL: Record<string, string> = {
 
 const PLAN_PRICE: Record<string, string> = {
   Gratuito: '$0 MXN',
-  Basico:   '$399 MXN / mes',  // ACTUALIZADO — era $990
-  Básico:   '$399 MXN / mes',  // ACTUALIZADO — era $990
-  Premium:  '$799 MXN / mes',  // ACTUALIZADO — era $1,490
+  Basico:   '$399 MXN / mes',
+  Básico:   '$399 MXN / mes',
+  Premium:  '$799 MXN / mes',
 };
 
 const PLAN_EMOJI: Record<string, string> = {
@@ -89,6 +90,7 @@ type PlanTarget = 'Basico' | 'Premium';
 export default function SubscriptionScreen() {
   const router = useRouter();
   const { plan, loading, isGratuito, isBasico, isPremium } = usePlan();
+  const { user } = useAuth();
   const [confirmModal, setConfirmModal] = useState<{ visible: boolean; target: PlanTarget | null }>({
     visible: false, target: null,
   });
@@ -103,18 +105,19 @@ export default function SubscriptionScreen() {
     setConfirmModal({ visible: true, target });
   };
 
-  const handleConfirmRedirect = async () => {
+  const handleConfirmRedirect = () => {
     const target = confirmModal.target;
     setConfirmModal({ visible: false, target: null });
     if (!target) return;
-    const url = target === 'Premium' ? PLAN_PRICES.premium.link : PLAN_PRICES.basico.link;
-    try {
-      const supported = await Linking.canOpenURL(url);
-      if (supported) await Linking.openURL(url);
-      else setErrorModal({ visible: true, message: 'No se pudo abrir el navegador.' });
-    } catch {
-      setErrorModal({ visible: true, message: 'Error al abrir el link de pago.' });
+
+    if (!user?.id) {
+      setErrorModal({ visible: true, message: 'Error: No se pudo obtener tu ID de usuario. Cierra sesión y vuelve a entrar.' });
+      return;
     }
+
+    // CRÍTICO: openStripePaymentLink agrega ?client_reference_id=USER_ID a la URL
+    // Esto permite que el webhook sepa a qué usuario asignar el plan
+    openStripePaymentLink(target === 'Premium' ? 'premium' : 'basico', user.id);
   };
 
   if (loading) {
@@ -127,7 +130,7 @@ export default function SubscriptionScreen() {
 
   // Labels para el modal de confirmación de activación de plan
   const targetName  = confirmModal.target === 'Premium' ? 'Luxury'  : 'Premium';
-  const targetPrice = confirmModal.target === 'Premium' ? '$799 MXN/mes' : '$399 MXN/mes';  // ACTUALIZADO
+  const targetPrice = confirmModal.target === 'Premium' ? '$799 MXN/mes' : '$399 MXN/mes';
 
   return (
     <SafeAreaView style={s.container}>
@@ -267,7 +270,7 @@ export default function SubscriptionScreen() {
               const isAI = f.includes('IA');
               return (
                 <View key={i} style={s.featureRow}>
-                  <MaterialIcons name="check" size={16} color={isAI ? '#6366F1' : '#6366F1'} />
+                  <MaterialIcons name="check" size={16} color="#6366F1" />
                   <Text style={[s.featureText, isAI && s.featureAIPremium]}>{f}</Text>
                   {isAI && (
                     <View style={[s.aiChip, { backgroundColor: '#EEF2FF', borderColor: '#6366F1' }]}>
