@@ -13,6 +13,8 @@ export const PLAN_PRICES = {
     },
 };
 
+const SUPABASE_URL = 'https://nhjmwmkaduiaifgztymi.supabase.co';
+
 /**
  * Abre el Payment Link de Stripe con el client_reference_id (user_id)
  * El client_reference_id es CRÍTICO para que el webhook sepa a qué usuario asignar el plan
@@ -33,7 +35,6 @@ export const openStripePaymentLink = (planType: 'basico' | 'premium', userId: st
   }
 
   // CRÍTICO: Pasar client_reference_id como parámetro en la URL
-  // Esto permite que Stripe sepa a quién asignar el plan cuando el webhook procese el pago
   const url = `${baseUrl}?client_reference_id=${encodeURIComponent(userId)}`;
   
   console.log(`[Stripe] Opening Payment Link: ${planType} for user ${userId}`);
@@ -41,4 +42,40 @@ export const openStripePaymentLink = (planType: 'basico' | 'premium', userId: st
   Linking.openURL(url).catch((err) => {
     console.error('[Stripe] Error opening payment link:', err);
   });
+};
+
+/**
+ * Abre el Stripe Customer Portal para gestionar la suscripción
+ * El portal permite: cancelar suscripción, cambiar método de pago, ver facturas
+ * @param userId - El ID del usuario (de Supabase Auth)
+ * @returns Promise con el resultado (true si abrió correctamente)
+ */
+export const openStripePortal = async (userId: string): Promise<{ success: boolean; error?: string }> => {
+  if (!userId) {
+    return { success: false, error: 'No se pudo obtener tu ID de usuario.' };
+  }
+
+  try {
+    const response = await fetch(`${SUPABASE_URL}/functions/v1/create-portal-session`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ user_id: userId }),
+    });
+
+    const data = await response.json();
+
+    if (!response.ok || !data.url) {
+      console.error('[Stripe Portal] Error:', data.error);
+      return { success: false, error: data.error || 'No se pudo abrir el portal de suscripción.' };
+    }
+
+    console.log('[Stripe Portal] Opening portal URL');
+    await Linking.openURL(data.url);
+    return { success: true };
+  } catch (err: any) {
+    console.error('[Stripe Portal] Error:', err.message);
+    return { success: false, error: 'Error de conexión. Intenta de nuevo.' };
+  }
 };

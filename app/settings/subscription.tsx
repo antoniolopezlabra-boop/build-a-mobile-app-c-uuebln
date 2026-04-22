@@ -11,7 +11,7 @@ import { IconSymbol } from '@/components/IconSymbol';
 import { ConfirmModal } from '@/components/button';
 import { usePlan } from '@/contexts/PlanContext';
 import { useAuth } from '@/contexts/AuthContext';
-import { openStripePaymentLink } from '@/services/stripe';
+import { openStripePaymentLink, openStripePortal } from '@/services/stripe';
 import MaterialIcons from '@expo/vector-icons/MaterialIcons';
 
 // ══════════════════════════════════════════════════════════════════
@@ -94,11 +94,14 @@ export default function SubscriptionScreen() {
     visible: false, target: null,
   });
   const [errorModal, setErrorModal] = useState({ visible: false, message: '' });
+  const [portalLoading, setPortalLoading] = useState(false);
 
   const currentPlan      = plan.planType;
   const currentPlanLabel = PLAN_LABEL[currentPlan] || 'Básico';
   const priceLabel       = PLAN_PRICE[currentPlan] || '$0 MXN';
   const emoji            = PLAN_EMOJI[currentPlan] || '🌱';
+
+  const hasPaidPlan = isBasico || isPremium;
 
   const handleActivatePlan = (target: PlanTarget) => {
     setConfirmModal({ visible: true, target });
@@ -115,6 +118,24 @@ export default function SubscriptionScreen() {
     }
 
     openStripePaymentLink(target === 'Premium' ? 'premium' : 'basico', user.id);
+  };
+
+  const handleOpenPortal = async () => {
+    if (!user?.id) {
+      setErrorModal({ visible: true, message: 'Error: No se pudo obtener tu ID de usuario. Cierra sesión y vuelve a entrar.' });
+      return;
+    }
+
+    setPortalLoading(true);
+    const result = await openStripePortal(user.id);
+    setPortalLoading(false);
+
+    if (!result.success) {
+      setErrorModal({
+        visible: true,
+        message: result.error || 'No se pudo abrir el portal. Intenta de nuevo.',
+      });
+    }
   };
 
   if (loading) {
@@ -176,6 +197,33 @@ export default function SubscriptionScreen() {
               <Text style={s.currentPrice}>{priceLabel}</Text>
             </View>
           </View>
+
+          {/* Botón Gestionar suscripción — solo para planes de pago */}
+          {hasPaidPlan && (
+            <TouchableOpacity
+              style={s.manageBtn}
+              onPress={handleOpenPortal}
+              disabled={portalLoading}
+            >
+              {portalLoading ? (
+                <ActivityIndicator size="small" color="#6366F1" />
+              ) : (
+                <MaterialIcons name="settings" size={18} color="#6366F1" />
+              )}
+              <Text style={s.manageBtnText}>
+                {portalLoading ? 'Abriendo portal...' : 'Gestionar suscripción'}
+              </Text>
+              {!portalLoading && (
+                <MaterialIcons name="open-in-new" size={14} color="#94A3B8" />
+              )}
+            </TouchableOpacity>
+          )}
+          {hasPaidPlan && (
+            <Text style={s.manageHint}>
+              Cambiar método de pago, ver facturas o cancelar tu suscripción
+            </Text>
+          )}
+
           {isGratuito && (
             <View style={s.upgradeBanner}>
               <Text style={s.upgradeBannerText}>
@@ -289,7 +337,7 @@ export default function SubscriptionScreen() {
         <View style={s.secureNote}>
           <MaterialIcons name="lock" size={14} color="#94A3B8" />
           <Text style={s.secureNoteText}>
-            Pago seguro procesado por Stripe. Puedes cancelar tu suscripción en cualquier momento.
+            Pago seguro procesado por Stripe. Puedes cancelar tu suscripción en cualquier momento desde "Gestionar suscripción".
           </Text>
         </View>
 
@@ -320,6 +368,17 @@ const s = StyleSheet.create({
   currentLabel: { fontSize: 11, color: colors.textSecondary, fontWeight: '600', textTransform: 'uppercase', letterSpacing: 0.5 },
   currentName: { fontSize: 22, fontWeight: '800', marginTop: 2 },
   currentPrice: { fontSize: 14, color: colors.textSecondary, marginTop: 3, fontWeight: '500' },
+  manageBtn: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8,
+    marginTop: 16, paddingVertical: 12, paddingHorizontal: 16,
+    borderRadius: 12, borderWidth: 1.5, borderColor: '#6366F1',
+    backgroundColor: '#F5F3FF',
+  },
+  manageBtnText: { fontSize: 14, fontWeight: '600', color: '#6366F1' },
+  manageHint: {
+    fontSize: 12, color: colors.textSecondary, textAlign: 'center',
+    marginTop: 8, lineHeight: 16,
+  },
   upgradeBanner: { marginTop: 14, backgroundColor: '#ECFDF5', borderRadius: 10, padding: 12, borderWidth: 1, borderColor: '#10B981' },
   upgradeBannerText: { fontSize: 13, color: '#065F46', lineHeight: 18 },
   sectionLabel: { fontSize: 11, fontWeight: '800', color: colors.textSecondary, marginBottom: 12, letterSpacing: 1 },
