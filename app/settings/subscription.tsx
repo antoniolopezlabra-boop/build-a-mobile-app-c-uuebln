@@ -1,5 +1,5 @@
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View, Text, StyleSheet, ScrollView,
   TouchableOpacity, ActivityIndicator,
@@ -12,14 +12,8 @@ import { ConfirmModal } from '@/components/button';
 import { usePlan } from '@/contexts/PlanContext';
 import { useAuth } from '@/contexts/AuthContext';
 import { openStripePaymentLink, openStripePortal } from '@/services/stripe';
+import { supabase } from '@/lib/supabase';
 import MaterialIcons from '@expo/vector-icons/MaterialIcons';
-
-// ══════════════════════════════════════════════════════════════════
-// PLANES VYLTA — ACTUALIZADO 21 ABRIL 2026
-// ══════════════════════════════════════════════════════════════════
-// Visible al usuario (UI):  Básico ($0) / Premium ($399) / Luxury ($799)
-// Interno en BD:            Gratuito   / Basico      / Premium
-// ══════════════════════════════════════════════════════════════════
 
 const PLAN_FEATURES = {
   Gratuito: [
@@ -61,81 +55,75 @@ const PLAN_FEATURES = {
   ],
 };
 
-// MAPEO: nombre interno BD → etiqueta visible
-const PLAN_LABEL: Record<string, string> = {
-  Gratuito: 'Básico',
-  Basico:   'Premium',
-  Básico:   'Premium',
-  Premium:  'Luxury',
-};
-
-// MAPEO: nombre interno BD → precio visible
-const PLAN_PRICE: Record<string, string> = {
-  Gratuito: '$0 MXN',
-  Basico:   '$399 MXN / mes',
-  Básico:   '$399 MXN / mes',
-  Premium:  '$799 MXN / mes',
-};
-
-const PLAN_EMOJI: Record<string, string> = {
-  Gratuito: '🌱',
-  Basico:   '🚀',
-  Básico:   '🚀',
-  Premium:  '⭐',
-};
+const PLAN_LABEL: Record<string, string> = { Gratuito: 'Básico', Basico: 'Premium', 'Básico': 'Premium', Premium: 'Luxury' };
+const PLAN_PRICE: Record<string, string> = { Gratuito: '$0 MXN', Basico: '$399 MXN / mes', 'Básico': '$399 MXN / mes', Premium: '$799 MXN / mes' };
+const PLAN_EMOJI: Record<string, string> = { Gratuito: '🌱', Basico: '🚀', 'Básico': '🚀', Premium: '⭐' };
 
 type PlanTarget = 'Basico' | 'Premium';
+
+interface SubscriptionDetails {
+  stripe_customer_id: string | null;
+  stripe_subscription_id: string | null;
+  updated_at: string | null;
+  created_at: string | null;
+  status: string | null;
+}
 
 export default function SubscriptionScreen() {
   const router = useRouter();
   const { plan, loading, isGratuito, isBasico, isPremium } = usePlan();
   const { user } = useAuth();
-  const [confirmModal, setConfirmModal] = useState<{ visible: boolean; target: PlanTarget | null }>({
-    visible: false, target: null,
-  });
+  const [confirmModal, setConfirmModal] = useState<{ visible: boolean; target: PlanTarget | null }>({ visible: false, target: null });
   const [errorModal, setErrorModal] = useState({ visible: false, message: '' });
   const [portalLoading, setPortalLoading] = useState(false);
+  const [subDetails, setSubDetails] = useState<SubscriptionDetails | null>(null);
+  const [detailsLoading, setDetailsLoading] = useState(false);
 
-  const currentPlan      = plan.planType;
+  const currentPlan = plan.planType;
   const currentPlanLabel = PLAN_LABEL[currentPlan] || 'Básico';
-  const priceLabel       = PLAN_PRICE[currentPlan] || '$0 MXN';
-  const emoji            = PLAN_EMOJI[currentPlan] || '🌱';
-
+  const priceLabel = PLAN_PRICE[currentPlan] || '$0 MXN';
+  const emoji = PLAN_EMOJI[currentPlan] || '🌱';
   const hasPaidPlan = isBasico || isPremium;
 
-  const handleActivatePlan = (target: PlanTarget) => {
-    setConfirmModal({ visible: true, target });
+  useEffect(() => {
+    if (user?.id && hasPaidPlan) loadSubscriptionDetails();
+  }, [user?.id, hasPaidPlan]);
+
+  const loadSubscriptionDetails = async () => {
+    if (!user?.id) return;
+    setDetailsLoading(true);
+    try {
+      const { data } = await supabase
+        .from('subscription_plans')
+        .select('stripe_customer_id, stripe_subscription_id, updated_at, created_at, status')
+        .eq('user_id', user.id)
+        .single();
+      if (data) setSubDetails(data);
+    } catch (e) {
+      console.error('[Subscription] Error loading details:', e);
+    } finally {
+      setDetailsLoading(false);
+    }
   };
+
+  const handleActivatePlan = (target: PlanTarget) => setConfirmModal({ visible: true, target });
 
   const handleConfirmRedirect = () => {
     const target = confirmModal.target;
     setConfirmModal({ visible: false, target: null });
-    if (!target) return;
-
-    if (!user?.id) {
-      setErrorModal({ visible: true, message: 'Error: No se pudo obtener tu ID de usuario. Cierra sesión y vuelve a entrar.' });
+    if (!target || !user?.id) {
+      setErrorModal({ visible: true, message: 'Error: No se pudo obtener tu ID de usuario.' });
       return;
     }
-
     openStripePaymentLink(target === 'Premium' ? 'premium' : 'basico', user.id);
   };
 
   const handleOpenPortal = async () => {
-    if (!user?.id) {
-      setErrorModal({ visible: true, message: 'Error: No se pudo obtener tu ID de usuario. Cierra sesión y vuelve a entrar.' });
-      return;
-    }
-
+    if (!user?.id) { setErrorModal({ visible: true, message: 'Error: No se pudo obtener tu ID de usuario.' }); return; }
     setPortalLoading(true);
     const result = await openStripePortal(user.id);
     setPortalLoading(false);
-
-    if (!result.success) {
-      setErrorModal({
-        visible: true,
-        message: result.error || 'No se pudo abrir el portal. Intenta de nuevo.',
-      });
-    }
+    if (!result.success) setErrorModal({ visible: true, message: result.error || 'No se pudo abrir el portal.' });
   };
 
   if (loading) {
@@ -146,28 +134,31 @@ export default function SubscriptionScreen() {
     );
   }
 
-  const targetName  = confirmModal.target === 'Premium' ? 'Luxury'  : 'Premium';
+  const targetName = confirmModal.target === 'Premium' ? 'Luxury' : 'Premium';
   const targetPrice = confirmModal.target === 'Premium' ? '$799 MXN/mes' : '$399 MXN/mes';
+
+  // Calculate next billing date (approx: updated_at + 30 days)
+  const getNextBillingDate = () => {
+    if (!subDetails?.updated_at) return null;
+    const lastUpdate = new Date(subDetails.updated_at);
+    const next = new Date(lastUpdate);
+    next.setDate(next.getDate() + 30);
+    return next;
+  };
+
+  const formatDate = (date: Date | string | null) => {
+    if (!date) return '—';
+    const d = typeof date === 'string' ? new Date(date) : date;
+    return d.toLocaleDateString('es-MX', { day: 'numeric', month: 'long', year: 'numeric' });
+  };
+
+  const nextBilling = getNextBillingDate();
+  const isNextBillingSoon = nextBilling && (nextBilling.getTime() - Date.now()) < 5 * 24 * 60 * 60 * 1000;
 
   return (
     <SafeAreaView style={s.container}>
-      <ConfirmModal
-        visible={confirmModal.visible}
-        title={`Activar Plan ${targetName}`}
-        message={`Serás redirigido a la página de pago seguro de Stripe para completar tu suscripción de ${targetPrice}.\n\n¿Continuar?`}
-        buttons={[
-          { text: 'Cancelar', onPress: () => setConfirmModal({ visible: false, target: null }), style: 'cancel' },
-          { text: 'Ir al pago →', onPress: handleConfirmRedirect, style: 'default' },
-        ]}
-        onDismiss={() => setConfirmModal({ visible: false, target: null })}
-      />
-      <ConfirmModal
-        visible={errorModal.visible}
-        title="Error"
-        message={errorModal.message}
-        buttons={[{ text: 'Aceptar', onPress: () => setErrorModal({ visible: false, message: '' }), style: 'default' }]}
-        onDismiss={() => setErrorModal({ visible: false, message: '' })}
-      />
+      <ConfirmModal visible={confirmModal.visible} title={`Activar Plan ${targetName}`} message={`Serás redirigido a la página de pago seguro de Stripe para completar tu suscripción de ${targetPrice}.\n\n¿Continuar?`} buttons={[{ text: 'Cancelar', onPress: () => setConfirmModal({ visible: false, target: null }), style: 'cancel' }, { text: 'Ir al pago →', onPress: handleConfirmRedirect, style: 'default' }]} onDismiss={() => setConfirmModal({ visible: false, target: null })} />
+      <ConfirmModal visible={errorModal.visible} title="Error" message={errorModal.message} buttons={[{ text: 'Aceptar', onPress: () => setErrorModal({ visible: false, message: '' }), style: 'default' }]} onDismiss={() => setErrorModal({ visible: false, message: '' })} />
 
       <View style={s.header}>
         <TouchableOpacity onPress={() => router.back()} style={s.back}>
@@ -182,46 +173,83 @@ export default function SubscriptionScreen() {
         {/* Plan actual */}
         <View style={s.currentCard}>
           <View style={s.currentRow}>
-            <View style={[s.currentIconBox, {
-              backgroundColor: isPremium ? '#EDE9FE' : isBasico ? '#ECFDF5' : '#F1F5F9',
-            }]}>
+            <View style={[s.currentIconBox, { backgroundColor: isPremium ? '#EDE9FE' : isBasico ? '#ECFDF5' : '#F1F5F9' }]}>
               <Text style={s.currentEmoji}>{emoji}</Text>
             </View>
             <View style={s.currentInfo}>
               <Text style={s.currentLabel}>Plan actual</Text>
-              <Text style={[s.currentName, {
-                color: isPremium ? '#6366F1' : isBasico ? '#10B981' : '#64748B',
-              }]}>
-                {currentPlanLabel}
-              </Text>
+              <Text style={[s.currentName, { color: isPremium ? '#6366F1' : isBasico ? '#10B981' : '#64748B' }]}>{currentPlanLabel}</Text>
               <Text style={s.currentPrice}>{priceLabel}</Text>
             </View>
           </View>
 
-          {/* Botón Gestionar suscripción — solo para planes de pago */}
+          {/* Detalles de suscripción — solo para planes de pago */}
+          {hasPaidPlan && subDetails && (
+            <View style={s.detailsSection}>
+              <View style={s.detailsDivider} />
+
+              <View style={s.detailRow}>
+                <View style={s.detailIconWrap}>
+                  <MaterialIcons name="event" size={16} color="#3B82F6" />
+                </View>
+                <View style={s.detailTextWrap}>
+                  <Text style={s.detailLabel}>Suscrito desde</Text>
+                  <Text style={s.detailValue}>{formatDate(subDetails.created_at)}</Text>
+                </View>
+              </View>
+
+              <View style={s.detailRow}>
+                <View style={s.detailIconWrap}>
+                  <MaterialIcons name="autorenew" size={16} color={isNextBillingSoon ? '#F59E0B' : '#10B981'} />
+                </View>
+                <View style={s.detailTextWrap}>
+                  <Text style={s.detailLabel}>Próximo cobro</Text>
+                  <Text style={[s.detailValue, isNextBillingSoon && { color: '#F59E0B' }]}>
+                    {nextBilling ? formatDate(nextBilling) : '—'}
+                    {isNextBillingSoon ? '  ⚠️ Pronto' : ''}
+                  </Text>
+                </View>
+              </View>
+
+              <View style={s.detailRow}>
+                <View style={s.detailIconWrap}>
+                  <MaterialIcons name="verified" size={16} color="#10B981" />
+                </View>
+                <View style={s.detailTextWrap}>
+                  <Text style={s.detailLabel}>Estado</Text>
+                  <View style={s.statusBadgeRow}>
+                    <View style={[s.statusBadge, { backgroundColor: subDetails.status === 'active' ? '#ECFDF5' : '#FEF3C7' }]}>
+                      <View style={[s.statusDot, { backgroundColor: subDetails.status === 'active' ? '#10B981' : '#F59E0B' }]} />
+                      <Text style={[s.statusBadgeText, { color: subDetails.status === 'active' ? '#065F46' : '#92400E' }]}>
+                        {subDetails.status === 'active' ? 'Activa' : subDetails.status === 'pending_cancellation' ? 'Cancelación pendiente' : subDetails.status || 'Desconocido'}
+                      </Text>
+                    </View>
+                  </View>
+                </View>
+              </View>
+
+              <View style={s.detailRow}>
+                <View style={s.detailIconWrap}>
+                  <MaterialIcons name="credit-card" size={16} color="#6366F1" />
+                </View>
+                <View style={s.detailTextWrap}>
+                  <Text style={s.detailLabel}>Método de pago</Text>
+                  <Text style={s.detailValue}>Gestionado por Stripe</Text>
+                </View>
+              </View>
+            </View>
+          )}
+
+          {/* Botón Gestionar suscripción */}
           {hasPaidPlan && (
-            <TouchableOpacity
-              style={s.manageBtn}
-              onPress={handleOpenPortal}
-              disabled={portalLoading}
-            >
-              {portalLoading ? (
-                <ActivityIndicator size="small" color="#6366F1" />
-              ) : (
-                <MaterialIcons name="settings" size={18} color="#6366F1" />
-              )}
-              <Text style={s.manageBtnText}>
-                {portalLoading ? 'Abriendo portal...' : 'Gestionar suscripción'}
-              </Text>
-              {!portalLoading && (
-                <MaterialIcons name="open-in-new" size={14} color="#94A3B8" />
-              )}
+            <TouchableOpacity style={s.manageBtn} onPress={handleOpenPortal} disabled={portalLoading}>
+              {portalLoading ? <ActivityIndicator size="small" color="#6366F1" /> : <MaterialIcons name="settings" size={18} color="#6366F1" />}
+              <Text style={s.manageBtnText}>{portalLoading ? 'Abriendo portal...' : 'Gestionar suscripción'}</Text>
+              {!portalLoading && <MaterialIcons name="open-in-new" size={14} color="#94A3B8" />}
             </TouchableOpacity>
           )}
           {hasPaidPlan && (
-            <Text style={s.manageHint}>
-              Cambiar método de pago, ver facturas o cancelar tu suscripción
-            </Text>
+            <Text style={s.manageHint}>Cambiar método de pago, ver facturas o cancelar tu suscripción</Text>
           )}
 
           {isGratuito && (
@@ -233,114 +261,68 @@ export default function SubscriptionScreen() {
           )}
           {isBasico && (
             <View style={[s.upgradeBanner, { backgroundColor: '#EEF2FF', borderColor: '#6366F1' }]}>
-              <Text style={[s.upgradeBannerText, { color: '#3730A3' }]}>
-                Mejora al Plan Luxury para activar tu equipo de colaboradores, email marketing y reportes avanzados.
-              </Text>
+              <Text style={[s.upgradeBannerText, { color: '#3730A3' }]}>Mejora al Plan Luxury para activar tu equipo de colaboradores, email marketing y reportes avanzados.</Text>
             </View>
           )}
         </View>
 
         <Text style={s.sectionLabel}>PLANES DISPONIBLES</Text>
 
-        {/* Plan Básico ($0) — internal: Gratuito */}
+        {/* Plan Básico ($0) */}
         <View style={[s.planCard, isGratuito && s.planCardActive]}>
           <View style={s.planHeader}>
             <Text style={s.planName}>🌱 Básico</Text>
             {isGratuito && <View style={s.activeBadge}><Text style={s.activeBadgeText}>Tu plan actual</Text></View>}
           </View>
-          <Text style={s.planPrice}>$0 MXN</Text>
+          <Text style={s.planPriceTag}>$0 MXN</Text>
           <Text style={s.planPeriod}>hasta 10 citas al mes</Text>
           <View style={s.features}>
             {PLAN_FEATURES.Gratuito.map((f, i) => {
               const isLimit = f.startsWith('Sin');
-              return (
-                <View key={i} style={s.featureRow}>
-                  <MaterialIcons
-                    name={isLimit ? 'close' : 'check'}
-                    size={16}
-                    color={isLimit ? '#EF4444' : '#94A3B8'}
-                  />
-                  <Text style={[s.featureText, { color: isLimit ? '#EF4444' : colors.textSecondary }]}>{f}</Text>
-                </View>
-              );
+              return (<View key={i} style={s.featureRow}><MaterialIcons name={isLimit ? 'close' : 'check'} size={16} color={isLimit ? '#EF4444' : '#94A3B8'} /><Text style={[s.featureText, { color: isLimit ? '#EF4444' : colors.textSecondary }]}>{f}</Text></View>);
             })}
           </View>
         </View>
 
-        {/* Plan Premium ($399) — internal: Basico */}
+        {/* Plan Premium ($399) */}
         <View style={[s.planCard, isBasico && s.planCardActive]}>
           <View style={s.planHeader}>
             <Text style={s.planName}>🚀 Premium</Text>
             {isBasico && <View style={s.activeBadge}><Text style={s.activeBadgeText}>Tu plan actual</Text></View>}
           </View>
-          <Text style={s.planPrice}>$399 MXN</Text>
+          <Text style={s.planPriceTag}>$399 MXN</Text>
           <Text style={s.planPeriod}>por mes</Text>
           <View style={s.features}>
             {PLAN_FEATURES.Basico.map((f, i) => {
               const isAI = f.includes('IA');
-              return (
-                <View key={i} style={s.featureRow}>
-                  <MaterialIcons name="check" size={16} color={isAI ? '#10B981' : colors.primary} />
-                  <Text style={[s.featureText, isAI && s.featureAI]}>{f}</Text>
-                  {isAI && (
-                    <View style={s.aiChip}>
-                      <MaterialIcons name="auto-awesome" size={10} color="#10B981" />
-                      <Text style={s.aiChipText}>IA</Text>
-                    </View>
-                  )}
-                </View>
-              );
+              return (<View key={i} style={s.featureRow}><MaterialIcons name="check" size={16} color={isAI ? '#10B981' : colors.primary} /><Text style={[s.featureText, isAI && s.featureAI]}>{f}</Text>{isAI && (<View style={s.aiChip}><MaterialIcons name="auto-awesome" size={10} color="#10B981" /><Text style={s.aiChipText}>IA</Text></View>)}</View>);
             })}
           </View>
-          {isGratuito && (
-            <TouchableOpacity style={s.ctaBtn} onPress={() => handleActivatePlan('Basico')}>
-              <MaterialIcons name="lock-open" size={18} color="#fff" />
-              <Text style={s.ctaBtnText}>Activar Plan Premium</Text>
-            </TouchableOpacity>
-          )}
+          {isGratuito && (<TouchableOpacity style={s.ctaBtn} onPress={() => handleActivatePlan('Basico')}><MaterialIcons name="lock-open" size={18} color="#fff" /><Text style={s.ctaBtnText}>Activar Plan Premium</Text></TouchableOpacity>)}
         </View>
 
-        {/* Plan Luxury ($799) — internal: Premium */}
+        {/* Plan Luxury ($799) */}
         <View style={[s.planCard, s.planCardPremium, isPremium && s.planCardPremiumActive]}>
           <View style={s.premiumBadge}><Text style={s.premiumBadgeText}>⭐ RECOMENDADO</Text></View>
           <View style={s.planHeader}>
             <Text style={[s.planName, { color: '#6366F1' }]}>Luxury</Text>
             {isPremium && <View style={[s.activeBadge, { backgroundColor: '#6366F1' }]}><Text style={s.activeBadgeText}>Tu plan actual</Text></View>}
           </View>
-          <Text style={[s.planPrice, { color: '#6366F1' }]}>$799 MXN</Text>
+          <Text style={[s.planPriceTag, { color: '#6366F1' }]}>$799 MXN</Text>
           <Text style={s.planPeriod}>por mes</Text>
           <View style={s.features}>
             {PLAN_FEATURES.Premium.map((f, i) => {
               const isAI = f.includes('IA');
-              return (
-                <View key={i} style={s.featureRow}>
-                  <MaterialIcons name="check" size={16} color="#6366F1" />
-                  <Text style={[s.featureText, isAI && s.featureAIPremium]}>{f}</Text>
-                  {isAI && (
-                    <View style={[s.aiChip, { backgroundColor: '#EEF2FF', borderColor: '#6366F1' }]}>
-                      <MaterialIcons name="auto-awesome" size={10} color="#6366F1" />
-                      <Text style={[s.aiChipText, { color: '#6366F1' }]}>IA</Text>
-                    </View>
-                  )}
-                </View>
-              );
+              return (<View key={i} style={s.featureRow}><MaterialIcons name="check" size={16} color="#6366F1" /><Text style={[s.featureText, isAI && s.featureAIPremium]}>{f}</Text>{isAI && (<View style={[s.aiChip, { backgroundColor: '#EEF2FF', borderColor: '#6366F1' }]}><MaterialIcons name="auto-awesome" size={10} color="#6366F1" /><Text style={[s.aiChipText, { color: '#6366F1' }]}>IA</Text></View>)}</View>);
             })}
           </View>
-          {!isPremium && (
-            <TouchableOpacity style={[s.ctaBtn, { backgroundColor: '#6366F1' }]} onPress={() => handleActivatePlan('Premium')}>
-              <MaterialIcons name="lock-open" size={18} color="#fff" />
-              <Text style={s.ctaBtnText}>Activar Plan Luxury</Text>
-            </TouchableOpacity>
-          )}
+          {!isPremium && (<TouchableOpacity style={[s.ctaBtn, { backgroundColor: '#6366F1' }]} onPress={() => handleActivatePlan('Premium')}><MaterialIcons name="lock-open" size={18} color="#fff" /><Text style={s.ctaBtnText}>Activar Plan Luxury</Text></TouchableOpacity>)}
         </View>
 
         <View style={s.secureNote}>
           <MaterialIcons name="lock" size={14} color="#94A3B8" />
-          <Text style={s.secureNoteText}>
-            Pago seguro procesado por Stripe. Puedes cancelar tu suscripción en cualquier momento desde "Gestionar suscripción".
-          </Text>
+          <Text style={s.secureNoteText}>Pago seguro procesado por Stripe. Puedes cancelar tu suscripción en cualquier momento desde "Gestionar suscripción".</Text>
         </View>
-
       </ScrollView>
     </SafeAreaView>
   );
@@ -349,18 +331,11 @@ export default function SubscriptionScreen() {
 const s = StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.background },
   loading: { flex: 1, justifyContent: 'center', alignItems: 'center' },
-  header: {
-    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
-    padding: 20, paddingTop: 16, backgroundColor: colors.card,
-    borderBottomWidth: 1, borderBottomColor: colors.border,
-  },
+  header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', padding: 20, paddingTop: 16, backgroundColor: colors.card, borderBottomWidth: 1, borderBottomColor: colors.border },
   back: { padding: 4 },
   title: { fontSize: 20, fontWeight: 'bold', color: colors.text },
   scroll: { padding: 20, paddingBottom: 60 },
-  currentCard: {
-    backgroundColor: colors.card, borderRadius: 16, padding: 20,
-    marginBottom: 24, shadowColor: '#000', shadowOpacity: 0.05, shadowRadius: 8, elevation: 2,
-  },
+  currentCard: { backgroundColor: colors.card, borderRadius: 16, padding: 20, marginBottom: 24, shadowColor: '#000', shadowOpacity: 0.05, shadowRadius: 8, elevation: 2 },
   currentRow: { flexDirection: 'row', alignItems: 'center', gap: 16 },
   currentIconBox: { width: 56, height: 56, borderRadius: 16, justifyContent: 'center', alignItems: 'center' },
   currentEmoji: { fontSize: 28 },
@@ -368,27 +343,31 @@ const s = StyleSheet.create({
   currentLabel: { fontSize: 11, color: colors.textSecondary, fontWeight: '600', textTransform: 'uppercase', letterSpacing: 0.5 },
   currentName: { fontSize: 22, fontWeight: '800', marginTop: 2 },
   currentPrice: { fontSize: 14, color: colors.textSecondary, marginTop: 3, fontWeight: '500' },
-  manageBtn: {
-    flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8,
-    marginTop: 16, paddingVertical: 12, paddingHorizontal: 16,
-    borderRadius: 12, borderWidth: 1.5, borderColor: '#6366F1',
-    backgroundColor: '#F5F3FF',
-  },
+
+  // Subscription details section
+  detailsSection: { marginTop: 4 },
+  detailsDivider: { height: 1, backgroundColor: '#F1F5F9', marginVertical: 16 },
+  detailRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 12, marginBottom: 14 },
+  detailIconWrap: { width: 32, height: 32, borderRadius: 8, backgroundColor: '#F8FAFC', justifyContent: 'center', alignItems: 'center', marginTop: 1 },
+  detailTextWrap: { flex: 1 },
+  detailLabel: { fontSize: 11, color: colors.textSecondary, fontWeight: '600', textTransform: 'uppercase', letterSpacing: 0.3 },
+  detailValue: { fontSize: 15, color: colors.text, fontWeight: '600', marginTop: 2 },
+  statusBadgeRow: { flexDirection: 'row', marginTop: 4 },
+  statusBadge: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 10, paddingVertical: 4, borderRadius: 20 },
+  statusDot: { width: 7, height: 7, borderRadius: 4 },
+  statusBadgeText: { fontSize: 12, fontWeight: '700' },
+
+  // Manage button
+  manageBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, marginTop: 16, paddingVertical: 12, paddingHorizontal: 16, borderRadius: 12, borderWidth: 1.5, borderColor: '#6366F1', backgroundColor: '#F5F3FF' },
   manageBtnText: { fontSize: 14, fontWeight: '600', color: '#6366F1' },
-  manageHint: {
-    fontSize: 12, color: colors.textSecondary, textAlign: 'center',
-    marginTop: 8, lineHeight: 16,
-  },
+  manageHint: { fontSize: 12, color: colors.textSecondary, textAlign: 'center', marginTop: 8, lineHeight: 16 },
+
   upgradeBanner: { marginTop: 14, backgroundColor: '#ECFDF5', borderRadius: 10, padding: 12, borderWidth: 1, borderColor: '#10B981' },
   upgradeBannerText: { fontSize: 13, color: '#065F46', lineHeight: 18 },
   sectionLabel: { fontSize: 11, fontWeight: '800', color: colors.textSecondary, marginBottom: 12, letterSpacing: 1 },
-  planCard: {
-    backgroundColor: colors.card, borderRadius: 16, padding: 20,
-    marginBottom: 16, borderWidth: 1.5, borderColor: 'transparent',
-    shadowColor: '#000', shadowOpacity: 0.04, shadowRadius: 6, elevation: 1,
-  },
-  planCardActive:        { borderColor: colors.primary },
-  planCardPremium:       { borderColor: '#C7D2FE' },
+  planCard: { backgroundColor: colors.card, borderRadius: 16, padding: 20, marginBottom: 16, borderWidth: 1.5, borderColor: 'transparent', shadowColor: '#000', shadowOpacity: 0.04, shadowRadius: 6, elevation: 1 },
+  planCardActive: { borderColor: colors.primary },
+  planCardPremium: { borderColor: '#C7D2FE' },
   planCardPremiumActive: { borderColor: '#6366F1' },
   premiumBadge: { alignSelf: 'flex-start', backgroundColor: '#EEF2FF', borderRadius: 8, paddingHorizontal: 10, paddingVertical: 4, marginBottom: 12 },
   premiumBadgeText: { fontSize: 11, fontWeight: '800', color: '#6366F1' },
@@ -396,7 +375,7 @@ const s = StyleSheet.create({
   planName: { fontSize: 20, fontWeight: '700', color: colors.text },
   activeBadge: { backgroundColor: colors.primary, borderRadius: 10, paddingHorizontal: 10, paddingVertical: 4 },
   activeBadgeText: { fontSize: 11, fontWeight: '700', color: '#fff' },
-  planPrice: { fontSize: 28, fontWeight: '800', color: colors.text },
+  planPriceTag: { fontSize: 28, fontWeight: '800', color: colors.text },
   planPeriod: { fontSize: 13, color: colors.textSecondary, marginBottom: 16 },
   features: { gap: 10 },
   featureRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
@@ -405,14 +384,8 @@ const s = StyleSheet.create({
   featureAIPremium: { color: '#3730A3', fontWeight: '600' },
   aiChip: { flexDirection: 'row', alignItems: 'center', gap: 3, backgroundColor: '#ECFDF5', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 6, borderWidth: 0.5, borderColor: '#10B981' },
   aiChipText: { fontSize: 9, fontWeight: '800', color: '#10B981' },
-  ctaBtn: {
-    flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8,
-    backgroundColor: colors.primary, borderRadius: 12, padding: 14, marginTop: 18,
-  },
+  ctaBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, backgroundColor: colors.primary, borderRadius: 12, padding: 14, marginTop: 18 },
   ctaBtnText: { color: '#fff', fontSize: 15, fontWeight: '700' },
-  secureNote: {
-    flexDirection: 'row', alignItems: 'center', gap: 6,
-    backgroundColor: colors.card, borderRadius: 10, padding: 12, marginTop: 4,
-  },
+  secureNote: { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: colors.card, borderRadius: 10, padding: 12, marginTop: 4 },
   secureNoteText: { flex: 1, fontSize: 12, color: colors.textSecondary, lineHeight: 18 },
 });
