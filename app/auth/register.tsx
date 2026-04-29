@@ -14,6 +14,7 @@ import {
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { colors } from '@/styles/commonStyles';
 import { IconSymbol } from '@/components/IconSymbol';
 import { ConfirmModal } from '@/components/button';
@@ -66,12 +67,20 @@ export default function RegisterScreen() {
     console.log('Submitting registration:', { name, email, businessName, businessType });
 
     try {
-      await register({ email, password, name, businessName, businessType });
-      console.log('[Register] Registration successful, navigating to home with reset');
-      
-      // Use router.replace with reset to clear navigation stack
-      // This prevents going back to auth screens
-      router.replace('/(tabs)/(home)');
+      const result: any = await register({ email, password, name, businessName, businessType });
+      console.log('[Register] Registration successful, redirecting to setup wizard');
+
+      // IMPORTANTE: NO marcar setup_completed aquí. El usuario debe completar
+      // el wizard primero para que el flag se grabe.
+      // Asegurarse de NO tener un flag previo que skipee el wizard.
+      const newUserId = result?.user?.id;
+      if (newUserId) {
+        // Borrar cualquier flag stale para garantizar que el wizard aparezca
+        await AsyncStorage.removeItem(`setup_completed_${newUserId}`);
+      }
+
+      // Redirigir al setup wizard, no al home directamente
+      router.replace('/setup');
     } catch (error: any) {
       console.error('Registration failed:', error);
       const message = error?.message?.includes('already exists') || error?.message?.includes('409')
