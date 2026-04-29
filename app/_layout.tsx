@@ -11,6 +11,8 @@ import { AuthProvider, useAuth } from '@/contexts/AuthContext';
 import { PlanProvider } from '@/contexts/PlanContext';
 import { AdminProvider, useAdmin } from '@/contexts/AdminContext';
 import { ThemeProvider, useTheme } from '@/contexts/ThemeContext';
+import { NetworkProvider } from '@/contexts/NetworkContext';
+import { OfflineBanner } from '@/components/OfflineBanner';
 import React from 'react';
 
 // Puente: una vez dentro de AuthProvider, sincroniza el userId con ThemeContext
@@ -114,19 +116,23 @@ function AppStatusBar() {
 export default function RootLayout() {
   return (
     <ThemeProvider>
-      <StripeProvider publishableKey={STRIPE_PUBLISHABLE_KEY} merchantIdentifier="merchant.com.vylta">
-        <AuthProvider>
-          <PlanProvider>
-            <AdminProvider>
-              {/* ThemeUserSync debe estar dentro de AuthProvider para acceder a useAuth */}
-              <ThemeUserSync />
-              <NavigationGuard />
-              <Stack screenOptions={{ headerShown: false }} />
-              <AppStatusBar />
-            </AdminProvider>
-          </PlanProvider>
-        </AuthProvider>
-      </StripeProvider>
+      <NetworkProvider>
+        <StripeProvider publishableKey={STRIPE_PUBLISHABLE_KEY} merchantIdentifier="merchant.com.vylta">
+          <AuthProvider>
+            <PlanProvider>
+              <AdminProvider>
+                {/* ThemeUserSync debe estar dentro de AuthProvider para acceder a useAuth */}
+                <ThemeUserSync />
+                <NavigationGuard />
+                <Stack screenOptions={{ headerShown: false }} />
+                {/* OfflineBanner global, aparece encima de todas las pantallas cuando no hay red */}
+                <OfflineBanner />
+                <AppStatusBar />
+              </AdminProvider>
+            </PlanProvider>
+          </AuthProvider>
+        </StripeProvider>
+      </NetworkProvider>
     </ThemeProvider>
   );
 }
