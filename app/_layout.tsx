@@ -16,8 +16,6 @@ import { OfflineBanner } from '@/components/OfflineBanner';
 import React from 'react';
 
 // Puente: una vez dentro de AuthProvider, sincroniza el userId con ThemeContext
-// Esto resuelve el crash "useAuth must be used within AuthProvider"
-// que ocurría cuando ThemeProvider intentaba llamar useAuth directamente
 function ThemeUserSync() {
   const { user } = useAuth();
   const { loadThemeForUser } = useTheme();
@@ -36,45 +34,43 @@ function NavigationGuard() {
   const segments = useSegments();
 
   const [hasSeenOnboarding, setHasSeenOnboarding] = useState<boolean | null>(null);
-  const [isFirstLogin, setIsFirstLogin] = useState<boolean | null>(null);
+  // ── Setup wizard post-registro ──
+  // null = aún no sabemos si lo completó; true = ya lo hizo; false = primera vez
+  const [setupCompleted, setSetupCompleted] = useState<boolean | null>(null);
 
-  const hasRedirectedToOnboarding = useRef(false);
+  const hasRedirectedToSetup = useRef(false);
   const isNavigating = useRef(false);
 
+  // Carga del flag global de "ya vio onboarding marketing"
   useEffect(() => {
     AsyncStorage.getItem('has_seen_onboarding').then(val => {
       setHasSeenOnboarding(val === 'true');
     });
   }, []);
 
+  // Carga del flag específico por usuario: setup_completed_<userId>
+  // Se ejecuta cuando cambia el user.id (al hacer login o registrarse)
   useEffect(() => {
     if (!user) {
-      setIsFirstLogin(null);
-      hasRedirectedToOnboarding.current = false;
+      setSetupCompleted(null);
+      hasRedirectedToSetup.current = false;
       return;
     }
-    const key = `first_login_${user.id}`;
-    AsyncStorage.getItem(key).then(async val => {
-      if (val === null) {
-        await AsyncStorage.setItem(key, 'done');
-        await AsyncStorage.setItem('has_seen_onboarding', 'true');
-        setIsFirstLogin(true);
-      } else {
-        setIsFirstLogin(false);
-      }
+    AsyncStorage.getItem(`setup_completed_${user.id}`).then(val => {
+      setSetupCompleted(val === 'true');
     });
   }, [user?.id]);
 
   useEffect(() => {
     if (authLoading || adminLoading) return;
     if (hasSeenOnboarding === null) return;
-    if (user && isFirstLogin === null) return;
+    if (user && setupCompleted === null) return;
     if (isNavigating.current) return;
 
     const inAuthScreen  = segments[0] === 'auth';
     const inAdminScreen = segments[0] === 'admin';
     const inStaffApp    = segments[0] === 'staff-app';
-    const inOnboarding  = segments[1] === 'onboarding';
+    const inSetupWizard = segments[0] === 'setup';
 
     const navigate = (path: string) => {
       isNavigating.current = true;
@@ -82,28 +78,33 @@ function NavigationGuard() {
       setTimeout(() => { isNavigating.current = false; }, 600);
     };
 
+    // No autenticado → onboarding marketing o login
     if (!user && !inAuthScreen) {
       navigate(hasSeenOnboarding ? '/auth/login' : '/auth/onboarding');
       return;
     }
 
-    // Colaboradores: redirigir a su app, nunca al onboarding ni al admin
+    // Colaboradores: redirigir a su app, nunca a setup ni admin
     if (user && isStaffAccount) {
       if (!inStaffApp) navigate('/staff-app');
       return;
     }
 
-    if (user && isFirstLogin === true && !inOnboarding && !hasRedirectedToOnboarding.current) {
-      hasRedirectedToOnboarding.current = true;
-      navigate('/auth/onboarding');
+    // ── Setup wizard: solo la primera vez que el usuario entra ──
+    // Si setupCompleted === false (no existe el flag en AsyncStorage), redirigir.
+    // El propio wizard guarda el flag al terminar o al saltar, así nunca vuelve.
+    if (user && setupCompleted === false && !inSetupWizard && !hasRedirectedToSetup.current) {
+      hasRedirectedToSetup.current = true;
+      navigate('/setup');
       return;
     }
 
-    if (user && isAdmin && isFirstLogin === false && !inAdminScreen) {
+    // Admin: solo redirigir si ya completó (o saltó) el setup
+    if (user && isAdmin && setupCompleted === true && !inAdminScreen) {
       navigate('/admin');
       return;
     }
-  }, [user, isAdmin, authLoading, adminLoading, hasSeenOnboarding, isFirstLogin, segments]);
+  }, [user, isAdmin, authLoading, adminLoading, hasSeenOnboarding, setupCompleted, segments]);
 
   return null;
 }
@@ -121,11 +122,9 @@ export default function RootLayout() {
           <AuthProvider>
             <PlanProvider>
               <AdminProvider>
-                {/* ThemeUserSync debe estar dentro de AuthProvider para acceder a useAuth */}
                 <ThemeUserSync />
                 <NavigationGuard />
                 <Stack screenOptions={{ headerShown: false }} />
-                {/* OfflineBanner global, aparece encima de todas las pantallas cuando no hay red */}
                 <OfflineBanner />
                 <AppStatusBar />
               </AdminProvider>
