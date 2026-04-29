@@ -6,6 +6,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, usePathname } from 'expo-router';
 import { usePlan } from '@/contexts/PlanContext';
+import { useGratuitoUsage } from '@/contexts/useGratuitoUsage';
 import { colors } from '@/styles/commonStyles';
 import MaterialIcons from '@expo/vector-icons/MaterialIcons';
 import { useAuth } from '@/contexts/AuthContext';
@@ -45,6 +46,7 @@ export default function HomeScreen() {
   const pathname = usePathname();
   const { user, businessProfile, loading: authLoading } = useAuth();
   const { canSchedule, isGratuito, isBasico, isPremium } = usePlan();
+  const usage = useGratuitoUsage();
   const { colors: tc, isDark } = useTheme();
 
   const [loading,    setLoading]    = useState(true);
@@ -188,6 +190,27 @@ export default function HomeScreen() {
     : todayAppointments;
   const totalUnpaid = unpaidAppointments.reduce((sum, a) => sum + (a.service_cost || 0), 0);
 
+  // ── Color/estilo del banner Gratuito según uso ──
+  // <80%: verde (modo informativo)
+  // 80-99%: amarillo (modo advertencia)
+  // 100%: rojo (modo bloqueo)
+  const usageColor = usage.isAtLimit ? '#EF4444' : usage.isNearLimit ? '#F59E0B' : colors.primary;
+  const usageBgColor = usage.isAtLimit ? '#FEF2F2' : usage.isNearLimit ? '#FFFBEB' : '#ECFDF5';
+  const usageBorderColor = usage.isAtLimit ? '#FCA5A5' : usage.isNearLimit ? '#FCD34D' : colors.primary + '33';
+  const usageIcon = usage.isAtLimit ? 'block' : usage.isNearLimit ? 'warning' : 'event-available';
+
+  const usageTitle = usage.isAtLimit
+    ? 'Límite mensual alcanzado'
+    : usage.isNearLimit
+      ? `Solo te quedan ${usage.remaining} citas`
+      : `${usage.used} de ${usage.limit} citas usadas este mes`;
+
+  const usageDesc = usage.isAtLimit
+    ? 'Mejora a Plan Premium para citas ilimitadas y WhatsApp automático'
+    : usage.isNearLimit
+      ? 'Te estás acercando al límite. Considera actualizar a Premium.'
+      : 'Plan Básico · Mejora a Premium para citas ilimitadas';
+
   if (loading) {
     return (
       <SafeAreaView style={[s.container, { backgroundColor: tc.bg }]} edges={['top']}>
@@ -234,21 +257,38 @@ export default function HomeScreen() {
           </TouchableOpacity>
         </View>
 
-        {/* UPGRADE BANNER */}
-        {isGratuito && (
+        {/* USAGE BANNER (Plan Básico/Gratuito) — Contador visual con barra de progreso */}
+        {isGratuito && !usage.loading && (
           <TouchableOpacity
-            style={[s.upgradeCard, { backgroundColor: tc.surface, borderColor: colors.primary + '33' }]}
+            style={[s.usageCard, { backgroundColor: isDark ? tc.surface : usageBgColor, borderColor: usageBorderColor }]}
             onPress={() => router.push('/settings/subscription')}
             activeOpacity={0.85}
           >
-            <View style={[s.upgradeIconWrap, { backgroundColor: colors.primary + '18' }]}>
-              <MaterialIcons name="bolt" size={22} color={colors.primary} />
+            <View style={s.usageHeader}>
+              <View style={[s.usageIconWrap, { backgroundColor: usageColor + '20' }]}>
+                <MaterialIcons name={usageIcon as any} size={20} color={usageColor} />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={[s.usageTitle, { color: usageColor }]}>{usageTitle}</Text>
+                <Text style={[s.usageDesc, { color: tc.textMuted }]}>{usageDesc}</Text>
+              </View>
+              <MaterialIcons name="arrow-forward-ios" size={14} color={usageColor} />
             </View>
-            <View style={{ flex: 1 }}>
-              <Text style={[s.upgradeTitle, { color: colors.primary }]}>Activa tu plan VYLTA</Text>
-              <Text style={[s.upgradeDesc, { color: tc.textMuted }]}>Agenda citas y automatiza recordatorios por WhatsApp</Text>
+
+            {/* Barra de progreso */}
+            <View style={s.usageProgressWrap}>
+              <View style={[s.usageProgressBg, { backgroundColor: tc.border + '60' }]}>
+                <View style={[s.usageProgressFill, { width: `${usage.percentage}%`, backgroundColor: usageColor }]} />
+              </View>
+              <View style={s.usageProgressLabels}>
+                <Text style={[s.usageCount, { color: usageColor }]}>
+                  {usage.used} / {usage.limit}
+                </Text>
+                <Text style={[s.usageRemaining, { color: tc.textMuted }]}>
+                  {usage.isAtLimit ? 'Sin disponibles' : `${usage.remaining} disponibles`}
+                </Text>
+              </View>
             </View>
-            <MaterialIcons name="arrow-forward-ios" size={14} color={colors.primary} />
           </TouchableOpacity>
         )}
 
@@ -510,10 +550,20 @@ const s = StyleSheet.create({
   avatar:          { width: 56, height: 56, borderRadius: 16, borderWidth: 2, borderColor: colors.primary },
   avatarFallback:  { width: 56, height: 56, borderRadius: 16, justifyContent: 'center', alignItems: 'center', borderWidth: 2, borderColor: colors.primary },
   avatarText:      { fontSize: 20, fontWeight: '900' },
-  upgradeCard:     { flexDirection: 'row', alignItems: 'center', gap: 12, borderRadius: 16, padding: 16, marginBottom: 20, borderWidth: 1 },
-  upgradeIconWrap: { width: 44, height: 44, borderRadius: 12, justifyContent: 'center', alignItems: 'center' },
-  upgradeTitle:    { fontSize: 15, fontWeight: '800', marginBottom: 2 },
-  upgradeDesc:     { fontSize: 12, lineHeight: 17 },
+
+  // Usage card (Plan Básico) — contador con barra de progreso
+  usageCard:       { borderRadius: 16, padding: 16, marginBottom: 20, borderWidth: 1.5 },
+  usageHeader:     { flexDirection: 'row', alignItems: 'center', gap: 12, marginBottom: 14 },
+  usageIconWrap:   { width: 38, height: 38, borderRadius: 11, justifyContent: 'center', alignItems: 'center' },
+  usageTitle:      { fontSize: 14, fontWeight: '800', marginBottom: 2 },
+  usageDesc:       { fontSize: 11, lineHeight: 15 },
+  usageProgressWrap: { gap: 6 },
+  usageProgressBg: { height: 8, borderRadius: 4, overflow: 'hidden' },
+  usageProgressFill: { height: '100%', borderRadius: 4 },
+  usageProgressLabels: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 4 },
+  usageCount:      { fontSize: 13, fontWeight: '800' },
+  usageRemaining:  { fontSize: 11, fontWeight: '500' },
+
   heroCard:        { borderRadius: 20, padding: 22, marginBottom: 20, flexDirection: 'row', alignItems: 'center', borderWidth: 1 },
   heroLeft:        { flex: 1 },
   heroBadge:       { flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 8 },
