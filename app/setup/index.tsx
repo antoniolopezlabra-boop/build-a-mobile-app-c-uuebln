@@ -2,13 +2,12 @@ import React, { useState, useEffect, useRef } from 'react';
 import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity,
   TextInput, ActivityIndicator, Alert, KeyboardAvoidingView,
-  Platform, Animated,
+  Platform, Animated, Clipboard,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import MaterialIcons from '@expo/vector-icons/MaterialIcons';
-import * as Clipboard from 'expo-clipboard';
 import { useAuth } from '@/contexts/AuthContext';
 import { supabase } from '@/lib/supabase';
 import { colors } from '@/styles/commonStyles';
@@ -201,10 +200,10 @@ export default function SetupWizard() {
     router.replace('/(tabs)/(home)');
   };
 
-  const handleCopyLink = async () => {
+  const handleCopyLink = () => {
     if (!bookingSlug) return;
     const url = `https://book.vylta.lat/${bookingSlug}`;
-    await Clipboard.setStringAsync(url);
+    Clipboard.setString(url);
     Alert.alert('¡Copiado!', `Tu link "${url}" se copió al portapapeles. Compártelo en tu Instagram, WhatsApp y Google Business.`);
   };
 
