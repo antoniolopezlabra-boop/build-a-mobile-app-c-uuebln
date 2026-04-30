@@ -43,6 +43,10 @@ interface TimeSlot {
   isOverlap?: boolean;
   isBlocked?: boolean;       // Si el slot cae en un bloqueo de tiempo
   blockedLabel?: string;     // Etiqueta del bloqueo (ej. "Comida")
+  // Razón por la que un slot inicial no es elegible para el servicio seleccionado.
+  // Solo se llena cuando la duración del servicio hace que el rango [t, t+dur]
+  // atraviese un conflicto (cita, bloqueo, fuera de horario).
+  unavailableReason?: 'block' | 'booked' | 'closed' | null;
 }
 
 interface CatalogService {
@@ -83,19 +87,14 @@ function findBlockForSlot(
 ): TimeBlockData | null {
   const projectDay = jsDay === 0 ? 6 : jsDay - 1; // 0=Lun..6=Dom
   for (const b of blocks) {
-    // Aplicabilidad por staff:
-    //   - bloqueo con staff_id !== null aplica solo si coincide con staffId del slot.
-    //   - bloqueo con staff_id null aplica a todos.
     if (b.staff_id) {
       if (b.staff_id !== staffId) continue;
     }
-    // Aplicabilidad temporal
     if (b.is_recurring) {
       if (b.day_of_week !== projectDay) continue;
     } else {
       if (b.specific_date !== dateStr) continue;
     }
-    // Traslape de rangos
     const bStart = timeToMin(b.start_time);
     const bEnd = timeToMin(b.end_time);
     if (slotStartMin < bEnd && slotEndMin > bStart) return b;
@@ -194,7 +193,9 @@ export default function NewAppointmentScreen() {
     loadTimeBlocks();
   }, []);
 
-  useEffect(() => { checkAvailability(); }, [date, selectedStaff, timeBlocks]);
+  // IMPORTANTE: recalcular disponibilidad cuando cambia el servicio (porque la duración
+  // cambia el rango requerido), la fecha, el colaborador o los bloqueos cargados.
+  useEffect(() => { checkAvailability(); }, [date, selectedStaff, timeBlocks, selectedCatalogService]);
 
   const loadCatalogServices = async () => {
     try { const data = await apiGet<CatalogService[]>('/api/services'); setCatalogServices(data); } catch {}
@@ -276,6 +277,8 @@ export default function NewAppointmentScreen() {
       const startMin  = parseInt(dayConfig.startTime.split(':')[1]);
       const endHour   = parseInt(dayConfig.endTime.split(':')[0]);
       const endMin    = parseInt(dayConfig.endTime.split(':')[1]);
+      const dayStartMin = startHour * 60 + startMin;
+      const dayEndMin   = endHour * 60 + endMin;
 
       const allDateAppointments = appointments as any[];
 
@@ -293,9 +296,14 @@ export default function NewAppointmentScreen() {
       const today = new Date();
       const todayString = `${today.getFullYear()}-${String(today.getMonth()+1).padStart(2,'0')}-${String(today.getDate()).padStart(2,'0')}`;
       const isToday = dateString === todayString;
+
+      // ─────────────────────────────────────────────────────────────
+      // PASADA 1 — Construir slots base (estado "atómico" del slot de 30 min):
+      //            ¿Está bookeado? ¿Bloqueado por comida? ¿En el pasado?
+      // ─────────────────────────────────────────────────────────────
       const slots: TimeSlot[] = [];
 
-      for (let totalMin = startHour*60+startMin; totalMin < endHour*60+endMin; totalMin += 30) {
+      for (let totalMin = dayStartMin; totalMin < dayEndMin; totalMin += 30) {
         const hour = Math.floor(totalMin/60);
         const minute = totalMin%60;
         const timeString = `${hour.toString().padStart(2,'0')}:${minute.toString().padStart(2,'0')}`;
@@ -322,7 +330,6 @@ export default function NewAppointmentScreen() {
         const isBooked = blockedByStaff || blockedByGeneral;
         const isPast = isToday && (hour < today.getHours() || (hour === today.getHours() && minute <= today.getMinutes()));
 
-        // Verificar si el slot cae en un bloqueo de tiempo
         const blockingTimeBlock = findBlockForSlot(
           totalMin, slotEndMin, dateString, dayOfWeek, selectedStaff?.id || null, timeBlocks
         );
@@ -330,13 +337,79 @@ export default function NewAppointmentScreen() {
 
         slots.push({
           time: timeString,
-          // Slot disponible solo si no está booked, no es pasado y no está bloqueado
           available: !isBooked && !isPast && !isBlocked,
           isOverlap: isOverlap && !isPast && !isBlocked,
           isBlocked,
           blockedLabel: blockingTimeBlock?.label,
+          unavailableReason: null,
         });
       }
+
+      // ─────────────────────────────────────────────────────────────
+      // PASADA 2 — Validación por DURACIÓN DEL SERVICIO.
+      //
+      // Para cada slot que sería un INICIO válido, verificamos que el rango
+      // [t, t + duración] esté completamente libre (no toca citas, ni bloqueos,
+      // ni se sale del horario laboral).
+      //
+      // Si la duración del servicio es 30 min (1 sub-bloque), esta pasada
+      // es equivalente a la pasada 1 — no cambia nada.
+      //
+      // Si la duración es 90 min (3 sub-bloques) y el slot 13:30 está libre
+      // pero el 14:00 está bloqueado por comida, marcamos 13:30 como
+      // NO disponible con razón 'block'.
+      // ─────────────────────────────────────────────────────────────
+      const durationMin = selectedCatalogService?.durationMinutes ?? 30;
+      const subBlocksNeeded = Math.ceil(durationMin / 30);
+
+      if (subBlocksNeeded > 1) {
+        for (let i = 0; i < slots.length; i++) {
+          const startSlot = slots[i];
+          // Si el slot ya está marcado como no disponible por su propia causa,
+          // no necesitamos hacer nada extra (mantiene su isBlocked / etc.).
+          if (!startSlot.available && !startSlot.isOverlap) continue;
+
+          // Verificar el rango requerido por la duración del servicio.
+          // Cualquier sub-slot que falte, esté bookeado, o esté bloqueado → invalida el inicio.
+          let rangeOK = true;
+          let reason: 'block' | 'booked' | 'closed' | null = null;
+
+          for (let j = 0; j < subBlocksNeeded; j++) {
+            const subSlot = slots[i + j];
+            if (!subSlot) {
+              // Se sale del horario laboral
+              rangeOK = false;
+              reason = 'closed';
+              break;
+            }
+            // Si el sub-slot está bloqueado por comida/descanso → todo el rango falla.
+            if (subSlot.isBlocked) {
+              rangeOK = false;
+              reason = 'block';
+              break;
+            }
+            // Si NO permite empalme y el sub-slot está bookeado → falla.
+            // (Nota: si allowOverlapping=true sin staff, el slot está marcado como
+            //  isOverlap pero NO como bookeado en `available`, así pasa el rango;
+            //  el server validará el conflicto real al insertar.)
+            if (!subSlot.available && !subSlot.isOverlap) {
+              rangeOK = false;
+              reason = subSlot.isBlocked ? 'block' : 'booked';
+              break;
+            }
+          }
+
+          if (!rangeOK) {
+            slots[i].available = false;
+            slots[i].unavailableReason = reason;
+            // Nota: NO sobrescribimos isBlocked/blockedLabel del slot inicial,
+            // porque visualmente queremos diferenciar:
+            //   - slot 13:30 no es comida (su isBlocked sigue false), pero
+            //     no se puede usar de inicio porque el rango invade comida.
+          }
+        }
+      }
+
       setTimeSlots(slots);
     } catch {
       // Si falla, no bloquear la pantalla
@@ -410,6 +483,9 @@ export default function NewAppointmentScreen() {
     ? 'No puedes crear más citas este mes. Toca para mejorar a Premium.'
     : 'Plan Básico — Mejora a Premium para citas ilimitadas';
 
+  // Si hay servicio del catálogo seleccionado, ¿hay slots inválidos por duración?
+  const hasInvalidByDuration = !!selectedCatalogService && timeSlots.some(s => s.unavailableReason);
+
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
       <View style={styles.header}>
@@ -428,7 +504,6 @@ export default function NewAppointmentScreen() {
           keyboardDismissMode="on-drag"
           scrollEnabled={!showDatePanel}
         >
-          {/* Banner contador X/10 con barra de progreso (solo plan Gratuito) */}
           {isGratuito && !usage.loading && (
             <TouchableOpacity
               style={[styles.usageCard, { backgroundColor: usageBgColor, borderColor: usageBorderColor }]}
@@ -541,6 +616,7 @@ export default function NewAppointmentScreen() {
           <View style={styles.section}>
             <Text style={styles.label}>
               Hora *{selectedStaff ? ` — ${selectedStaff.name}` : ''}
+              {selectedCatalogService ? ` (${durationLabel(selectedCatalogService.durationMinutes)})` : ''}
             </Text>
             {dayIsClosed ? (
               <View style={styles.dayClosedContainer}>
@@ -570,6 +646,10 @@ export default function NewAppointmentScreen() {
                     const isSelected = selectedBlocks.includes(slot.time);
                     const isOverlap  = slot.isOverlap && !isSelected;
                     const isBlocked  = slot.isBlocked;
+                    // Slot inicial NO usable porque la duración del servicio
+                    // hace que el rango invada un conflicto. Visualmente
+                    // distinguimos esto del "bloqueado por comida":
+                    const isInvalidByDuration = !!slot.unavailableReason && !isBlocked;
                     return (
                       <TouchableOpacity
                         key={slot.time}
@@ -578,6 +658,7 @@ export default function NewAppointmentScreen() {
                           isSelected && styles.timeSlotSelected,
                           !slot.available && styles.timeSlotDisabled,
                           isBlocked && styles.timeSlotBlocked,
+                          isInvalidByDuration && styles.timeSlotDurationInvalid,
                           isOverlap && !isBlocked && styles.timeSlotOverlap,
                         ]}
                         onPress={() => {
@@ -617,19 +698,34 @@ export default function NewAppointmentScreen() {
                             {slot.blockedLabel?.toLowerCase().includes('comida') ? '🍽️' : '🚫'} {slot.blockedLabel?.slice(0, 8)}
                           </Text>
                         )}
-                        {slot.isOverlap && !isBlocked && <Text style={{ fontSize: 8, color: '#F59E0B' }}>⚡</Text>}
+                        {isInvalidByDuration && (
+                          <Text style={styles.timeSlotDurationInvalidLabel} numberOfLines={1}>
+                            No alcanza
+                          </Text>
+                        )}
+                        {slot.isOverlap && !isBlocked && !isInvalidByDuration && <Text style={{ fontSize: 8, color: '#F59E0B' }}>⚡</Text>}
                       </TouchableOpacity>
                     );
                   })}
                 </ScrollView>
 
-                {/* Leyenda visual de slots bloqueados */}
-                {timeSlots.some(s => s.isBlocked) && (
-                  <View style={styles.legendRow}>
-                    <View style={styles.legendItem}>
-                      <View style={[styles.legendDot, { backgroundColor: '#FEF3C7' }]} />
-                      <Text style={styles.legendText}>Bloqueado por horario de comida o descanso</Text>
-                    </View>
+                {/* Leyenda visual */}
+                {(timeSlots.some(s => s.isBlocked) || hasInvalidByDuration) && (
+                  <View style={styles.legendCol}>
+                    {timeSlots.some(s => s.isBlocked) && (
+                      <View style={styles.legendItem}>
+                        <View style={[styles.legendDot, { backgroundColor: '#FEF3C7', borderColor: '#FDE68A' }]} />
+                        <Text style={styles.legendText}>Bloqueado por horario de comida o descanso</Text>
+                      </View>
+                    )}
+                    {hasInvalidByDuration && (
+                      <View style={styles.legendItem}>
+                        <View style={[styles.legendDot, { backgroundColor: '#FEE2E2', borderColor: '#FCA5A5' }]} />
+                        <Text style={styles.legendText}>
+                          La duración del servicio ({durationLabel(selectedCatalogService!.durationMinutes)}) no alcanza antes del próximo bloqueo o cita
+                        </Text>
+                      </View>
+                    )}
                   </View>
                 )}
               </>
@@ -946,7 +1042,6 @@ const styles = StyleSheet.create({
   placeholder:            { width: 32 },
   content:                { flex: 1, padding: 20 },
 
-  // Banner contador X/10 con barra de progreso
   usageCard:              { borderRadius: 12, padding: 12, marginBottom: 20, borderWidth: 1.5 },
   usageHeader:            { flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 10 },
   usageTitle:             { fontSize: 13, fontWeight: '800' },
@@ -986,18 +1081,19 @@ const styles = StyleSheet.create({
   timeSlot:               { paddingHorizontal: 16, paddingVertical: 10, borderRadius: 8, backgroundColor: '#ffffff', borderWidth: 1, borderColor: '#E5E7EB', marginRight: 8, alignItems: 'center', minWidth: 80 },
   timeSlotSelected:       { backgroundColor: colors.primary, borderColor: colors.primary },
   timeSlotDisabled:       { backgroundColor: '#F3F4F6', borderColor: '#E5E7EB' },
-  // Slot bloqueado por horario de comida/descanso
   timeSlotBlocked:        { backgroundColor: '#FEF3C7', borderColor: '#FDE68A' },
+  // Slot inicial inválido por duración del servicio (rosa rojizo)
+  timeSlotDurationInvalid: { backgroundColor: '#FEE2E2', borderColor: '#FCA5A5' },
   timeSlotText:           { fontSize: 14, fontWeight: '500', color: colors.text },
   timeSlotTextSelected:   { color: '#ffffff' },
   timeSlotTextDisabled:   { color: '#9CA3AF' },
   timeSlotTextBlocked:    { color: '#92400E', fontWeight: '600' },
   timeSlotBlockedLabel:   { fontSize: 9, color: '#92400E', marginTop: 2, fontWeight: '600' },
-  // Leyenda visual
-  legendRow:              { flexDirection: 'row', alignItems: 'center', marginTop: 10, gap: 8 },
-  legendItem:             { flexDirection: 'row', alignItems: 'center', gap: 6 },
-  legendDot:              { width: 10, height: 10, borderRadius: 3, borderWidth: 1, borderColor: '#FDE68A' },
-  legendText:             { fontSize: 11, color: '#64748B', fontStyle: 'italic' },
+  timeSlotDurationInvalidLabel: { fontSize: 9, color: '#991B1B', marginTop: 2, fontWeight: '700' },
+  legendCol:              { marginTop: 10, gap: 6 },
+  legendItem:             { flexDirection: 'row', alignItems: 'flex-start', gap: 6 },
+  legendDot:              { width: 10, height: 10, borderRadius: 3, borderWidth: 1, marginTop: 2 },
+  legendText:             { flex: 1, fontSize: 11, color: '#64748B', fontStyle: 'italic', lineHeight: 15 },
   switchRow:              { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', backgroundColor: '#ffffff', borderRadius: 12, padding: 16 },
   switchLabel:            { flexDirection: 'row', alignItems: 'center', gap: 8, flex: 1 },
   switchText:             { fontSize: 16, fontWeight: '600', color: colors.text },
