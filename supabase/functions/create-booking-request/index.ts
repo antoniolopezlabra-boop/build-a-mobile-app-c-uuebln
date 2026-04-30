@@ -18,6 +18,15 @@ function json(body: unknown, status = 200) {
 
 const GRATUITO_MONTHLY_LIMIT = 10
 
+// Helpers para validación de bloqueos de tiempo
+function timeToMin(t: string): number {
+  const [h, m] = (t || '00:00').split(':').map(Number)
+  return h * 60 + m
+}
+function rangesOverlap(aS: number, aE: number, bS: number, bE: number): boolean {
+  return aS < bE && aE > bS
+}
+
 serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders })
 
@@ -54,14 +63,12 @@ serve(async (req) => {
     }
 
     // ── Verificar límite del plan Gratuito ──────────────────────────────
-    // La tabla del plan es subscription_plans con columna plan_type
     const { data: sub } = await supabase
       .from('subscription_plans')
       .select('plan_type, status')
       .eq('user_id', link.user_id)
       .single()
 
-    // Si no tiene plan o es Gratuito, aplicar límite de 10 citas/mes
     const planType = sub?.plan_type?.toLowerCase() ?? 'gratuito'
     const isGratuito = planType === 'gratuito'
 
@@ -88,7 +95,7 @@ serve(async (req) => {
     }
     // ────────────────────────────────────────────────────────────────────
 
-    // Verificar disponibilidad del slot
+    // ── Verificar disponibilidad del slot vs citas existentes ──
     let conflictQuery = supabase
       .from('appointments')
       .select('id')
@@ -110,6 +117,66 @@ serve(async (req) => {
         code: 'SLOT_TAKEN',
       }, 409)
     }
+
+    // ── Verificar bloqueos de tiempo (comida, descansos) ──
+    // Resuelve dos riesgos:
+    //   1. Cliente manipulado pasando un horario que cae en comida.
+    //   2. UI desactualizada (el negocio creó un bloqueo después de que el
+    //      cliente cargó la página pero antes de presionar Confirmar).
+    //
+    // Lógica:
+    //   - Bloqueos con staff_id NULL aplican a TODOS (negocio entero).
+    //   - Bloqueos con staff_id específico solo aplican al staff del slot.
+    //   - Recurrentes filtran por day_of_week (convención: 0=Lun..6=Dom).
+    //   - No recurrentes filtran por specific_date.
+    //
+    // Convertimos el date string YYYY-MM-DD a day_of_week con la convención
+    // del proyecto (0=Lunes..6=Domingo). JS getDay() es 0=Domingo..6=Sábado.
+    const [yy, mm, dd] = date.split('-').map(Number)
+    const jsDate = new Date(yy, mm - 1, dd, 12, 0, 0)
+    const jsDay = jsDate.getDay() // 0=Dom..6=Sab
+    const projectDay = jsDay === 0 ? 6 : jsDay - 1 // 0=Lun..6=Dom
+
+    // Filtro: bloqueos generales (staff_id null) + bloqueos del staff del slot
+    let staffFilter = 'staff_id.is.null'
+    if (staff_id) {
+      staffFilter = `staff_id.is.null,staff_id.eq.${staff_id}`
+    }
+
+    const { data: blocks, error: blocksErr } = await supabase
+      .from('time_blocks')
+      .select('id, label, staff_id, start_time, end_time, is_recurring, day_of_week, specific_date')
+      .eq('user_id', link.user_id)
+      .eq('is_active', true)
+      .or(staffFilter)
+
+    if (blocksErr) {
+      console.warn('[create-booking-request] time_blocks query error:', blocksErr)
+      // No bloqueamos por error de DB para no afectar UX, pero registramos.
+    } else if (blocks && blocks.length > 0) {
+      const startMin = timeToMin(startTime)
+      const endMin   = timeToMin(endTime)
+
+      for (const b of blocks) {
+        // Aplicabilidad temporal
+        if (b.is_recurring) {
+          if (b.day_of_week !== projectDay) continue
+        } else {
+          if (b.specific_date !== date) continue
+        }
+
+        const bStart = timeToMin(b.start_time)
+        const bEnd   = timeToMin(b.end_time)
+
+        if (rangesOverlap(startMin, endMin, bStart, bEnd)) {
+          return json({
+            error: `Ese horario está bloqueado: "${b.label}" (${b.start_time.slice(0,5)}-${b.end_time.slice(0,5)}). Por favor elige otro horario.`,
+            code: 'SLOT_BLOCKED',
+          }, 409)
+        }
+      }
+    }
+    // ────────────────────────────────────────────────────────────────────
 
     const whatsappNotification = link.whatsapp_confirmation ?? true
     const status = link.require_approval ? 'Solicitud' : 'Confirmada'
