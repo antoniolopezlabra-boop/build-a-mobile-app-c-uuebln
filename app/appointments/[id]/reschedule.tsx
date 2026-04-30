@@ -15,7 +15,24 @@ import { ConfirmModal } from '@/components/button';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import MaterialIcons from '@expo/vector-icons/MaterialIcons';
 
-interface TimeSlot { time: string; available: boolean; }
+interface TimeSlot {
+  time: string;
+  available: boolean;
+  isBlocked?: boolean;
+  blockedLabel?: string;
+  unavailableReason?: 'block' | 'booked' | 'closed' | null;
+}
+
+interface TimeBlockData {
+  id: string;
+  staff_id: string | null;
+  label: string;
+  start_time: string;
+  end_time: string;
+  is_recurring: boolean;
+  day_of_week: number | null;
+  specific_date: string | null;
+}
 
 interface Appointment {
   id: string; date: string; time: string; end_time?: string; endTime?: string;
@@ -23,16 +40,59 @@ interface Appointment {
   client: { id: string; name: string } | null;
   clientNameTemp?: string | null;
   userId: string; clientId: string;
+  staff_id?: string | null;
 }
 
 function toDateStr(d: Date) {
   return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
 }
 
-// FIX #7/#9/#12: clave dinámica de caché de reportes (año_mes)
 function getReportsCacheKey() {
   const n = new Date();
   return `reports_stats_${n.getFullYear()}_${n.getMonth()+1}`;
+}
+
+const timeToMin = (t: string): number => {
+  const [h, m] = t.split(':').map(Number);
+  return h * 60 + m;
+};
+
+// Mismo helper que new.tsx — bloqueo aplicable al slot.
+function findBlockForSlot(
+  slotStartMin: number,
+  slotEndMin: number,
+  dateStr: string,
+  jsDay: number,
+  staffId: string | null,
+  blocks: TimeBlockData[]
+): TimeBlockData | null {
+  const projectDay = jsDay === 0 ? 6 : jsDay - 1;
+  for (const b of blocks) {
+    if (b.staff_id) {
+      if (b.staff_id !== staffId) continue;
+    }
+    if (b.is_recurring) {
+      if (b.day_of_week !== projectDay) continue;
+    } else {
+      if (b.specific_date !== dateStr) continue;
+    }
+    const bStart = timeToMin(b.start_time);
+    const bEnd = timeToMin(b.end_time);
+    if (slotStartMin < bEnd && slotEndMin > bStart) return b;
+  }
+  return null;
+}
+
+// Calcula duración (minutos) de una cita a partir de start_time y end_time.
+// Si no hay end_time, asume 30 min.
+function calcAppointmentDuration(appt: Appointment): number {
+  const start = appt.time;
+  const end = appt.end_time || appt.endTime;
+  if (!end) return 30;
+  const [sh, sm] = start.split(':').map(Number);
+  const [eh, em] = end.split(':').map(Number);
+  const diff = (eh*60+em) - (sh*60+sm);
+  return diff > 0 ? diff : 30;
 }
 
 export default function RescheduleAppointmentScreen() {
@@ -41,7 +101,7 @@ export default function RescheduleAppointmentScreen() {
   const { colors: tc, isDark } = useTheme();
   const { user } = useAuth();
 
-  const saveLockRef = useRef(false); // FIX #2: guard doble-submit
+  const saveLockRef = useRef(false);
   const [loading, setLoading]   = useState(true);
   const [saving, setSaving]     = useState(false);
   const [loadingSlots, setLoadingSlots] = useState(false);
@@ -52,19 +112,19 @@ export default function RescheduleAppointmentScreen() {
   const [showAndroidPicker, setShowAndroidPicker] = useState(false);
   const [time, setTime]         = useState('09:00');
   const [timeSlots, setTimeSlots] = useState<TimeSlot[]>([]);
+  const [timeBlocks, setTimeBlocks] = useState<TimeBlockData[]>([]);
   const [errorModal, setErrorModal] = useState({ visible: false, message: '' });
 
-  useEffect(() => { loadAppointment(); }, [id]);
+  useEffect(() => { loadAppointment(); loadTimeBlocks(); }, [id]);
 
-  // FIX #1: recargar slots cuando cambia la fecha
+  // Recalcular slots cuando cambia fecha, cita o bloqueos.
   useEffect(() => {
     if (appointment) checkAvailability();
-  }, [date, appointment]);
+  }, [date, appointment, timeBlocks]);
 
   const loadAppointment = async () => {
     setLoading(true);
     try {
-      // FIX #1: cargar solo la cita específica en lugar de todas
       const appt = await apiGet<Appointment>(`/api/appointments/${id}`);
       if (appt) {
         setAppointment(appt);
@@ -80,24 +140,46 @@ export default function RescheduleAppointmentScreen() {
     }
   };
 
-  // FIX #1: disponibilidad correcta con rangos start_time/end_time + business_hours
+  const loadTimeBlocks = async () => {
+    try {
+      const data = await apiGet<TimeBlockData[]>('/api/time-blocks');
+      setTimeBlocks(data || []);
+    } catch (e) {
+      console.warn('[reschedule] loadTimeBlocks error:', e);
+      setTimeBlocks([]);
+    }
+  };
+
+  // Construye slots con la misma lógica de 2 pasadas que new.tsx:
+  //   PASADA 1: estado atómico de cada slot de 30 min (booked / past / blocked).
+  //   PASADA 2: validación por DURACIÓN del servicio que se está reagendando.
+  //             Excluye la propia cita del cálculo de bookeado.
   const checkAvailability = async () => {
     if (!appointment) return;
     setLoadingSlots(true);
     try {
       const dateString = toDateStr(date);
       const dayOfWeek  = date.getDay();
+      const staffId    = appointment.staff_id || null;
+      const duration   = calcAppointmentDuration(appointment);
+      const subBlocksNeeded = Math.ceil(duration / 30);
 
       // Citas del día excluyendo la actual y canceladas
       const { data: appts } = await supabase
         .from('appointments')
-        .select('start_time, end_time, status')
+        .select('start_time, end_time, status, staff_id')
         .eq('user_id', user?.id)
         .eq('date', dateString)
         .neq('id', appointment.id)
         .not('status', 'in', '("Cancelada","No asistió","Rechazada")');
 
-      // Horario del negocio para ese día
+      // Si la cita tiene staff asignado, solo nos importan citas de ese mismo staff.
+      // Si no tiene staff, todas las citas del día cuentan como conflicto.
+      const relevantAppts = staffId
+        ? (appts ?? []).filter((a: any) => a.staff_id === staffId)
+        : (appts ?? []);
+
+      // Horario laboral del día
       let startH = 9, startM = 0, endH = 19, endM = 0;
       const { data: bh } = await supabase
         .from('business_hours')
@@ -112,18 +194,20 @@ export default function RescheduleAppointmentScreen() {
         [endH,   endM]   = (bh.end_time   || '19:00').split(':').map(Number);
       }
 
-      // Slots pasados si es hoy
       const today    = new Date();
       const isToday  = dateString === toDateStr(today);
+      const dayStartMin = startH * 60 + startM;
+      const dayEndMin   = endH * 60 + endM;
 
+      // ── PASADA 1: estado atómico de cada slot de 30 min ──
       const slots: TimeSlot[] = [];
-      for (let total = startH*60+startM; total < endH*60+endM; total += 30) {
+      for (let total = dayStartMin; total < dayEndMin; total += 30) {
         const h = Math.floor(total/60);
         const m = total % 60;
         const slotTime = `${h.toString().padStart(2,'0')}:${m.toString().padStart(2,'0')}`;
+        const slotEndMin = total + 30;
 
-        // FIX #1: comparar rangos, no igualdad exacta de hora
-        const isBooked = (appts ?? []).some((a: any) => {
+        const isBooked = relevantAppts.some((a: any) => {
           const [sh, sm] = (a.start_time || '00:00').split(':').map(Number);
           const [eh, em] = (a.end_time   || '00:00').split(':').map(Number);
           return total >= sh*60+sm && total < eh*60+em;
@@ -134,11 +218,59 @@ export default function RescheduleAppointmentScreen() {
           (h === today.getHours() && m <= today.getMinutes())
         );
 
-        slots.push({ time: slotTime, available: !isBooked && !isPast });
+        const blockingTimeBlock = findBlockForSlot(
+          total, slotEndMin, dateString, dayOfWeek, staffId, timeBlocks
+        );
+        const isBlocked = !!blockingTimeBlock;
+
+        slots.push({
+          time: slotTime,
+          available: !isBooked && !isPast && !isBlocked,
+          isBlocked,
+          blockedLabel: blockingTimeBlock?.label,
+          unavailableReason: null,
+        });
       }
+
+      // ── PASADA 2: validar rango completo según duración de la cita ──
+      // Si la cita dura 90 min (3 sub-bloques), un slot inicial libre no es válido
+      // si el rango [t, t+90] invade un bloqueo, una cita o el cierre del día.
+      if (subBlocksNeeded > 1) {
+        for (let i = 0; i < slots.length; i++) {
+          const startSlot = slots[i];
+          if (!startSlot.available) continue;
+
+          let rangeOK = true;
+          let reason: 'block' | 'booked' | 'closed' | null = null;
+
+          for (let j = 0; j < subBlocksNeeded; j++) {
+            const subSlot = slots[i + j];
+            if (!subSlot) {
+              rangeOK = false;
+              reason = 'closed';
+              break;
+            }
+            if (subSlot.isBlocked) {
+              rangeOK = false;
+              reason = 'block';
+              break;
+            }
+            if (!subSlot.available) {
+              rangeOK = false;
+              reason = subSlot.isBlocked ? 'block' : 'booked';
+              break;
+            }
+          }
+
+          if (!rangeOK) {
+            slots[i].available = false;
+            slots[i].unavailableReason = reason;
+          }
+        }
+      }
+
       setTimeSlots(slots);
     } catch {
-      // Fallback: slots de 9-19 todos disponibles
       const slots: TimeSlot[] = [];
       for (let h = 9; h < 19; h++) {
         for (let m = 0; m < 60; m += 30) {
@@ -151,8 +283,6 @@ export default function RescheduleAppointmentScreen() {
     }
   };
 
-  // FIX #2: guard doble-submit
-  // FIX #9: invalida caché al reagendar
   const handleSave = async () => {
     if (saveLockRef.current || !appointment) return;
 
@@ -171,12 +301,11 @@ export default function RescheduleAppointmentScreen() {
         time: time,
         status: 'Pendiente',
       });
-      // FIX #9: invalidar todos los cachés afectados
       invalidateCache('appointments_list');
       invalidateCache('today_appointments');
       invalidateCache('week_appointments');
       invalidateCache('dashboard_stats');
-      invalidateCache(getReportsCacheKey()); // clave dinámica
+      invalidateCache(getReportsCacheKey());
       router.back();
     } catch (error: any) {
       saveLockRef.current = false;
@@ -207,10 +336,17 @@ export default function RescheduleAppointmentScreen() {
   const formattedDate = date.toLocaleDateString('es-MX', { weekday:'long', year:'numeric', month:'long', day:'numeric' });
   const formattedTempDate = tempDate.toLocaleDateString('es-MX', { weekday:'long', year:'numeric', month:'long', day:'numeric' });
   const clientName = appointment.client?.name || appointment.clientNameTemp || 'Cliente';
+  const duration = calcAppointmentDuration(appointment);
+  const durationLabel = duration < 60
+    ? `${duration} min`
+    : duration === 60
+      ? '1 hora'
+      : `${Math.floor(duration/60)}h${duration%60>0?` ${duration%60}min`:''}`;
+  const hasInvalidByDuration = timeSlots.some(s => s.unavailableReason);
+  const hasBlockedSlots = timeSlots.some(s => s.isBlocked);
 
   return (
     <SafeAreaView style={[s.container, { backgroundColor: tc.bg }]} edges={['top']}>
-      {/* Header — usa tc.surface para dark mode FIX #15 */}
       <View style={[s.header, { backgroundColor: tc.surface, borderBottomColor: tc.border }]}>
         <TouchableOpacity onPress={() => router.back()} style={s.backButton}>
           <IconSymbol ios_icon_name="chevron.left" android_material_icon_name="arrow-back" size={24} color={tc.text} />
@@ -224,7 +360,7 @@ export default function RescheduleAppointmentScreen() {
         <View style={[s.infoCard, { backgroundColor: tc.surface, borderColor: tc.border }]}>
           <Text style={[s.infoTitle, { color: tc.textMuted }]}>Cita actual</Text>
           <Text style={[s.infoClient, { color: tc.text }]}>{clientName}</Text>
-          <Text style={[s.infoService, { color: tc.textMuted }]}>{appointment.service || 'Servicio'}</Text>
+          <Text style={[s.infoService, { color: tc.textMuted }]}>{appointment.service || 'Servicio'} · {durationLabel}</Text>
           <Text style={[s.infoDateTime, { color: tc.textMuted }]}>
             {new Date(appointment.date+'T12:00:00').toLocaleDateString('es-MX')} · {appointment.time}
           </Text>
@@ -239,7 +375,6 @@ export default function RescheduleAppointmentScreen() {
           </TouchableOpacity>
         </View>
 
-        {/* Android date picker */}
         {Platform.OS === 'android' && showAndroidPicker && (
           <DateTimePicker
             value={date} mode="date" display="default" minimumDate={new Date()}
@@ -249,7 +384,7 @@ export default function RescheduleAppointmentScreen() {
 
         {/* Nueva Hora */}
         <View style={s.section}>
-          <Text style={[s.label, { color: tc.text }]}>Nueva Hora</Text>
+          <Text style={[s.label, { color: tc.text }]}>Nueva Hora ({durationLabel})</Text>
           {loadingSlots ? (
             <View style={s.slotsLoading}>
               <ActivityIndicator color="#10B981" size="small" />
@@ -261,23 +396,70 @@ export default function RescheduleAppointmentScreen() {
               <Text style={[s.closedSub, { color: tc.textMuted }]}>Selecciona otra fecha</Text>
             </View>
           ) : (
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} style={s.timeSlotsContainer}>
-              {timeSlots.map(slot => {
-                const isSel = slot.time === time;
-                return (
-                  <TouchableOpacity
-                    key={slot.time}
-                    style={[s.timeSlot, { backgroundColor: tc.surface, borderColor: tc.border }, isSel && s.timeSlotSelected, !slot.available && s.timeSlotDisabled]}
-                    onPress={() => slot.available && setTime(slot.time)}
-                    disabled={!slot.available}
-                  >
-                    <Text style={[s.timeSlotText, { color: tc.text }, isSel && s.timeSlotTextSelected, !slot.available && s.timeSlotTextDisabled]}>
-                      {slot.time}
-                    </Text>
-                  </TouchableOpacity>
-                );
-              })}
-            </ScrollView>
+            <>
+              <ScrollView horizontal showsHorizontalScrollIndicator={false} style={s.timeSlotsContainer}>
+                {timeSlots.map(slot => {
+                  const isSel = slot.time === time;
+                  const isBlocked = slot.isBlocked;
+                  const isInvalidByDuration = !!slot.unavailableReason && !isBlocked;
+                  return (
+                    <TouchableOpacity
+                      key={slot.time}
+                      style={[
+                        s.timeSlot,
+                        { backgroundColor: tc.surface, borderColor: tc.border },
+                        isSel && s.timeSlotSelected,
+                        !slot.available && s.timeSlotDisabled,
+                        isBlocked && s.timeSlotBlocked,
+                        isInvalidByDuration && s.timeSlotDurationInvalid,
+                      ]}
+                      onPress={() => slot.available && setTime(slot.time)}
+                      disabled={!slot.available}
+                    >
+                      <Text style={[
+                        s.timeSlotText,
+                        { color: tc.text },
+                        isSel && s.timeSlotTextSelected,
+                        !slot.available && s.timeSlotTextDisabled,
+                        isBlocked && s.timeSlotTextBlocked,
+                      ]}>
+                        {slot.time}
+                      </Text>
+                      {isBlocked && (
+                        <Text style={s.timeSlotBlockedLabel} numberOfLines={1}>
+                          {slot.blockedLabel?.toLowerCase().includes('comida') ? '🍽️' : '🚫'} {slot.blockedLabel?.slice(0, 8)}
+                        </Text>
+                      )}
+                      {isInvalidByDuration && (
+                        <Text style={s.timeSlotDurationInvalidLabel} numberOfLines={1}>
+                          No alcanza
+                        </Text>
+                      )}
+                    </TouchableOpacity>
+                  );
+                })}
+              </ScrollView>
+
+              {/* Leyendas explicativas */}
+              {(hasBlockedSlots || hasInvalidByDuration) && (
+                <View style={s.legendCol}>
+                  {hasBlockedSlots && (
+                    <View style={s.legendItem}>
+                      <View style={[s.legendDot, { backgroundColor: '#FEF3C7', borderColor: '#FDE68A' }]} />
+                      <Text style={[s.legendText, { color: tc.textMuted }]}>Bloqueado por horario de comida o descanso</Text>
+                    </View>
+                  )}
+                  {hasInvalidByDuration && (
+                    <View style={s.legendItem}>
+                      <View style={[s.legendDot, { backgroundColor: '#FEE2E2', borderColor: '#FCA5A5' }]} />
+                      <Text style={[s.legendText, { color: tc.textMuted }]}>
+                        La duración de la cita ({durationLabel}) no alcanza antes del próximo bloqueo o cita
+                      </Text>
+                    </View>
+                  )}
+                </View>
+              )}
+            </>
           )}
           <Text style={[s.slotHint, { color: tc.textMuted }]}>Desliza para ver más horarios</Text>
         </View>
@@ -354,17 +536,25 @@ const s = StyleSheet.create({
   closedText:         { fontSize: 14, fontWeight: '700', color: '#EF4444' },
   closedSub:          { fontSize: 12 },
   timeSlotsContainer: { flexDirection: 'row' },
-  timeSlot:           { paddingHorizontal: 16, paddingVertical: 10, borderRadius: 8, borderWidth: 1, marginRight: 8 },
+  timeSlot:           { paddingHorizontal: 16, paddingVertical: 10, borderRadius: 8, borderWidth: 1, marginRight: 8, alignItems: 'center', minWidth: 80 },
   timeSlotSelected:   { backgroundColor: '#10B981', borderColor: '#10B981' },
   timeSlotDisabled:   { backgroundColor: '#F3F4F6', borderColor: '#E5E7EB' },
+  timeSlotBlocked:    { backgroundColor: '#FEF3C7', borderColor: '#FDE68A' },
+  timeSlotDurationInvalid: { backgroundColor: '#FEE2E2', borderColor: '#FCA5A5' },
   timeSlotText:       { fontSize: 14, fontWeight: '500' },
   timeSlotTextSelected: { color: '#ffffff' },
   timeSlotTextDisabled: { color: '#9CA3AF' },
+  timeSlotTextBlocked:  { color: '#92400E', fontWeight: '600' },
+  timeSlotBlockedLabel: { fontSize: 9, color: '#92400E', marginTop: 2, fontWeight: '600' },
+  timeSlotDurationInvalidLabel: { fontSize: 9, color: '#991B1B', marginTop: 2, fontWeight: '700' },
+  legendCol:          { marginTop: 10, gap: 6 },
+  legendItem:         { flexDirection: 'row', alignItems: 'flex-start', gap: 6 },
+  legendDot:          { width: 10, height: 10, borderRadius: 3, borderWidth: 1, marginTop: 2 },
+  legendText:         { flex: 1, fontSize: 11, fontStyle: 'italic', lineHeight: 15 },
   slotHint:           { fontSize: 11, marginTop: 8 },
   saveButton:         { backgroundColor: '#10B981', borderRadius: 12, padding: 16, alignItems: 'center', marginTop: 8, marginBottom: 32 },
   saveButtonDisabled: { opacity: 0.6 },
   saveButtonText:     { fontSize: 16, fontWeight: '700', color: '#ffffff' },
-  // iOS date panel
   panelOverlay:       { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.4)' },
   panel:              { position: 'absolute', bottom: 0, left: 0, right: 0, borderTopLeftRadius: 24, borderTopRightRadius: 24, paddingBottom: 40 },
   panelHeader:        { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 20, paddingTop: 18, paddingBottom: 14, borderBottomWidth: 0.5, borderBottomColor: '#E2E8F0' },
