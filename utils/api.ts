@@ -93,8 +93,6 @@ async function enforceGratuitoMonthlyLimit(userId: string): Promise<void> {
 // ────────────────────────────────────────────────────────────────────
 // SEGURIDAD: Valida que el usuario tenga plan Premium (Luxury visible)
 // para crear citas con isOverlapping=true (citas simultáneas).
-// Sin esta validación, un cliente manipulado podría enviar isOverlapping
-// y obtener la feature de Luxury sin pagarla.
 // ────────────────────────────────────────────────────────────────────
 async function validateOverlappingPermission(userId: string, isOverlapping: boolean): Promise<void> {
   if (!isOverlapping) return;
@@ -105,7 +103,6 @@ async function validateOverlappingPermission(userId: string, isOverlapping: bool
     .eq('user_id', userId)
     .single();
 
-  // Solo plan Premium (interno) = Luxury (visible) puede usar citas simultáneas
   const planType = sub?.plan_type?.toLowerCase() ?? 'gratuito';
   const status   = sub?.status?.toLowerCase() ?? '';
   const isPremium = planType === 'premium' && (status === 'active' || status === 'pending_cancellation');
@@ -135,15 +132,6 @@ async function validateOverlappingPermission(userId: string, isOverlapping: bool
 
 // ────────────────────────────────────────────────────────────────────
 // SEGURIDAD: Valida que NO haya conflicto de horario antes de crear/reagendar.
-// Resuelve dos riesgos:
-//   1. Race condition: 2 personas agendando el mismo slot al mismo tiempo
-//   2. Cliente manipulado: usuario sin Luxury enviando isOverlapping=false
-//      pero con slot ya ocupado.
-//
-// Lógica:
-//   - Si allowOverlap=true (Luxury con toggle ON), solo bloquea conflictos del MISMO staff_id.
-//     Diferentes colaboradores pueden tener citas al mismo tiempo (es lo correcto).
-//   - Si allowOverlap=false, bloquea cualquier conflicto del usuario en ese rango.
 // ────────────────────────────────────────────────────────────────────
 async function validateNoTimeConflict(
   userId: string,
@@ -167,7 +155,6 @@ async function validateNoTimeConflict(
     query = query.neq('id', excludeAppointmentId);
   }
 
-  // Si tiene Luxury con overlap, solo verificar conflictos del MISMO colaborador.
   if (allowOverlap && staffId) {
     query = query.eq('staff_id', staffId);
   }
@@ -186,6 +173,86 @@ async function validateNoTimeConflict(
     err.code = 'SLOT_TAKEN';
     throw err;
   }
+}
+
+// ────────────────────────────────────────────────────────────────────
+// SEGURIDAD: Valida que el slot solicitado NO caiga dentro de un bloqueo de tiempo
+// (horario de comida, descansos, etc.) configurado por el dueño.
+//
+// Reglas:
+//   - Bloqueo con staff_id NULL afecta a TODOS (negocio completo).
+//   - Bloqueo con staff_id específico solo afecta al slot de ese colaborador.
+//   - Bloqueos recurrentes (is_recurring=true) aplican por day_of_week.
+//   - Bloqueos únicos (is_recurring=false) aplican por specific_date.
+//
+// IMPORTANTE: La convención de day_of_week en el proyecto es: 0=Lunes ... 6=Domingo.
+// JS getDay() devuelve 0=Domingo ... 6=Sábado, así que convertimos.
+// ────────────────────────────────────────────────────────────────────
+async function validateNoTimeBlock(
+  userId: string,
+  date: string,
+  startTime: string,
+  endTime: string,
+  staffId: string | null
+): Promise<void> {
+  // Convertir date string "YYYY-MM-DD" a day_of_week (convención proyecto: 0=Lun..6=Dom)
+  // JS Date getDay() retorna 0=Dom..6=Sab, hay que convertir.
+  const [y, m, d] = date.split('-').map(Number);
+  const jsDate = new Date(y, m - 1, d, 12, 0, 0); // medio día para evitar DST issues
+  const jsDayOfWeek = jsDate.getDay(); // 0=Dom..6=Sab
+  const projectDayOfWeek = jsDayOfWeek === 0 ? 6 : jsDayOfWeek - 1; // 0=Lun..6=Dom
+
+  // Buscar bloqueos activos del usuario que apliquen a este slot.
+  // Filtramos por: (recurrentes en este día) OR (no recurrentes en esta fecha)
+  // y por staff: bloqueos generales (staff_id NULL) OR bloqueos del staff del slot.
+  let staffFilter = 'staff_id.is.null';
+  if (staffId) {
+    staffFilter = `staff_id.is.null,staff_id.eq.${staffId}`;
+  }
+  // Si el slot no tiene staff asignado (cita general), solo aplican bloqueos generales.
+
+  const { data: blocks, error } = await supabase
+    .from('time_blocks')
+    .select('id, label, staff_id, start_time, end_time, is_recurring, day_of_week, specific_date')
+    .eq('user_id', userId)
+    .eq('is_active', true)
+    .or(staffFilter);
+
+  if (error) {
+    console.warn('[validateNoTimeBlock] DB error:', error);
+    return; // No bloquear creación por error de DB; el cliente ya validó visualmente
+  }
+
+  if (!blocks || blocks.length === 0) return;
+
+  const startMin = timeToMin(startTime);
+  const endMin = timeToMin(endTime);
+
+  for (const b of blocks) {
+    // Filtro por aplicabilidad temporal
+    if (b.is_recurring) {
+      if (b.day_of_week !== projectDayOfWeek) continue;
+    } else {
+      if (b.specific_date !== date) continue;
+    }
+
+    const bStart = timeToMin(b.start_time);
+    const bEnd = timeToMin(b.end_time);
+
+    // Traslape de rangos
+    if (startMin < bEnd && endMin > bStart) {
+      const err: any = new Error(
+        `Ese horario está bloqueado: "${b.label}" (${b.start_time.slice(0,5)}-${b.end_time.slice(0,5)}). Elige otro horario.`
+      );
+      err.code = 'SLOT_BLOCKED';
+      throw err;
+    }
+  }
+}
+
+function timeToMin(t: string): number {
+  const [h, m] = t.split(':').map(Number);
+  return h * 60 + m;
 }
 
 async function getAllowOverlapping(userId: string): Promise<boolean> {
@@ -216,6 +283,17 @@ export async function apiGet<T>(path: string): Promise<T> {
     const { data, error } = await supabase.from('services').select('*').eq('user_id', userId).eq('is_active', true).order('name');
     if (error) throw error;
     return (data?.map(s => ({ id: s.id, name: s.name, description: s.description, price: s.price, durationMinutes: s.duration_minutes, isActive: s.is_active })) || []) as T;
+  }
+
+  // Bloqueos de tiempo activos del negocio (lectura para UI de agenda)
+  if (path === '/api/time-blocks') {
+    const { data, error } = await supabase
+      .from('time_blocks')
+      .select('*')
+      .eq('user_id', userId)
+      .eq('is_active', true);
+    if (error) throw error;
+    return (data || []) as T;
   }
 
   if (path === '/api/appointments') {
@@ -396,6 +474,15 @@ export async function apiPost<T>(path: string, body: any): Promise<T> {
       requestedOverlap
     );
 
+    // ── 4. SEGURIDAD: Validar que el slot no caiga en un bloqueo de tiempo ──
+    await validateNoTimeBlock(
+      userId,
+      body.date,
+      startTime,
+      endTime,
+      body.staff_id || null
+    );
+
     const { data, error } = await supabase.from('appointments').insert({
       user_id: userId,
       client_id: body.clientId,
@@ -565,6 +652,15 @@ export async function apiPut<T>(path: string, body: any): Promise<T> {
         existing.staff_id || null,
         allowOverlap,
         id
+      );
+
+      // ── SEGURIDAD: Validar bloqueos al reagendar ──
+      await validateNoTimeBlock(
+        userId,
+        body.date,
+        newStartTime,
+        newEndTime,
+        existing.staff_id || null
       );
     }
 
