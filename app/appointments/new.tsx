@@ -13,6 +13,7 @@ import { IconSymbol } from '@/components/IconSymbol';
 import { useRouter } from 'expo-router';
 import { usePlan } from '@/contexts/PlanContext';
 import { useAuth } from '@/contexts/AuthContext';
+import { useGratuitoUsage } from '@/contexts/useGratuitoUsage';
 import { ConfirmModal } from '@/components/button';
 import { supabase } from '@/lib/supabase';
 import DateTimePicker from '@react-native-community/datetimepicker';
@@ -24,11 +25,24 @@ interface Client {
   phone: string;
 }
 
+interface TimeBlockData {
+  id: string;
+  staff_id: string | null;
+  label: string;
+  start_time: string;
+  end_time: string;
+  is_recurring: boolean;
+  day_of_week: number | null;
+  specific_date: string | null;
+}
+
 interface TimeSlot {
   time: string;
   available: boolean;
   endTime?: string;
   isOverlap?: boolean;
+  isBlocked?: boolean;       // Si el slot cae en un bloqueo de tiempo
+  blockedLabel?: string;     // Etiqueta del bloqueo (ej. "Comida")
 }
 
 interface CatalogService {
@@ -51,12 +65,51 @@ const durationLabel = (min: number) =>
 
 const { height: SCREEN_HEIGHT } = Dimensions.get('window');
 
+// Helper: minutos desde medianoche
+const timeToMin = (t: string): number => {
+  const [h, m] = t.split(':').map(Number);
+  return h * 60 + m;
+};
+
+// Helper: encuentra un bloqueo aplicable para el slot dado.
+// Convierte day_of_week JS (0=Dom..6=Sab) a convención del proyecto (0=Lun..6=Dom).
+function findBlockForSlot(
+  slotStartMin: number,
+  slotEndMin: number,
+  dateStr: string,
+  jsDay: number,
+  staffId: string | null,
+  blocks: TimeBlockData[]
+): TimeBlockData | null {
+  const projectDay = jsDay === 0 ? 6 : jsDay - 1; // 0=Lun..6=Dom
+  for (const b of blocks) {
+    // Aplicabilidad por staff:
+    //   - bloqueo con staff_id !== null aplica solo si coincide con staffId del slot.
+    //   - bloqueo con staff_id null aplica a todos.
+    if (b.staff_id) {
+      if (b.staff_id !== staffId) continue;
+    }
+    // Aplicabilidad temporal
+    if (b.is_recurring) {
+      if (b.day_of_week !== projectDay) continue;
+    } else {
+      if (b.specific_date !== dateStr) continue;
+    }
+    // Traslape de rangos
+    const bStart = timeToMin(b.start_time);
+    const bEnd = timeToMin(b.end_time);
+    if (slotStartMin < bEnd && slotEndMin > bStart) return b;
+  }
+  return null;
+}
+
 export default function NewAppointmentScreen() {
   const router = useRouter();
   const { user } = useAuth();
   const { isGratuito } = usePlan();
+  const usage = useGratuitoUsage();
   const [loading, setLoading] = useState(false);
-  const saveLockRef = useRef(false); // FIX: guard contra doble-submit
+  const saveLockRef = useRef(false);
 
   const [clients, setClients] = useState<Client[]>([]);
   const [selectedClient, setSelectedClient] = useState<Client | null>(null);
@@ -88,6 +141,7 @@ export default function NewAppointmentScreen() {
   const [timeSlots, setTimeSlots] = useState<TimeSlot[]>([]);
   const [dayIsClosed, setDayIsClosed] = useState(false);
   const [allowOverlapping, setAllowOverlapping] = useState(false);
+  const [timeBlocks, setTimeBlocks] = useState<TimeBlockData[]>([]);
   const [errorModal, setErrorModal] = useState({ visible: false, message: '' });
 
   const serviceInputRef = useRef<TextInput>(null);
@@ -137,9 +191,10 @@ export default function NewAppointmentScreen() {
     loadOverlapConfig();
     loadCatalogServices();
     loadStaffMembers();
+    loadTimeBlocks();
   }, []);
 
-  useEffect(() => { checkAvailability(); }, [date, selectedStaff]);
+  useEffect(() => { checkAvailability(); }, [date, selectedStaff, timeBlocks]);
 
   const loadCatalogServices = async () => {
     try { const data = await apiGet<CatalogService[]>('/api/services'); setCatalogServices(data); } catch {}
@@ -166,6 +221,16 @@ export default function NewAppointmentScreen() {
     } catch {}
   };
 
+  const loadTimeBlocks = async () => {
+    try {
+      const data = await apiGet<TimeBlockData[]>('/api/time-blocks');
+      setTimeBlocks(data || []);
+    } catch (e) {
+      console.warn('[new-appointment] loadTimeBlocks error:', e);
+      setTimeBlocks([]);
+    }
+  };
+
   const loadClients = async () => {
     try { const data = await apiGet<Client[]>('/api/clients'); setClients(data); }
     catch { setErrorModal({ visible: true, message: 'Error al cargar los clientes' }); }
@@ -179,7 +244,7 @@ export default function NewAppointmentScreen() {
         apiGet<any[]>('/api/business-hours'),
       ]);
 
-      const dayOfWeek = date.getDay();
+      const dayOfWeek = date.getDay(); // JS: 0=Dom..6=Sab
 
       let dayConfig: any = null;
       if (selectedStaff) {
@@ -234,6 +299,7 @@ export default function NewAppointmentScreen() {
         const hour = Math.floor(totalMin/60);
         const minute = totalMin%60;
         const timeString = `${hour.toString().padStart(2,'0')}:${minute.toString().padStart(2,'0')}`;
+        const slotEndMin = totalMin + 30;
 
         const blockedByStaff = staffAppointments.some((appt: any) => {
           const [sh2, sm2] = (appt.time || appt.startTime || '00:00').split(':').map(Number);
@@ -256,10 +322,19 @@ export default function NewAppointmentScreen() {
         const isBooked = blockedByStaff || blockedByGeneral;
         const isPast = isToday && (hour < today.getHours() || (hour === today.getHours() && minute <= today.getMinutes()));
 
+        // Verificar si el slot cae en un bloqueo de tiempo
+        const blockingTimeBlock = findBlockForSlot(
+          totalMin, slotEndMin, dateString, dayOfWeek, selectedStaff?.id || null, timeBlocks
+        );
+        const isBlocked = !!blockingTimeBlock;
+
         slots.push({
           time: timeString,
-          available: !isBooked && !isPast,
-          isOverlap: isOverlap && !isPast,
+          // Slot disponible solo si no está booked, no es pasado y no está bloqueado
+          available: !isBooked && !isPast && !isBlocked,
+          isOverlap: isOverlap && !isPast && !isBlocked,
+          isBlocked,
+          blockedLabel: blockingTimeBlock?.label,
         });
       }
       setTimeSlots(slots);
@@ -269,7 +344,6 @@ export default function NewAppointmentScreen() {
   };
 
   const handleSave = async () => {
-    // FIX doble-submit: guard con ref (más rápido que useState)
     if (saveLockRef.current) return;
 
     Keyboard.dismiss();
@@ -284,7 +358,6 @@ export default function NewAppointmentScreen() {
       setErrorModal({ visible: true, message: 'El horario seleccionado no está disponible.' }); return;
     }
 
-    // Bloquear ANTES del fetch
     saveLockRef.current = true;
     setLoading(true);
 
@@ -307,10 +380,8 @@ export default function NewAppointmentScreen() {
       invalidateCache('appointments_list');
       router.back();
     } catch (error: any) {
-      // Solo desbloquear en error — en éxito el router.back() desmonta el componente
       saveLockRef.current = false;
       setLoading(false);
-      // El mensaje de PLAN_LIMIT_REACHED viene del server-side en apiPost
       setErrorModal({ visible: true, message: error?.message || 'Error al crear la cita' });
     }
   };
@@ -325,6 +396,19 @@ export default function NewAppointmentScreen() {
   const formattedTempDate = tempDate.toLocaleDateString('es-MX', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
   const hasCatalog = catalogServices.length > 0;
   const hasStaff   = staffMembers.length > 0;
+
+  // ── Banner contador X/10 (solo Gratuito) ──
+  const usageColor = usage.isAtLimit ? '#EF4444' : usage.isNearLimit ? '#F59E0B' : '#0EA5E9';
+  const usageBgColor = usage.isAtLimit ? '#FEF2F2' : usage.isNearLimit ? '#FFFBEB' : '#E0F2FE';
+  const usageBorderColor = usage.isAtLimit ? '#FCA5A5' : usage.isNearLimit ? '#FDE68A' : '#7DD3FC';
+  const usageTitle = usage.isAtLimit
+    ? '¡Límite alcanzado!'
+    : usage.isNearLimit
+      ? `Solo ${usage.remaining} cita${usage.remaining !== 1 ? 's' : ''} restante${usage.remaining !== 1 ? 's' : ''}`
+      : `${usage.used} de ${usage.limit} citas usadas este mes`;
+  const usageDesc = usage.isAtLimit
+    ? 'No puedes crear más citas este mes. Toca para mejorar a Premium.'
+    : 'Plan Básico — Mejora a Premium para citas ilimitadas';
 
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
@@ -344,14 +428,29 @@ export default function NewAppointmentScreen() {
           keyboardDismissMode="on-drag"
           scrollEnabled={!showDatePanel}
         >
-          {/* Aviso plan Básico (ex-Gratuito) */}
-          {isGratuito && (
-            <View style={styles.planNoticeBanner}>
-              <MaterialIcons name="info" size={16} color="#0369A1" />
-              <Text style={styles.planNoticeText}>
-                Plan Básico: hasta 10 citas al mes (app + link público combinadas). Actualiza al Plan Premium para citas ilimitadas.
-              </Text>
-            </View>
+          {/* Banner contador X/10 con barra de progreso (solo plan Gratuito) */}
+          {isGratuito && !usage.loading && (
+            <TouchableOpacity
+              style={[styles.usageCard, { backgroundColor: usageBgColor, borderColor: usageBorderColor }]}
+              onPress={() => router.push('/settings/subscription')}
+              activeOpacity={0.85}
+            >
+              <View style={styles.usageHeader}>
+                <MaterialIcons
+                  name={usage.isAtLimit ? 'block' : usage.isNearLimit ? 'warning' : 'event-available'}
+                  size={18}
+                  color={usageColor}
+                />
+                <View style={{ flex: 1 }}>
+                  <Text style={[styles.usageTitle, { color: usageColor }]}>{usageTitle}</Text>
+                  <Text style={styles.usageDesc}>{usageDesc}</Text>
+                </View>
+                <Text style={[styles.usageCount, { color: usageColor }]}>{usage.used}/{usage.limit}</Text>
+              </View>
+              <View style={styles.usageProgressBg}>
+                <View style={[styles.usageProgressFill, { width: `${usage.percentage}%`, backgroundColor: usageColor }]} />
+              </View>
+            </TouchableOpacity>
           )}
 
           {/* Cliente */}
@@ -470,6 +569,7 @@ export default function NewAppointmentScreen() {
                   {timeSlots.map((slot) => {
                     const isSelected = selectedBlocks.includes(slot.time);
                     const isOverlap  = slot.isOverlap && !isSelected;
+                    const isBlocked  = slot.isBlocked;
                     return (
                       <TouchableOpacity
                         key={slot.time}
@@ -477,7 +577,8 @@ export default function NewAppointmentScreen() {
                           styles.timeSlot,
                           isSelected && styles.timeSlotSelected,
                           !slot.available && styles.timeSlotDisabled,
-                          isOverlap && styles.timeSlotOverlap,
+                          isBlocked && styles.timeSlotBlocked,
+                          isOverlap && !isBlocked && styles.timeSlotOverlap,
                         ]}
                         onPress={() => {
                           if (!slot.available) return;
@@ -508,13 +609,29 @@ export default function NewAppointmentScreen() {
                           styles.timeSlotText,
                           isSelected && styles.timeSlotTextSelected,
                           !slot.available && styles.timeSlotTextDisabled,
-                          isOverlap && { color: '#F59E0B' },
+                          isBlocked && styles.timeSlotTextBlocked,
+                          isOverlap && !isBlocked && { color: '#F59E0B' },
                         ]}>{slot.time}</Text>
-                        {slot.isOverlap && <Text style={{ fontSize: 8, color: '#F59E0B' }}>⚡</Text>}
+                        {isBlocked && (
+                          <Text style={styles.timeSlotBlockedLabel} numberOfLines={1}>
+                            {slot.blockedLabel?.toLowerCase().includes('comida') ? '🍽️' : '🚫'} {slot.blockedLabel?.slice(0, 8)}
+                          </Text>
+                        )}
+                        {slot.isOverlap && !isBlocked && <Text style={{ fontSize: 8, color: '#F59E0B' }}>⚡</Text>}
                       </TouchableOpacity>
                     );
                   })}
                 </ScrollView>
+
+                {/* Leyenda visual de slots bloqueados */}
+                {timeSlots.some(s => s.isBlocked) && (
+                  <View style={styles.legendRow}>
+                    <View style={styles.legendItem}>
+                      <View style={[styles.legendDot, { backgroundColor: '#FEF3C7' }]} />
+                      <Text style={styles.legendText}>Bloqueado por horario de comida o descanso</Text>
+                    </View>
+                  </View>
+                )}
               </>
             )}
           </View>
@@ -564,7 +681,6 @@ export default function NewAppointmentScreen() {
             </View>
           </View>
 
-          {/* Botón guardar con feedback visual mejorado */}
           <TouchableOpacity
             style={[styles.saveButton, loading && styles.saveButtonDisabled]}
             onPress={handleSave}
@@ -829,8 +945,16 @@ const styles = StyleSheet.create({
   title:                  { fontSize: 20, fontWeight: '600', color: colors.text },
   placeholder:            { width: 32 },
   content:                { flex: 1, padding: 20 },
-  planNoticeBanner:       { flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: '#E0F2FE', borderRadius: 10, padding: 12, marginBottom: 20, borderWidth: 0.5, borderColor: '#7DD3FC' },
-  planNoticeText:         { flex: 1, fontSize: 12, color: '#0369A1', lineHeight: 16 },
+
+  // Banner contador X/10 con barra de progreso
+  usageCard:              { borderRadius: 12, padding: 12, marginBottom: 20, borderWidth: 1.5 },
+  usageHeader:            { flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 10 },
+  usageTitle:             { fontSize: 13, fontWeight: '800' },
+  usageDesc:              { fontSize: 11, color: '#64748B', marginTop: 1 },
+  usageCount:             { fontSize: 16, fontWeight: '900' },
+  usageProgressBg:        { height: 6, backgroundColor: 'rgba(0,0,0,0.06)', borderRadius: 3, overflow: 'hidden' },
+  usageProgressFill:      { height: '100%', borderRadius: 3 },
+
   section:                { marginBottom: 24 },
   inputGroup:             { marginBottom: 24 },
   labelRow:               { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 },
@@ -859,12 +983,21 @@ const styles = StyleSheet.create({
   durationClear:          { fontSize: 12, color: '#EF4444', fontWeight: '600' },
   timeSlotOverlap:        { borderWidth: 1, borderColor: '#F59E0B', backgroundColor: '#FFFBEB' },
   timeSlotsContainer:     { flexDirection: 'row' },
-  timeSlot:               { paddingHorizontal: 16, paddingVertical: 10, borderRadius: 8, backgroundColor: '#ffffff', borderWidth: 1, borderColor: '#E5E7EB', marginRight: 8 },
+  timeSlot:               { paddingHorizontal: 16, paddingVertical: 10, borderRadius: 8, backgroundColor: '#ffffff', borderWidth: 1, borderColor: '#E5E7EB', marginRight: 8, alignItems: 'center', minWidth: 80 },
   timeSlotSelected:       { backgroundColor: colors.primary, borderColor: colors.primary },
   timeSlotDisabled:       { backgroundColor: '#F3F4F6', borderColor: '#E5E7EB' },
+  // Slot bloqueado por horario de comida/descanso
+  timeSlotBlocked:        { backgroundColor: '#FEF3C7', borderColor: '#FDE68A' },
   timeSlotText:           { fontSize: 14, fontWeight: '500', color: colors.text },
   timeSlotTextSelected:   { color: '#ffffff' },
   timeSlotTextDisabled:   { color: '#9CA3AF' },
+  timeSlotTextBlocked:    { color: '#92400E', fontWeight: '600' },
+  timeSlotBlockedLabel:   { fontSize: 9, color: '#92400E', marginTop: 2, fontWeight: '600' },
+  // Leyenda visual
+  legendRow:              { flexDirection: 'row', alignItems: 'center', marginTop: 10, gap: 8 },
+  legendItem:             { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  legendDot:              { width: 10, height: 10, borderRadius: 3, borderWidth: 1, borderColor: '#FDE68A' },
+  legendText:             { fontSize: 11, color: '#64748B', fontStyle: 'italic' },
   switchRow:              { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', backgroundColor: '#ffffff', borderRadius: 12, padding: 16 },
   switchLabel:            { flexDirection: 'row', alignItems: 'center', gap: 8, flex: 1 },
   switchText:             { fontSize: 16, fontWeight: '600', color: colors.text },
