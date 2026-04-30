@@ -111,6 +111,7 @@ export default function SettingsScreen() {
   const [subscription, setSubscription]         = useState<Subscription | null>(null);
   const [loading, setLoading]                   = useState(true);
   const [staffCount, setStaffCount]             = useState(0);
+  const [timeBlocksCount, setTimeBlocksCount]   = useState(0);
 
   const canUseAISupport = isBasico || isPremium;
 
@@ -144,6 +145,11 @@ export default function SettingsScreen() {
         .from('staff_members').select('id', { count: 'exact', head: true })
         .eq('user_id', user?.id).eq('is_active', true);
       setStaffCount(count || 0);
+      // Cargar conteo de bloqueos de tiempo activos para mostrar en sublabel
+      const { count: tbCount } = await supabase
+        .from('time_blocks').select('id', { count: 'exact', head: true })
+        .eq('user_id', user?.id).eq('is_active', true);
+      setTimeBlocksCount(tbCount || 0);
       if (subscriptionData) setCached('settings_subscription', subscriptionData);
       setWhatsappConfig(whatsappData); setSubscription(subscriptionData);
     } catch (error) {
@@ -185,6 +191,9 @@ export default function SettingsScreen() {
   const waActive = canUseWhatsApp && (whatsappConfig?.confirmationOnBooking || whatsappConfig?.reminder24h || whatsappConfig?.reminder2h);
   const waSubLabel = isGratuito ? 'Disponible en Plan Premium' : waActive ? 'Recordatorios activos · Número VYLTA' : 'Recordatorios desactivados';
   const staffSublabel = !canUseCollaborators ? 'Solo disponible en Plan Luxury' : staffCount > 0 ? `${staffCount} colaborador${staffCount !== 1 ? 'es' : ''} activo${staffCount !== 1 ? 's' : ''} (máx. 5)` : 'Sin colaboradores — toca para agregar';
+  const timeBlocksSublabel = timeBlocksCount > 0
+    ? `${timeBlocksCount} bloqueo${timeBlocksCount !== 1 ? 's' : ''} activo${timeBlocksCount !== 1 ? 's' : ''}`
+    : 'Horarios de comida y descansos';
 
   if (loading) {
     return (
@@ -236,6 +245,8 @@ export default function SettingsScreen() {
           <SettingRow iconName="content-cut" iconColor="#F59E0B" iconBg="#FFFBEB" label="Catálogo de servicios" sublabel="Gestiona tus servicios y precios" onPress={() => router.push('/settings/services')} />
           <SettingRow iconName="group" iconColor={canUseCollaborators ? '#8B5CF6' : '#CBD5E1'} iconBg={canUseCollaborators ? '#F5F3FF' : '#F8FAFC'} label="Mi equipo" sublabel={staffSublabel} badge={!canUseCollaborators ? <View style={s.luxuryChip}><Text style={s.luxuryChipText}>LUXURY</Text></View> : undefined} disabled={!canUseCollaborators} onPress={() => { if (!canUseCollaborators) { router.push('/settings/subscription'); return; } router.push('/settings/staff' as any); }} />
           <SettingRow iconName="event-available" iconColor={canOverlap ? '#06B6D4' : '#CBD5E1'} iconBg={canOverlap ? '#ECFEFF' : '#F8FAFC'} label="Citas simultáneas" sublabel={canOverlap ? 'Permite atender más de una cita al mismo tiempo' : 'Solo disponible en Plan Luxury'} badge={!canOverlap ? <View style={s.luxuryChip}><Text style={s.luxuryChipText}>LUXURY</Text></View> : undefined} disabled={!canOverlap} right={<Switch value={allowOverlapping} onValueChange={canOverlap ? handleOverlappingToggle : () => router.push('/settings/subscription')} trackColor={{ false: '#E2E8F0', true: '#10B981' }} thumbColor="#fff" disabled={savingOverlap || !canOverlap} />} />
+          {/* Nuevo: bloqueos de tiempo (horario de comida, descansos, etc.) */}
+          <SettingRow iconName="lunch-dining" iconColor="#F59E0B" iconBg="#FFFBEB" label="Bloqueos de tiempo" sublabel={timeBlocksSublabel} onPress={() => router.push('/settings/time-blocks' as any)} />
         </SettingGroup>
 
         <SettingGroup title="CAPTACIÓN DE CLIENTES">
