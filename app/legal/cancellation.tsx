@@ -9,40 +9,71 @@ export default function CancellationScreen() {
     <SafeAreaView style={styles.container}>
       <View style={styles.header}>
         <TouchableOpacity onPress={() => router.back()}><Text style={styles.back}>← Volver</Text></TouchableOpacity>
-        <Text style={styles.title}>Política de Cancelación</Text>
+        <Text style={styles.title}>Cancelación y Reembolsos</Text>
         <View style={{ width: 60 }} />
       </View>
       <ScrollView contentContainerStyle={styles.scroll}>
-        <Text style={styles.updated}>Última actualización: marzo de 2026</Text>
+        <Text style={styles.updated}>Última actualización: abril de 2026</Text>
 
-        <Text style={styles.section}>1. CANCELACIÓN POR PARTE DEL USUARIO</Text>
-        <Text style={styles.body}>El usuario puede cancelar su suscripción a VYLTA en cualquier momento desde la sección "Ajustes → Suscripción" dentro de la aplicación, o enviando un correo a soporte@vylta.com.{'\n\n'}La cancelación tendrá efecto al término del período de facturación en curso. No se realizarán reembolsos por períodos parciales utilizados.</Text>
-
-        <Text style={styles.section}>2. PERÍODO DE GRACIA</Text>
-        <Text style={styles.body}>VYLTA otorga un período de prueba gratuito de 14 días naturales a partir del registro. Durante este período, el usuario puede cancelar sin cargo alguno.</Text>
-
-        <Text style={styles.section}>3. CANCELACIÓN POR INCUMPLIMIENTO</Text>
-        <Text style={styles.body}>VYLTA se reserva el derecho de cancelar la suscripción de forma inmediata en caso de:{'\n\n'}
-          • Incumplimiento de los Términos y Condiciones.{'\n'}
-          • Uso fraudulento de la plataforma.{'\n'}
-          • Falta de pago después de 5 días naturales de vencimiento.{'\n\n'}
-          En estos casos no procederá reembolso alguno.
+        <Text style={styles.section}>1. CANCELACIÓN DE LA SUSCRIPCIÓN</Text>
+        <Text style={styles.body}>Puede cancelar su suscripción en cualquier momento desde la aplicación, sin necesidad de explicación ni autorización adicional.{'\n\n'}
+          Pasos:{'\n\n'}
+          1. Abra la aplicación VYLTA.{'\n'}
+          2. Vaya a Ajustes → Plan y Suscripción.{'\n'}
+          3. Pulse "Gestionar suscripción". Será redirigido al portal seguro de Stripe.{'\n'}
+          4. Seleccione "Cancelar suscripción" y confirme.{'\n\n'}
+          La cancelación queda registrada al instante. Recibirá un correo de confirmación de Stripe.
         </Text>
 
-        <Text style={styles.section}>4. REEMBOLSOS</Text>
-        <Text style={styles.body}>VYLTA evaluará solicitudes de reembolso únicamente en los siguientes casos:{'\n\n'}
-          • Cobro duplicado por error del sistema.{'\n'}
-          • Falla técnica grave que haya impedido el uso del servicio por más de 72 horas continuas.{'\n\n'}
-          Las solicitudes deben presentarse dentro de los 5 días naturales siguientes al cargo en disputa a través de soporte@vylta.com.</Text>
+        <Text style={styles.section}>2. EFECTOS DE LA CANCELACIÓN</Text>
+        <Text style={styles.body}>• Mantendrá acceso completo a todas las funciones de su plan pagado hasta el final del período de cobro vigente.{'\n'}
+          • Al finalizar el período, su cuenta será degradada automáticamente al Plan Básico (gratuito), con el límite de 10 citas mensuales.{'\n'}
+          • Sus datos NO se eliminan al cancelar la suscripción. Permanecen disponibles en su cuenta para que pueda seguir consultándolos o reactivar su plan posteriormente.{'\n'}
+          • Si tenía colaboradores configurados (Plan Luxury), las citas asignadas a ellos se conservan pero ya no podrán iniciar sesión hasta que vuelva a activar el Plan Luxury.{'\n'}
+          • Los recordatorios automáticos por WhatsApp dejarán de enviarse al concluir el período pagado.
+        </Text>
 
-        <Text style={styles.section}>5. PORTABILIDAD DE DATOS</Text>
-        <Text style={styles.body}>Al cancelar su suscripción, el usuario puede solicitar la exportación de sus datos (clientes y citas) en formato CSV dentro de los 30 días naturales posteriores a la cancelación. Transcurrido dicho plazo, los datos serán eliminados de manera permanente.</Text>
+        <Text style={styles.section}>3. REACTIVACIÓN</Text>
+        <Text style={styles.body}>Puede reactivar su suscripción en cualquier momento desde la aplicación, sin perder ningún dato. Toda su configuración (negocio, servicios, clientes, citas, bloqueos de tiempo, colaboradores) se restablece automáticamente al activar nuevamente el plan.</Text>
 
-        <Text style={styles.section}>6. REACTIVACIÓN</Text>
-        <Text style={styles.body}>Una cuenta cancelada puede reactivarse en cualquier momento contratando nuevamente el servicio. Los datos previamente exportados pueden ser importados mediante solicitud a soporte@vylta.com.</Text>
+        <Text style={styles.section}>4. POLÍTICA DE REEMBOLSOS</Text>
+        <Text style={styles.body}>Como regla general, los pagos de suscripción mensual NO son reembolsables, ya que el servicio se presta de manera inmediata desde el momento de la activación.{'\n\n'}
+          Excepciones donde sí procede reembolso:{'\n\n'}
+          • Cobro duplicado por error técnico: reembolso íntegro del cobro duplicado.{'\n'}
+          • Falla mayor del servicio (más de 72 horas continuas de inactividad): reembolso prorrateado del período afectado.{'\n'}
+          • Cobros realizados después de una cancelación efectiva: reembolso íntegro.{'\n'}
+          • Cualquier otro caso previsto por la Ley Federal de Protección al Consumidor.{'\n\n'}
+          Las solicitudes de reembolso deben enviarse a soporte@vylta.lat con la descripción del caso, fecha del cobro y comprobante. Atenderemos su petición en un plazo máximo de 10 días hábiles.
+        </Text>
 
-        <Text style={styles.section}>7. CONTACTO</Text>
-        <Text style={styles.body}>📧 soporte@vylta.com{'\n'}🌐 www.vylta.com</Text>
+        <Text style={styles.section}>5. CAMBIO DE PLAN (DOWNGRADE / UPGRADE)</Text>
+        <Text style={styles.body}>• Upgrade (de Premium a Luxury, por ejemplo): el cobro adicional se prorratea desde el momento del cambio hasta el siguiente ciclo de cobro.{'\n'}
+          • Downgrade (de Luxury a Premium o de pago a Básico): el plan superior se mantiene activo hasta el final del período pagado, después se aplica el plan inferior.{'\n'}
+          • Si baja de Plan Luxury a Premium, los colaboradores configurados se desactivarán pero sus datos se conservan.
+        </Text>
+
+        <Text style={styles.section}>6. ELIMINACIÓN DE LA CUENTA</Text>
+        <Text style={styles.body}>Si además de cancelar la suscripción desea eliminar permanentemente su cuenta y todos sus datos:{'\n\n'}
+          1. Vaya a Ajustes → Cuenta → "Eliminar mi cuenta".{'\n'}
+          2. Confirme la acción (es permanente y no tiene vuelta atrás).{'\n\n'}
+          Sus datos personales y los de sus clientes finales se eliminan en un plazo máximo de 7 días, salvo aquellos que debamos conservar por obligación legal o fiscal.{'\n\n'}
+          Antes de eliminar su cuenta, le recomendamos exportar sus datos desde Ajustes → Cuenta → "Exportar mis datos".
+        </Text>
+
+        <Text style={styles.section}>7. CANCELACIÓN POR PARTE DE VYLTA</Text>
+        <Text style={styles.body}>VYLTA podrá cancelar su cuenta unilateralmente en caso de:{'\n\n'}
+          • Violación a los Términos y Condiciones.{'\n'}
+          • Falta de pago por más de 30 días naturales después del período de gracia.{'\n'}
+          • Uso fraudulento, abusivo o que represente un riesgo para la plataforma o terceros.{'\n'}
+          • Requerimiento de autoridad competente.{'\n\n'}
+          En estos casos le notificaremos por correo electrónico y le daremos al menos 7 días para exportar sus datos antes de la eliminación, salvo cuando exista orden judicial en contrario o cuando la conducta requiera suspensión inmediata.
+        </Text>
+
+        <Text style={styles.section}>8. CONTACTO</Text>
+        <Text style={styles.body}>Para asistencia con la cancelación o reembolsos:{'\n\n'}
+          📧 soporte@vylta.lat{'\n'}
+          🌐 www.vylta.lat
+        </Text>
       </ScrollView>
     </SafeAreaView>
   );

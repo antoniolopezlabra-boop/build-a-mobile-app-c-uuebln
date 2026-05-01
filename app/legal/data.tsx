@@ -13,45 +13,67 @@ export default function DataScreen() {
         <View style={{ width: 60 }} />
       </View>
       <ScrollView contentContainerStyle={styles.scroll}>
-        <Text style={styles.updated}>Última actualización: marzo de 2026</Text>
+        <Text style={styles.updated}>Última actualización: abril de 2026</Text>
 
-        <Text style={styles.section}>1. ALMACENAMIENTO DE DATOS</Text>
-        <Text style={styles.body}>Los datos de VYLTA se almacenan en servidores seguros provistos por Supabase Inc., con infraestructura en la región us-east-1 (Estados Unidos). Todos los datos se cifran en tránsito mediante TLS 1.2 o superior y en reposo mediante AES-256.</Text>
+        <Text style={styles.section}>1. PROPIEDAD DE LOS DATOS</Text>
+        <Text style={styles.body}>Todos los datos que usted introduce en VYLTA (nombre del negocio, servicios, clientes, citas, horarios, bloqueos de tiempo, colaboradores, logotipo, etc.) son y seguirán siendo de su propiedad. VYLTA actúa exclusivamente como custodio y procesador de los mismos para brindar el servicio contratado.</Text>
 
-        <Text style={styles.section}>2. DATOS QUE RECOPILAMOS AUTOMÁTICAMENTE</Text>
-        <Text style={styles.body}>Al usar la aplicación, recopilamos automáticamente:{'\n\n'}
-          • Fecha y hora de inicio de sesión.{'\n'}
-          • Tipo de dispositivo y sistema operativo.{'\n'}
-          • Versión de la aplicación instalada.{'\n'}
-          • Registros de errores técnicos (crash reports).{'\n\n'}
-          Esta información se usa exclusivamente para mejorar la estabilidad y rendimiento del servicio.
+        <Text style={styles.section}>2. DÓNDE SE ALMACENAN SUS DATOS</Text>
+        <Text style={styles.body}>Sus datos se almacenan de forma segura en servidores administrados por Supabase Inc., con infraestructura subyacente provista por Amazon Web Services. La región principal de almacenamiento es São Paulo, Brasil, lo que garantiza baja latencia para usuarios en México y Latinoamérica.{'\n\n'}
+          • La base de datos utiliza PostgreSQL con cifrado en reposo (AES-256).{'\n'}
+          • Los archivos (logos, exportaciones CSV) se almacenan en Supabase Storage con políticas de acceso restringido.{'\n'}
+          • La autenticación se maneja con JWT y bcrypt para el hash de contraseñas.
         </Text>
 
-        <Text style={styles.section}>3. DATOS DE CLIENTES FINALES</Text>
-        <Text style={styles.body}>Los datos de los clientes finales (pacientes, clientes del negocio) son responsabilidad del negocio registrado en VYLTA. El negocio actúa como responsable del tratamiento de dichos datos y VYLTA como encargado. El negocio debe contar con el consentimiento de sus clientes para el envío de mensajes vía WhatsApp.</Text>
-
-        <Text style={styles.section}>4. RETENCIÓN DE DATOS</Text>
-        <Text style={styles.body}>
-          • Datos de cuenta activa: se conservan mientras la suscripción esté vigente.{'\n'}
-          • Tras cancelación: los datos se conservan 30 días para posible reactivación.{'\n'}
-          • Después de 30 días: eliminación permanente e irrecuperable.{'\n'}
-          • Logs técnicos: se conservan máximo 90 días.
+        <Text style={styles.section}>3. ACCESO Y CONTROL</Text>
+        <Text style={styles.body}>Cada cuenta de VYLTA tiene políticas de Row-Level Security (RLS) habilitadas en la base de datos. Esto significa que, a nivel de infraestructura, cada usuario solo puede acceder a sus propios datos. Ningún otro usuario, ni siquiera con privilegios de administrador, puede consultar la información de su negocio sin un proceso de auditoría documentado.{'\n\n'}
+          • Los colaboradores (Plan Luxury) tienen acceso limitado y restringido únicamente a las citas y horarios que el dueño de la cuenta les asigne.{'\n'}
+          • Las Edge Functions (validación server-side de citas, procesamiento de Stripe, etc.) operan con la clave de servicio pero están auditadas para no exponer datos cruzados entre usuarios.
         </Text>
 
-        <Text style={styles.section}>5. SEGURIDAD</Text>
-        <Text style={styles.body}>VYLTA implementa las siguientes medidas de seguridad:{'\n\n'}
-          • Autenticación segura mediante Supabase Auth con bcrypt.{'\n'}
-          • Políticas de Row Level Security (RLS) que garantizan aislamiento total entre cuentas.{'\n'}
-          • Acceso administrativo restringido y auditado.{'\n'}
-          • Sin almacenamiento de contraseñas en texto plano.{'\n'}
-          • Revisiones periódicas de seguridad.
+        <Text style={styles.section}>4. EXPORTACIÓN DE DATOS</Text>
+        <Text style={styles.body}>Usted puede exportar todos sus datos en cualquier momento desde la aplicación:{'\n\n'}
+          Ajustes → Cuenta → "Exportar mis datos"{'\n\n'}
+          • La exportación incluye sus citas y clientes en formato CSV (compatible con Excel y Google Sheets).{'\n'}
+          • Puede seleccionar el rango de fechas que desea exportar.{'\n'}
+          • La exportación está limitada a una vez por mes para prevenir abuso del sistema.{'\n'}
+          • Los archivos se descargan directamente a su dispositivo, sin almacenamiento intermedio.
         </Text>
 
-        <Text style={styles.section}>6. NOTIFICACIÓN DE BRECHAS</Text>
-        <Text style={styles.body}>En caso de una brecha de seguridad que comprometa datos personales, VYLTA notificará a los usuarios afectados dentro de las 72 horas siguientes a su detección, conforme a la normativa aplicable.</Text>
+        <Text style={styles.section}>5. RESPALDOS</Text>
+        <Text style={styles.body}>VYLTA realiza respaldos automáticos diarios de la base de datos con retención de 7 días. Estos respaldos están exclusivamente destinados a la recuperación ante desastres y no son accesibles directamente al usuario. Si requiere restaurar datos eliminados accidentalmente, contáctenos dentro de las primeras 72 horas posteriores al evento.</Text>
 
-        <Text style={styles.section}>7. CONTACTO DPO</Text>
-        <Text style={styles.body}>Para consultas sobre protección de datos:{'\n\n'}📧 privacidad@vylta.com{'\n'}🌐 www.vylta.com</Text>
+        <Text style={styles.section}>6. ELIMINACIÓN DE DATOS</Text>
+        <Text style={styles.body}>Cuando elimina su cuenta:{'\n\n'}
+          • Todos sus datos personales y los de sus clientes finales son marcados para eliminación inmediatamente.{'\n'}
+          • Los datos se eliminan de la base de datos primaria en un plazo máximo de 7 días.{'\n'}
+          • Los respaldos que contengan dichos datos se sobrescriben automáticamente en un plazo máximo de 30 días.{'\n'}
+          • Algunos datos podrán conservarse por más tiempo cuando exista una obligación legal (típicamente 5 años para registros fiscales según el Código Fiscal de la Federación).{'\n\n'}
+          También puede eliminar individualmente:{'\n\n'}
+          • Clientes específicos: desde el detalle del cliente, botón "Eliminar cliente" (con doble confirmación). Las citas existentes se conservan pero se desvinculan del cliente.{'\n'}
+          • Citas individuales: desde el detalle de la cita, opción "Cancelar" o "Eliminar".{'\n'}
+          • Servicios: desde el catálogo, opción "Desactivar" o "Eliminar".
+        </Text>
+
+        <Text style={styles.section}>7. PORTABILIDAD</Text>
+        <Text style={styles.body}>Si decide migrar a otro proveedor, puede:{'\n\n'}
+          • Exportar sus datos en CSV directamente desde la aplicación.{'\n'}
+          • Solicitar un respaldo completo en formato JSON enviando un correo a privacidad@vylta.lat (atendido en hasta 10 días hábiles).{'\n\n'}
+          VYLTA no impone barreras técnicas para la portabilidad de sus datos.
+        </Text>
+
+        <Text style={styles.section}>8. DATOS DE CLIENTES FINALES</Text>
+        <Text style={styles.body}>Los datos de los clientes finales de su negocio (nombre, teléfono, historial de citas, etc.) le pertenecen como Responsable del tratamiento. VYLTA actúa como Encargado conforme al artículo 50 del Reglamento de la LFPDPPP.{'\n\n'}
+          • Cuando un cliente final agenda una cita a través de su link público (book.vylta.lat/su-negocio), sus datos se almacenan de forma temporal en la cita hasta que usted decida convertirlo en cliente registrado.{'\n'}
+          • Si un cliente final solicita el ejercicio de derechos ARCO sobre sus datos, debe atender la solicitud directamente como Responsable. VYLTA puede colaborar técnicamente pero no actuar en su lugar.{'\n'}
+          • Si el cliente final solicita la eliminación de sus datos, puede hacerlo desde la app eliminando al cliente y desvinculando sus citas históricas.
+        </Text>
+
+        <Text style={styles.section}>9. CONTACTO</Text>
+        <Text style={styles.body}>Para preguntas sobre el manejo de sus datos:{'\n\n'}
+          📧 privacidad@vylta.lat{'\n'}
+          🌐 www.vylta.lat
+        </Text>
       </ScrollView>
     </SafeAreaView>
   );
