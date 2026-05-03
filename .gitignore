@@ -36,3 +36,6 @@ pnpm-lock.yaml
 package-lock.json
 
 .env
+
+# Supabase CLI archivos temporales (no se versionan)
+supabase/.temp/
