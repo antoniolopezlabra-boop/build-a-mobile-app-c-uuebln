@@ -1,11 +1,11 @@
 {
   "expo": {
-    "name": "build-a-mobile-app-c",
-    "slug": "build-a-mobile-app-c",
+    "name": "VYLTA",
+    "slug": "vylta",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/images/app-icon-hkt.png",
-    "userInterfaceStyle": "light",
+    "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
     "splash": {
       "image": "./assets/images/app-icon-hkt.png",
@@ -14,9 +14,12 @@
     },
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.anonymous.Natively",
+      "bundleIdentifier": "lat.vylta.app",
+      "buildNumber": "1",
       "infoPlist": {
-        "ITSAppUsesNonExemptEncryption": false
+        "ITSAppUsesNonExemptEncryption": false,
+        "NSCameraUsageDescription": "VYLTA usa la cámara para que puedas tomar la foto del logo de tu negocio.",
+        "NSPhotoLibraryUsageDescription": "VYLTA accede a tus fotos para que puedas seleccionar el logo de tu negocio."
       }
     },
     "android": {
@@ -25,7 +28,13 @@
         "backgroundColor": "#000000"
       },
       "edgeToEdgeEnabled": true,
-      "package": "com.anonymous.Natively"
+      "package": "lat.vylta.app",
+      "versionCode": 1,
+      "permissions": [
+        "android.permission.INTERNET",
+        "android.permission.READ_EXTERNAL_STORAGE",
+        "android.permission.WRITE_EXTERNAL_STORAGE"
+      ]
     },
     "web": {
       "favicon": "./assets/images/final_quest_240x240.png",
@@ -36,14 +45,16 @@
       "expo-router",
       "expo-web-browser"
     ],
-    "scheme": "buildamobileappc",
+    "scheme": "vylta",
     "experiments": {
       "typedRoutes": true
     },
     "extra": {
       "router": {},
-      "backendUrl": "https://3heh74dmmazf76f99rbffd54fjcq9zej.app.specular.dev",
-      "anthropicApiKey": "sk-ant-api03-Nt2WyxvMzgTSMSeAbnJwBxxVnhBpHMDoO_P0jYl9iT91aF66SU0CdTEe94ydpp2eoC1tKgFtYT30-kZZOPxt1w-_w-dHgAA"
-    }
+      "eas": {
+        "projectId": ""
+      }
+    },
+    "owner": "antoniolopezlabra-boop"
   }
 }
