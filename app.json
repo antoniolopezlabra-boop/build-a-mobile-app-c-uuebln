@@ -55,6 +55,12 @@
         "projectId": "a924a46c-7b9c-42b8-bbdb-aa0e063c4ff7"
       }
     },
-    "owner": "tonybravo001"
+    "owner": "tonybravo001",
+    "runtimeVersion": {
+      "policy": "appVersion"
+    },
+    "updates": {
+      "url": "https://u.expo.dev/a924a46c-7b9c-42b8-bbdb-aa0e063c4ff7"
+    }
   }
 }
