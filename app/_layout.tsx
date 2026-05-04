@@ -12,6 +12,7 @@ import { PlanProvider } from '@/contexts/PlanContext';
 import { AdminProvider, useAdmin } from '@/contexts/AdminContext';
 import { ThemeProvider, useTheme } from '@/contexts/ThemeContext';
 import { NetworkProvider } from '@/contexts/NetworkContext';
+import { AppStateProvider } from '@/contexts/AppStateContext';
 import { OfflineBanner } from '@/components/OfflineBanner';
 import React from 'react';
 
@@ -120,15 +121,17 @@ export default function RootLayout() {
       <NetworkProvider>
         <StripeProvider publishableKey={STRIPE_PUBLISHABLE_KEY} merchantIdentifier="merchant.com.vylta">
           <AuthProvider>
-            <PlanProvider>
-              <AdminProvider>
-                <ThemeUserSync />
-                <NavigationGuard />
-                <Stack screenOptions={{ headerShown: false }} />
-                <OfflineBanner />
-                <AppStatusBar />
-              </AdminProvider>
-            </PlanProvider>
+            <AppStateProvider>
+              <PlanProvider>
+                <AdminProvider>
+                  <ThemeUserSync />
+                  <NavigationGuard />
+                  <Stack screenOptions={{ headerShown: false }} />
+                  <OfflineBanner />
+                  <AppStatusBar />
+                </AdminProvider>
+              </PlanProvider>
+            </AppStateProvider>
           </AuthProvider>
         </StripeProvider>
       </NetworkProvider>
