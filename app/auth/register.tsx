@@ -1,4 +1,3 @@
-
 import React, { useState } from 'react';
 import {
   View,
@@ -10,28 +9,27 @@ import {
   KeyboardAvoidingView,
   Platform,
   ActivityIndicator,
-  Modal,
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { colors } from '@/styles/commonStyles';
-import { IconSymbol } from '@/components/IconSymbol';
 import { ConfirmModal } from '@/components/button';
 import { useAuth } from '@/contexts/AuthContext';
 
-const businessTypes = [
-  'Spa',
-  'Salón de belleza',
-  'Uñas',
-  'Barbería',
-  'Consultorio médico',
-  'Odontología',
-  'Veterinaria',
-  'Fotografía',
-  'Tutorías',
-  'Otro',
-];
+// ═════════════════════════════════════════════════════════════════
+// REGISTER — Pantalla de creación de cuenta (ULTRA simplificada)
+//
+// FLUJO DE ONBOARDING (May 2026 — limpieza UX):
+//   1. Aquí: solo 3 campos mínimos (nombre, email, password) → 30 seg
+//   2. Setup wizard (4 pasos guiados): negocio, servicios, horarios, link
+//
+// Por qué NO pedir aquí nombre/tipo de negocio:
+//   - Pedirlo aquí Y otra vez en el wizard era redundante (mala UX)
+//   - Reducir fricción en el momento más crítico (registro)
+//   - El wizard tiene contexto visual (iconos, progress, animaciones)
+//   - Patrón estándar de SaaS modernos (Slack, Notion, Calendly)
+// ═════════════════════════════════════════════════════════════════
 
 export default function RegisterScreen() {
   const router = useRouter();
@@ -39,9 +37,6 @@ export default function RegisterScreen() {
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
-  const [businessName, setBusinessName] = useState('');
-  const [businessType, setBusinessType] = useState('');
-  const [showTypePicker, setShowTypePicker] = useState(false);
   const [errorModal, setErrorModal] = useState<{ visible: boolean; message: string }>({
     visible: false,
     message: '',
@@ -54,7 +49,7 @@ export default function RegisterScreen() {
   const handleRegister = async () => {
     console.log('User tapped Register button');
 
-    if (!name || !email || !password || !businessName || !businessType) {
+    if (!name.trim() || !email.trim() || !password) {
       showError('Por favor completa todos los campos');
       return;
     }
@@ -64,22 +59,30 @@ export default function RegisterScreen() {
       return;
     }
 
-    console.log('Submitting registration:', { name, email, businessName, businessType });
+    // Validación mínima de email (debe tener @)
+    if (!email.includes('@') || !email.includes('.')) {
+      showError('Ingresa un correo electrónico válido');
+      return;
+    }
+
+    console.log('Submitting registration:', { name, email });
 
     try {
-      const result: any = await register({ email, password, name, businessName, businessType });
+      const result: any = await register({
+        email: email.trim().toLowerCase(),
+        password,
+        name: name.trim(),
+      });
       console.log('[Register] Registration successful, redirecting to setup wizard');
 
-      // IMPORTANTE: NO marcar setup_completed aquí. El usuario debe completar
-      // el wizard primero para que el flag se grabe.
-      // Asegurarse de NO tener un flag previo que skipee el wizard.
+      // IMPORTANTE: el setup wizard se encarga de capturar nombre y tipo del negocio
+      // (Paso 1 del wizard). Aquí solo creamos la cuenta.
       const newUserId = result?.user?.id;
       if (newUserId) {
         // Borrar cualquier flag stale para garantizar que el wizard aparezca
         await AsyncStorage.removeItem(`setup_completed_${newUserId}`);
       }
 
-      // Redirigir al setup wizard, no al home directamente
       router.replace('/setup');
     } catch (error: any) {
       console.error('Registration failed:', error);
@@ -90,123 +93,98 @@ export default function RegisterScreen() {
     }
   };
 
-  const handleTypeSelect = (type: string) => {
-    console.log('User selected business type:', type);
-    setBusinessType(type);
-    setShowTypePicker(false);
-  };
-
-  const displayBusinessType = businessType || 'Seleccionar tipo de negocio';
-
   return (
     <SafeAreaView style={styles.container}>
       <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={{ flex: 1 }}>
-      <ScrollView contentContainerStyle={styles.scrollContent} keyboardShouldPersistTaps="handled">
-        <View style={styles.header}>
-          <Text style={styles.logo}>VYLTA</Text>
-          <Text style={styles.tagline}>Cada cliente regresa</Text>
-        </View>
-
-        <View style={styles.form}>
-          <Text style={styles.title}>Crear cuenta</Text>
-
-          <View style={styles.inputContainer}>
-            <Text style={styles.label}>Nombre completo</Text>
-            <TextInput
-              style={styles.input}
-              value={name}
-              onChangeText={setName}
-              placeholder="Tu nombre"
-              placeholderTextColor={colors.textSecondary}
-              autoCapitalize="words"
-              editable={!authLoading}
-            />
+        <ScrollView contentContainerStyle={styles.scrollContent} keyboardShouldPersistTaps="handled">
+          <View style={styles.header}>
+            <Text style={styles.logo}>VYLTA</Text>
+            <Text style={styles.tagline}>Cada cliente regresa</Text>
           </View>
 
-          <View style={styles.inputContainer}>
-            <Text style={styles.label}>Correo electrónico</Text>
-            <TextInput
-              style={styles.input}
-              value={email}
-              onChangeText={setEmail}
-              placeholder="tu@email.com"
-              placeholderTextColor={colors.textSecondary}
-              keyboardType="email-address"
-              autoCapitalize="none"
-              editable={!authLoading}
-            />
-          </View>
+          <View style={styles.form}>
+            <Text style={styles.title}>Crear cuenta</Text>
+            <Text style={styles.subtitle}>
+              Empecemos con lo básico. Configurarás tu negocio en el siguiente paso.
+            </Text>
 
-          <View style={styles.inputContainer}>
-            <Text style={styles.label}>Contraseña</Text>
-            <TextInput
-              style={styles.input}
-              value={password}
-              onChangeText={setPassword}
-              placeholder="Mínimo 6 caracteres"
-              placeholderTextColor={colors.textSecondary}
-              secureTextEntry
-              editable={!authLoading}
-            />
-          </View>
+            <View style={styles.inputContainer}>
+              <Text style={styles.label}>Tu nombre</Text>
+              <TextInput
+                style={styles.input}
+                value={name}
+                onChangeText={setName}
+                placeholder="Ej. María López"
+                placeholderTextColor={colors.textSecondary}
+                autoCapitalize="words"
+                autoComplete="name"
+                editable={!authLoading}
+                maxLength={60}
+              />
+            </View>
 
-          <View style={styles.inputContainer}>
-            <Text style={styles.label}>Nombre del negocio</Text>
-            <TextInput
-              style={styles.input}
-              value={businessName}
-              onChangeText={setBusinessName}
-              placeholder="Nombre de tu negocio"
-              placeholderTextColor={colors.textSecondary}
-              editable={!authLoading}
-            />
-          </View>
+            <View style={styles.inputContainer}>
+              <Text style={styles.label}>Correo electrónico</Text>
+              <TextInput
+                style={styles.input}
+                value={email}
+                onChangeText={setEmail}
+                placeholder="tu@email.com"
+                placeholderTextColor={colors.textSecondary}
+                keyboardType="email-address"
+                autoCapitalize="none"
+                autoComplete="email"
+                editable={!authLoading}
+              />
+            </View>
 
-          <View style={styles.inputContainer}>
-            <Text style={styles.label}>Tipo de negocio</Text>
+            <View style={styles.inputContainer}>
+              <Text style={styles.label}>Contraseña</Text>
+              <TextInput
+                style={styles.input}
+                value={password}
+                onChangeText={setPassword}
+                placeholder="Mínimo 6 caracteres"
+                placeholderTextColor={colors.textSecondary}
+                secureTextEntry
+                autoComplete="new-password"
+                editable={!authLoading}
+              />
+            </View>
+
             <TouchableOpacity
-              style={styles.picker}
-              onPress={() => setShowTypePicker(true)}
+              style={[styles.button, authLoading && styles.buttonDisabled]}
+              onPress={handleRegister}
               disabled={authLoading}
             >
-              <Text style={[styles.pickerText, !businessType && styles.pickerPlaceholder]}>
-                {displayBusinessType}
-              </Text>
-              <IconSymbol
-                android_material_icon_name="arrow-drop-down"
-                size={24}
-                color={colors.textSecondary}
-              />
+              {authLoading ? (
+                <View style={styles.loadingContainer}>
+                  <ActivityIndicator color="#FFFFFF" size="small" />
+                  <Text style={styles.loadingText}>Creando cuenta...</Text>
+                </View>
+              ) : (
+                <Text style={styles.buttonText}>Continuar</Text>
+              )}
+            </TouchableOpacity>
+
+            <Text style={styles.disclaimer}>
+              Al continuar aceptas nuestros{' '}
+              <Text style={styles.disclaimerLink}>Términos</Text> y{' '}
+              <Text style={styles.disclaimerLink}>Aviso de Privacidad</Text>.
+            </Text>
+
+            <TouchableOpacity
+              style={styles.linkButton}
+              onPress={() => {
+                console.log('User tapped login link');
+                router.push('/auth/login');
+              }}
+              disabled={authLoading}
+            >
+              <Text style={styles.linkText}>¿Ya tienes cuenta? Inicia sesión</Text>
             </TouchableOpacity>
           </View>
-
-          <TouchableOpacity
-            style={[styles.button, authLoading && styles.buttonDisabled]}
-            onPress={handleRegister}
-            disabled={authLoading}
-          >
-            {authLoading ? (
-              <View style={styles.loadingContainer}>
-                <ActivityIndicator color="#FFFFFF" size="small" />
-                <Text style={styles.loadingText}>Registrando...</Text>
-              </View>
-            ) : (
-              <Text style={styles.buttonText}>Registrarse</Text>
-            )}
-          </TouchableOpacity>
-
-          <TouchableOpacity
-            style={styles.linkButton}
-            onPress={() => {
-              console.log('User tapped login link');
-              router.push('/auth/login');
-            }}
-            disabled={authLoading}
-          >
-            <Text style={styles.linkText}>¿Ya tienes cuenta? Inicia sesión</Text>
-          </TouchableOpacity>
-        </View>
-      </ScrollView>
+        </ScrollView>
       </KeyboardAvoidingView>
 
       <ConfirmModal
@@ -222,46 +200,6 @@ export default function RegisterScreen() {
         ]}
         onDismiss={() => setErrorModal({ visible: false, message: '' })}
       />
-
-      <Modal
-        visible={showTypePicker}
-        transparent
-        animationType="slide"
-        onRequestClose={() => setShowTypePicker(false)}
-      >
-        <View style={styles.modalOverlay}>
-          <View style={styles.modalContent}>
-            <View style={styles.modalHeader}>
-              <Text style={styles.modalTitle}>Tipo de negocio</Text>
-              <TouchableOpacity onPress={() => setShowTypePicker(false)}>
-                <IconSymbol
-                  android_material_icon_name="close"
-                  size={24}
-                  color={colors.text}
-                />
-              </TouchableOpacity>
-            </View>
-            <ScrollView>
-              {businessTypes.map((type) => (
-                <TouchableOpacity
-                  key={type}
-                  style={styles.typeOption}
-                  onPress={() => handleTypeSelect(type)}
-                >
-                  <Text style={styles.typeText}>{type}</Text>
-                  {businessType === type && (
-                    <IconSymbol
-                      android_material_icon_name="check"
-                      size={24}
-                      color={colors.primary}
-                    />
-                  )}
-                </TouchableOpacity>
-              ))}
-            </ScrollView>
-          </View>
-        </View>
-      </Modal>
     </SafeAreaView>
   );
 }
@@ -278,7 +216,7 @@ const styles = StyleSheet.create({
   header: {
     alignItems: 'center',
     marginTop: 32,
-    marginBottom: 48,
+    marginBottom: 40,
   },
   logo: {
     fontSize: 36,
@@ -297,7 +235,13 @@ const styles = StyleSheet.create({
     fontSize: 28,
     fontWeight: 'bold',
     color: colors.text,
-    marginBottom: 24,
+    marginBottom: 8,
+  },
+  subtitle: {
+    fontSize: 14,
+    color: colors.textSecondary,
+    marginBottom: 28,
+    lineHeight: 20,
   },
   inputContainer: {
     marginBottom: 20,
@@ -317,29 +261,12 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: colors.border,
   },
-  picker: {
-    backgroundColor: colors.card,
-    borderRadius: 12,
-    padding: 16,
-    borderWidth: 1,
-    borderColor: colors.border,
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-  },
-  pickerText: {
-    fontSize: 16,
-    color: colors.text,
-  },
-  pickerPlaceholder: {
-    color: colors.textSecondary,
-  },
   button: {
     backgroundColor: colors.primary,
     borderRadius: 12,
     padding: 16,
     alignItems: 'center',
-    marginTop: 8,
+    marginTop: 12,
   },
   buttonDisabled: {
     opacity: 0.6,
@@ -359,49 +286,24 @@ const styles = StyleSheet.create({
     fontSize: 18,
     fontWeight: '600',
   },
-  linkButton: {
+  disclaimer: {
+    fontSize: 12,
+    color: colors.textSecondary,
+    textAlign: 'center',
     marginTop: 16,
+    lineHeight: 18,
+    paddingHorizontal: 8,
+  },
+  disclaimerLink: {
+    color: colors.primary,
+    fontWeight: '600',
+  },
+  linkButton: {
+    marginTop: 20,
     alignItems: 'center',
   },
   linkText: {
     color: colors.primary,
     fontSize: 16,
-  },
-  modalOverlay: {
-    flex: 1,
-    backgroundColor: 'rgba(0, 0, 0, 0.5)',
-    justifyContent: 'flex-end',
-  },
-  modalContent: {
-    backgroundColor: colors.card,
-    borderTopLeftRadius: 24,
-    borderTopRightRadius: 24,
-    maxHeight: '70%',
-    paddingBottom: 32,
-  },
-  modalHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    padding: 20,
-    borderBottomWidth: 1,
-    borderBottomColor: colors.border,
-  },
-  modalTitle: {
-    fontSize: 20,
-    fontWeight: 'bold',
-    color: colors.text,
-  },
-  typeOption: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    padding: 20,
-    borderBottomWidth: 1,
-    borderBottomColor: colors.border,
-  },
-  typeText: {
-    fontSize: 16,
-    color: colors.text,
   },
 });

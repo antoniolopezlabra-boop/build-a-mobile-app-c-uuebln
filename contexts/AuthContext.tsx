@@ -36,7 +36,11 @@ interface AuthContextType {
   authLoading: boolean;
   isStaffAccount: boolean;
   staffMemberData: StaffMemberData | null;
-  register: (params: { email: string; password: string; name: string; businessName: string; businessType: string }) => Promise<void>;
+  // FLUJO DE ONBOARDING (May 2026 — limpieza UX):
+  // register() solo crea la cuenta de auth con datos mínimos.
+  // Los datos del negocio (nombre, tipo, teléfono) se capturan en el setup wizard
+  // (Paso 1 — app/setup/index.tsx) que es donde se hace upsert a business_profiles.
+  register: (params: { email: string; password: string; name: string }) => Promise<any>;
   login: (email: string, password: string) => Promise<void>;
   signOut: () => Promise<void>;
   fetchUser: () => Promise<void>;
@@ -66,10 +70,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       if (event === "USER_UPDATED") return;
 
       if (session?.user) {
-        // Si ya cargamos este usuario, no volvemos a cargar (evita double-fetch al arranque)
         if (loadedUserIdRef.current === session.user.id) return;
         loadedUserIdRef.current = session.user.id;
-        // PERF+SEC (Abr 2026): registrar userId en el cache para aislamiento automático
         setCacheUserId(session.user.id);
         await loadUserData(session.user);
       } else {
@@ -83,13 +85,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       }
     });
 
-    // Carga inicial: solo si onAuthStateChange no se disparó primero
     supabase.auth.getSession().then(async ({ data: { session } }) => {
       if (!mounted) return;
       if (session?.user) {
         if (loadedUserIdRef.current === session.user.id) return;
         loadedUserIdRef.current = session.user.id;
-        // PERF+SEC: registrar userId en el cache al arranque con sesión existente
         setCacheUserId(session.user.id);
         await loadUserData(session.user);
       } else {
@@ -142,7 +142,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       };
       setUser(appUser);
 
-      // Detectar si es una cuenta de colaborador (en paralelo con el perfil)
       const [staffData] = await Promise.all([
         checkStaffAccount(supabaseUser.id),
         loadBusinessProfile(supabaseUser.id),
@@ -171,6 +170,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         .single();
 
       if (error || !data) {
+        // Es normal que no haya business_profile para usuarios recién registrados
+        // que aún no completaron el setup wizard. setBusinessProfile(null) es correcto.
         setBusinessProfile(null);
         return;
       }
@@ -192,18 +193,26 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   };
 
-  const register = async (params: { email: string; password: string; name: string; businessName: string; businessType: string }) => {
+  // ==========================================================================
+  // REGISTER: solo crea la cuenta de auth.
+  // El perfil del negocio (business_name, business_type, phone) se captura
+  // en el setup wizard (Paso 1 — app/setup/index.tsx) que hace upsert a
+  // business_profiles. Así evitamos pedir lo mismo dos veces y reducimos
+  // fricción en el momento más crítico (registro).
+  // ==========================================================================
+  const register = async (params: { email: string; password: string; name: string }) => {
     try {
       setAuthLoading(true);
       const { data, error } = await supabase.auth.signUp({
         email: params.email,
         password: params.password,
         options: {
-          data: { name: params.name, businessName: params.businessName, businessType: params.businessType },
+          data: { name: params.name },
         },
       });
       if (error) throw error;
       if (!data.user) throw new Error('No user returned');
+      return data; // expone {user, session} para que register.tsx pueda leer user.id
     } catch (error) {
       logger.error('[Auth] Registration error:', error);
       throw error;
@@ -229,7 +238,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     try {
       setAuthLoading(true);
       invalidateCache();
-      setCacheUserId(null); // Limpiar el userId registrado en el cache
+      setCacheUserId(null);
       loadedUserIdRef.current = null;
       setIsStaffAccount(false);
       setStaffMemberData(null);
@@ -245,7 +254,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const fetchUser = async () => {
     const { data: { user: supabaseUser } } = await supabase.auth.getUser();
     if (supabaseUser) {
-      // Forzar recarga
       loadedUserIdRef.current = null;
       setCacheUserId(supabaseUser.id);
       await loadUserData(supabaseUser);
