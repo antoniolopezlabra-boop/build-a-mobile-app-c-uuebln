@@ -31,6 +31,7 @@ import {
 //   - Consulta Médica (salud) → médicos, clínicas, especialistas
 //   - Corte de cabello (belleza tradicional) → barberías, salones
 //   - Poligel (belleza premium) → nail techs modernas
+// Icono: inventory_2 (caja con productos) — universal y sin sesgo.
 // ═════════════════════════════════════════════════════════════════
 
 const DAYS_OF_WEEK = ['L', 'M', 'M', 'J', 'V', 'S', 'D'];
@@ -355,7 +356,7 @@ export default function SetupWizard() {
               <>
                 <View style={s.stepIconWrap}>
                   <View style={[s.stepIconCircle, { backgroundColor: '#FFFBEB' }]}>
-                    <MaterialIcons name="content-cut" size={40} color="#F59E0B" />
+                    <MaterialIcons name="inventory-2" size={40} color="#F59E0B" />
                   </View>
                 </View>
                 <Text style={s.stepTitle}>Agrega tu primer servicio</Text>
