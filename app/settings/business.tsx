@@ -11,31 +11,48 @@ import { ConfirmModal } from '@/components/button';
 import { useAuth } from '@/contexts/AuthContext';
 import { apiPut, getBearerToken, BACKEND_URL } from '@/utils/api';
 import * as ImagePicker from 'expo-image-picker';
+import {
+  BUSINESS_TYPES,
+  BUSINESS_TYPE_OTHER,
+  isCustomBusinessType,
+  validateCustomBusinessType,
+} from '@/constants/businessTypes';
 
-const BUSINESS_TYPES = [
-  'Spa','Salón de belleza','Uñas','Barbería','Consultorio médico',
-  'Odontología','Veterinaria','Fotografía','Tutorías','Otro',
-];
+// Lista de 31 tipos + 'Otro' definida en /constants/businessTypes.ts
+// (single source of truth, compartida con app/setup/index.tsx)
 
 export default function BusinessSettingsScreen() {
   const router = useRouter();
   const { businessProfile, refreshBusinessProfile } = useAuth();
-  const [saving, setSaving]           = useState(false);
+  const [saving, setSaving]                 = useState(false);
   const [showTypePicker, setShowTypePicker] = useState(false);
   const [uploadingLogo, setUploadingLogo]   = useState(false);
-  const [errorModal,   setErrorModal]   = useState({ visible: false, message: '' });
-  const [successModal, setSuccessModal] = useState(false);
-  const [businessName, setBusinessName] = useState('');
-  const [businessType, setBusinessType] = useState('');
-  const [address, setAddress]           = useState('');
-  const [phone, setPhone]               = useState('');
+  const [errorModal, setErrorModal]         = useState({ visible: false, message: '' });
+  const [successModal, setSuccessModal]     = useState(false);
+  const [businessName, setBusinessName]     = useState('');
+  // selectedType es el valor del dropdown (puede ser 'Otro' o uno de la lista)
+  // customType es el texto libre cuando selectedType === 'Otro'
+  // El valor que se guarda en BD es selectedType (si !== 'Otro') o customType (si === 'Otro')
+  const [selectedType, setSelectedType]     = useState('');
+  const [customType, setCustomType]         = useState('');
+  const [address, setAddress]               = useState('');
+  const [phone, setPhone]                   = useState('');
   const [alternativePhone, setAlternativePhone] = useState('');
-  const [logoUrl, setLogoUrl]           = useState('');
+  const [logoUrl, setLogoUrl]               = useState('');
 
   useEffect(() => {
     if (businessProfile) {
       setBusinessName(businessProfile.businessName || '');
-      setBusinessType(businessProfile.businessType || '');
+      const currentType = businessProfile.businessType || '';
+      // Si el valor guardado está en la lista oficial → lo seleccionamos directo
+      // Si NO está (ej: 'Especialista Parasitólogo') → selectedType='Otro' + customType=ese valor
+      if (currentType && isCustomBusinessType(currentType)) {
+        setSelectedType(BUSINESS_TYPE_OTHER);
+        setCustomType(currentType);
+      } else {
+        setSelectedType(currentType);
+        setCustomType('');
+      }
       setAddress((businessProfile as any).address || '');
       setPhone((businessProfile as any).phone || '');
       setAlternativePhone((businessProfile as any).alternativePhone || '');
@@ -79,14 +96,36 @@ export default function BusinessSettingsScreen() {
     }
   };
 
+  // Calcula el valor final que se guarda en BD
+  const getEffectiveBusinessType = (): string => {
+    if (selectedType === BUSINESS_TYPE_OTHER) {
+      return customType.trim();
+    }
+    return selectedType;
+  };
+
   const handleSave = async () => {
-    if (!businessName.trim() || !businessType) {
-      setErrorModal({ visible: true, message: 'El nombre y tipo de negocio son requeridos' }); return;
+    if (!businessName.trim()) {
+      setErrorModal({ visible: true, message: 'El nombre del negocio es requerido' });
+      return;
+    }
+    if (!selectedType) {
+      setErrorModal({ visible: true, message: 'El tipo de negocio es requerido' });
+      return;
+    }
+    // Validar input personalizado de 'Otro'
+    if (selectedType === BUSINESS_TYPE_OTHER) {
+      const v = validateCustomBusinessType(customType);
+      if (!v.valid) {
+        setErrorModal({ visible: true, message: v.error || 'Escribe tu tipo de negocio' });
+        return;
+      }
     }
     setSaving(true);
     try {
       await apiPut('/api/business-profile', {
-        businessName: businessName.trim(), businessType,
+        businessName: businessName.trim(),
+        businessType: getEffectiveBusinessType(),
         address: address.trim() || undefined,
         phone: phone.trim() || undefined,
         alternativePhone: alternativePhone.trim() || undefined,
@@ -101,8 +140,16 @@ export default function BusinessSettingsScreen() {
     }
   };
 
+  // Texto que se muestra en el botón del picker
+  const pickerDisplayText = () => {
+    if (!selectedType) return 'Seleccionar tipo';
+    if (selectedType === BUSINESS_TYPE_OTHER) {
+      return customType.trim() ? `Otro: ${customType.trim()}` : 'Otro (especifica)';
+    }
+    return selectedType;
+  };
+
   return (
-    // FIX #4: SafeAreaView edges={['top']} — sin paddingTop:48
     <SafeAreaView style={styles.container} edges={['top']}>
       <ConfirmModal visible={errorModal.visible} title="Error" message={errorModal.message}
         buttons={[{ text: 'Aceptar', onPress: () => setErrorModal({ visible: false, message: '' }), style: 'cancel' }]}
@@ -111,7 +158,6 @@ export default function BusinessSettingsScreen() {
         buttons={[{ text: 'Aceptar', onPress: () => { setSuccessModal(false); router.back(); }, style: 'default' }]}
         onDismiss={() => { setSuccessModal(false); router.back(); }} />
 
-      {/* FIX #4: sin paddingTop:48 */}
       <View style={styles.header}>
         <TouchableOpacity onPress={() => router.back()} style={styles.backButton}>
           <IconSymbol android_material_icon_name="arrow-back" size={24} color={colors.text} />
@@ -142,9 +188,28 @@ export default function BusinessSettingsScreen() {
 
         <Text style={styles.fieldLabel}>Tipo de negocio *</Text>
         <TouchableOpacity style={styles.pickerButton} onPress={() => setShowTypePicker(true)}>
-          <Text style={[styles.pickerText, !businessType && styles.pickerPlaceholder]}>{businessType || 'Seleccionar tipo'}</Text>
+          <Text style={[styles.pickerText, !selectedType && styles.pickerPlaceholder]} numberOfLines={1}>
+            {pickerDisplayText()}
+          </Text>
           <IconSymbol android_material_icon_name="arrow-drop-down" size={24} color={colors.textSecondary} />
         </TouchableOpacity>
+
+        {/* Input de texto libre cuando se selecciona 'Otro' */}
+        {selectedType === BUSINESS_TYPE_OTHER && (
+          <View style={styles.customInputWrap}>
+            <Text style={styles.customInputLabel}>Especifica tu tipo de negocio o especialidad *</Text>
+            <TextInput
+              style={styles.input}
+              value={customType}
+              onChangeText={setCustomType}
+              placeholder="Ej. Especialista Parasitólogo, Acupunturista..."
+              placeholderTextColor={colors.textSecondary}
+              maxLength={50}
+              autoCapitalize="words"
+            />
+            <Text style={styles.customInputHint}>{customType.length}/50 caracteres</Text>
+          </View>
+        )}
 
         <Text style={styles.fieldLabel}>Dirección (opcional)</Text>
         <TextInput style={styles.input} value={address} onChangeText={setAddress} placeholder="Calle, número, colonia, ciudad" placeholderTextColor={colors.textSecondary} />
@@ -169,13 +234,33 @@ export default function BusinessSettingsScreen() {
                 <IconSymbol android_material_icon_name="close" size={24} color={colors.text} />
               </TouchableOpacity>
             </View>
-            <ScrollView>
-              {BUSINESS_TYPES.map(type => (
-                <TouchableOpacity key={type} style={styles.typeOption} onPress={() => { setBusinessType(type); setShowTypePicker(false); }}>
-                  <Text style={styles.typeText}>{type}</Text>
-                  {businessType === type && <IconSymbol android_material_icon_name="check" size={20} color={colors.primary} />}
-                </TouchableOpacity>
-              ))}
+            <Text style={styles.pickerSubtitle}>
+              Selecciona el que mejor describe tu negocio. Si no aparece, elige “Otro”.
+            </Text>
+            <ScrollView showsVerticalScrollIndicator={false}>
+              {BUSINESS_TYPES.map(type => {
+                const isSelected = selectedType === type;
+                const isOther = type === BUSINESS_TYPE_OTHER;
+                return (
+                  <TouchableOpacity
+                    key={type}
+                    style={[
+                      styles.typeOption,
+                      isSelected && styles.typeOptionSelected,
+                      isOther && styles.typeOptionOther,
+                    ]}
+                    onPress={() => {
+                      setSelectedType(type);
+                      setShowTypePicker(false);
+                      // Si selecciona algo distinto de 'Otro', limpiamos el customType
+                      if (type !== BUSINESS_TYPE_OTHER) setCustomType('');
+                    }}
+                  >
+                    <Text style={[styles.typeText, isSelected && styles.typeTextSelected]}>{type}</Text>
+                    {isSelected && <IconSymbol android_material_icon_name="check" size={20} color={colors.primary} />}
+                  </TouchableOpacity>
+                );
+              })}
             </ScrollView>
           </View>
         </View>
@@ -186,7 +271,6 @@ export default function BusinessSettingsScreen() {
 
 const styles = StyleSheet.create({
   container:          { flex: 1, backgroundColor: colors.background },
-  // FIX #4: paddingTop removido
   header:             { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', padding: 20, paddingVertical: 16, backgroundColor: colors.card, borderBottomWidth: 1, borderBottomColor: colors.border },
   backButton:         { padding: 4 },
   title:              { fontSize: 20, fontWeight: 'bold', color: colors.text },
@@ -202,15 +286,25 @@ const styles = StyleSheet.create({
   fieldLabel:         { fontSize: 14, fontWeight: '600', color: colors.text, marginBottom: 8, marginTop: 16 },
   input:              { backgroundColor: colors.card, borderRadius: 12, padding: 14, fontSize: 16, color: colors.text, borderWidth: 1, borderColor: colors.border },
   pickerButton:       { backgroundColor: colors.card, borderRadius: 12, padding: 14, borderWidth: 1, borderColor: colors.border, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
-  pickerText:         { fontSize: 16, color: colors.text },
+  pickerText:         { flex: 1, fontSize: 16, color: colors.text },
   pickerPlaceholder:  { color: colors.textSecondary },
+
+  // Input de texto libre cuando es 'Otro'
+  customInputWrap:    { backgroundColor: '#FEF3C7', borderRadius: 12, padding: 12, marginTop: 8, borderWidth: 1, borderColor: '#FDE68A' },
+  customInputLabel:   { fontSize: 12, fontWeight: '700', color: '#92400E', marginBottom: 8, textTransform: 'uppercase', letterSpacing: 0.4 },
+  customInputHint:    { fontSize: 11, color: '#A16207', marginTop: 4, textAlign: 'right' },
+
   saveButton:         { backgroundColor: colors.primary, borderRadius: 12, padding: 16, alignItems: 'center', marginTop: 32 },
   saveButtonDisabled: { opacity: 0.6 },
   saveButtonText:     { color: '#FFFFFF', fontSize: 18, fontWeight: '600' },
   modalOverlay:       { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-end' },
-  pickerContainer:    { backgroundColor: colors.card, borderTopLeftRadius: 24, borderTopRightRadius: 24, maxHeight: '70%', paddingBottom: 32 },
-  pickerHeader:       { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', padding: 20, borderBottomWidth: 1, borderBottomColor: colors.border },
+  pickerContainer:    { backgroundColor: colors.card, borderTopLeftRadius: 24, borderTopRightRadius: 24, maxHeight: '80%', paddingBottom: 32 },
+  pickerHeader:       { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', padding: 20, paddingBottom: 8, borderBottomWidth: 0 },
   pickerTitle:        { fontSize: 20, fontWeight: 'bold', color: colors.text },
-  typeOption:         { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', padding: 18, borderBottomWidth: 1, borderBottomColor: colors.border },
-  typeText:           { fontSize: 16, color: colors.text },
+  pickerSubtitle:     { paddingHorizontal: 20, paddingBottom: 16, fontSize: 13, color: colors.textSecondary, lineHeight: 18 },
+  typeOption:         { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', padding: 18, borderTopWidth: 1, borderTopColor: colors.border },
+  typeOptionSelected: { backgroundColor: '#ECFDF5' },
+  typeOptionOther:    { borderTopWidth: 4, borderTopColor: '#FDE68A', backgroundColor: '#FFFBEB' },
+  typeText:           { fontSize: 16, color: colors.text, fontWeight: '500' },
+  typeTextSelected:   { color: colors.primary, fontWeight: '700' },
 });

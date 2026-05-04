@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity,
   TextInput, ActivityIndicator, Alert, KeyboardAvoidingView,
-  Platform, Animated, Clipboard,
+  Platform, Animated, Clipboard, Modal,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
@@ -11,22 +11,22 @@ import MaterialIcons from '@expo/vector-icons/MaterialIcons';
 import { useAuth } from '@/contexts/AuthContext';
 import { supabase } from '@/lib/supabase';
 import { colors } from '@/styles/commonStyles';
+import {
+  BUSINESS_TYPES,
+  BUSINESS_TYPE_OTHER,
+  isCustomBusinessType,
+  validateCustomBusinessType,
+} from '@/constants/businessTypes';
 
-// ══════════════════════════════════════════════════════════════════
+// ═════════════════════════════════════════════════════════════════
 // SETUP WIZARD — Onboarding post-registro
 // 4 pasos: Negocio → Servicios → Horarios → Link de citas
 // Solo aparece la primera vez que el usuario entra. Se marca en AsyncStorage
 // con la key `setup_completed_<userId>` para nunca volver a mostrarse.
-// ══════════════════════════════════════════════════════════════════
-
-const BUSINESS_TYPES = [
-  { value: 'salon',     label: 'Salón de belleza',  icon: 'content-cut' },
-  { value: 'barberia',  label: 'Barbería',          icon: 'face' },
-  { value: 'spa',       label: 'Spa',               icon: 'spa' },
-  { value: 'unas',      label: 'Manicure / Pedicure', icon: 'brush' },
-  { value: 'estetica',  label: 'Clínica estética',  icon: 'medical-services' },
-  { value: 'otro',      label: 'Otro',              icon: 'store' },
-];
+//
+// PASO 1 (Negocio): Lista de 31 tipos + opción 'Otro' con input de texto libre.
+// La lista vive en /constants/businessTypes.ts (single source of truth).
+// ═════════════════════════════════════════════════════════════════
 
 const DAYS_OF_WEEK = ['L', 'M', 'M', 'J', 'V', 'S', 'D'];
 const DAY_NAMES = ['Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado', 'Domingo'];
@@ -38,22 +38,34 @@ export default function SetupWizard() {
   const [saving, setSaving] = useState(false);
   const fadeAnim = useRef(new Animated.Value(1)).current;
 
-  // Paso 1: Negocio
+  // ============ PASO 1: Negocio ============
   const [businessName, setBusinessName] = useState(businessProfile?.businessName || '');
-  const [businessType, setBusinessType] = useState(businessProfile?.businessType || 'salon');
+  // Inicialización inteligente del tipo de negocio:
+  //   - Si el perfil tiene un valor que SI está en la lista oficial, lo usamos.
+  //   - Si tiene un valor que NO está (ej: 'Especialista Parasitólogo'),
+  //     ponemos selectedType = 'Otro' y el customType con ese valor.
+  //   - Si no tiene nada, vacío.
+  const initialType = businessProfile?.businessType || '';
+  const [selectedType, setSelectedType] = useState(
+    initialType ? (isCustomBusinessType(initialType) ? BUSINESS_TYPE_OTHER : initialType) : ''
+  );
+  const [customType, setCustomType] = useState(
+    isCustomBusinessType(initialType) ? initialType : ''
+  );
+  const [showTypePicker, setShowTypePicker] = useState(false);
   const [phone, setPhone] = useState(businessProfile?.phone || '');
 
-  // Paso 2: Primer servicio
+  // ============ PASO 2: Primer servicio ============
   const [serviceName, setServiceName] = useState('');
   const [servicePrice, setServicePrice] = useState('');
   const [serviceDuration, setServiceDuration] = useState('30');
 
-  // Paso 3: Horarios (índices de días activos: 0=Lun … 6=Dom)
-  const [openDays, setOpenDays] = useState<number[]>([0, 1, 2, 3, 4, 5]); // Lun-Sab por defecto
+  // ============ PASO 3: Horarios ============
+  const [openDays, setOpenDays] = useState<number[]>([0, 1, 2, 3, 4, 5]); // Lun-Sáb por defecto
   const [openTime, setOpenTime] = useState('09:00');
   const [closeTime, setCloseTime] = useState('19:00');
 
-  // Paso 4: Link
+  // ============ PASO 4: Link ============
   const [bookingSlug, setBookingSlug] = useState<string | null>(null);
   const [linkLoading, setLinkLoading] = useState(false);
 
@@ -111,18 +123,41 @@ export default function SetupWizard() {
   };
 
   // ---------- PASO 1: Guardar negocio ----------
+  // Calcula el valor final que se guarda en BD:
+  //   - Si selectedType es 'Otro' → usa customType (texto libre del usuario)
+  //   - Caso contrario → usa selectedType tal cual
+  const getEffectiveBusinessType = (): string => {
+    if (selectedType === BUSINESS_TYPE_OTHER) {
+      return customType.trim();
+    }
+    return selectedType;
+  };
+
   const handleSaveBusinessAndNext = async () => {
     if (!businessName.trim()) {
       Alert.alert('Falta información', 'Por favor escribe el nombre de tu negocio.');
       return;
     }
+    if (!selectedType) {
+      Alert.alert('Falta información', 'Por favor selecciona el tipo de negocio.');
+      return;
+    }
+    // Validar input personalizado de 'Otro'
+    if (selectedType === BUSINESS_TYPE_OTHER) {
+      const v = validateCustomBusinessType(customType);
+      if (!v.valid) {
+        Alert.alert('Tipo de negocio', v.error || 'Escribe tu tipo de negocio.');
+        return;
+      }
+    }
     if (!user?.id) return;
     setSaving(true);
     try {
+      const finalBusinessType = getEffectiveBusinessType();
       await supabase.from('business_profiles').upsert({
         user_id: user.id,
         business_name: businessName.trim(),
-        business_type: businessType,
+        business_type: finalBusinessType,
         phone: phone.trim() || null,
         updated_at: new Date().toISOString(),
       }, { onConflict: 'user_id' });
@@ -138,7 +173,6 @@ export default function SetupWizard() {
   // ---------- PASO 2: Guardar primer servicio ----------
   const handleSaveServiceAndNext = async () => {
     if (!user?.id) return;
-    // Si dejó vacío, simplemente avanza (puede agregar después)
     if (!serviceName.trim()) {
       animateStepChange(2);
       return;
@@ -175,7 +209,6 @@ export default function SetupWizard() {
     if (!user?.id) return;
     setSaving(true);
     try {
-      // Insertar 7 días (0 = Lunes según tu convención)
       const rows = Array.from({ length: 7 }, (_, dayIdx) => ({
         user_id: user.id,
         day_of_week: dayIdx,
@@ -183,7 +216,6 @@ export default function SetupWizard() {
         end_time: closeTime,
         is_open: openDays.includes(dayIdx),
       }));
-      // Borrar previos y reinsertar (más simple que upsert por compuesta)
       await supabase.from('business_hours').delete().eq('user_id', user.id);
       await supabase.from('business_hours').insert(rows);
       animateStepChange(3);
@@ -221,6 +253,15 @@ export default function SetupWizard() {
       <Text style={s.progressText}>Paso {step + 1} de 4</Text>
     </View>
   );
+
+  // Texto que se muestra en el botón del picker
+  const pickerDisplayText = () => {
+    if (!selectedType) return 'Seleccionar tipo de negocio';
+    if (selectedType === BUSINESS_TYPE_OTHER) {
+      return customType.trim() ? `Otro: ${customType.trim()}` : 'Otro (especifica)';
+    }
+    return selectedType;
+  };
 
   return (
     <SafeAreaView style={s.container} edges={['top']}>
@@ -262,26 +303,34 @@ export default function SetupWizard() {
                   maxLength={60}
                 />
 
-                <Text style={s.label}>Tipo de negocio</Text>
-                <View style={s.typeGrid}>
-                  {BUSINESS_TYPES.map(bt => (
-                    <TouchableOpacity
-                      key={bt.value}
-                      style={[s.typeChip, businessType === bt.value && s.typeChipActive]}
-                      onPress={() => setBusinessType(bt.value)}
-                      activeOpacity={0.7}
-                    >
-                      <MaterialIcons
-                        name={bt.icon as any}
-                        size={16}
-                        color={businessType === bt.value ? '#fff' : '#64748B'}
-                      />
-                      <Text style={[s.typeChipText, businessType === bt.value && s.typeChipTextActive]}>
-                        {bt.label}
-                      </Text>
-                    </TouchableOpacity>
-                  ))}
-                </View>
+                <Text style={s.label}>Tipo de negocio *</Text>
+                <TouchableOpacity
+                  style={s.pickerButton}
+                  onPress={() => setShowTypePicker(true)}
+                  activeOpacity={0.8}
+                >
+                  <Text style={[s.pickerButtonText, !selectedType && s.pickerButtonPlaceholder]} numberOfLines={1}>
+                    {pickerDisplayText()}
+                  </Text>
+                  <MaterialIcons name="arrow-drop-down" size={24} color="#64748B" />
+                </TouchableOpacity>
+
+                {/* Input de texto libre cuando se selecciona 'Otro' */}
+                {selectedType === BUSINESS_TYPE_OTHER && (
+                  <View style={s.customInputWrap}>
+                    <Text style={s.customInputLabel}>Especifica tu tipo de negocio o especialidad *</Text>
+                    <TextInput
+                      style={s.input}
+                      placeholder="Ej. Especialista Parasitólogo, Acupunturista..."
+                      placeholderTextColor="#94A3B8"
+                      value={customType}
+                      onChangeText={setCustomType}
+                      autoCapitalize="words"
+                      maxLength={50}
+                    />
+                    <Text style={s.customInputHint}>{customType.length}/50 caracteres</Text>
+                  </View>
+                )}
 
                 <Text style={s.label}>Teléfono de contacto (opcional)</Text>
                 <TextInput
@@ -505,6 +554,54 @@ export default function SetupWizard() {
           </TouchableOpacity>
         </View>
       </KeyboardAvoidingView>
+
+      {/* MODAL: Selector de tipo de negocio */}
+      <Modal
+        visible={showTypePicker}
+        animationType="slide"
+        transparent
+        onRequestClose={() => setShowTypePicker(false)}
+      >
+        <View style={s.modalOverlay}>
+          <View style={s.pickerContainer}>
+            <View style={s.pickerHeader}>
+              <Text style={s.pickerTitle}>Tipo de negocio</Text>
+              <TouchableOpacity onPress={() => setShowTypePicker(false)} style={s.pickerCloseBtn}>
+                <MaterialIcons name="close" size={24} color="#0F172A" />
+              </TouchableOpacity>
+            </View>
+            <Text style={s.pickerSubtitle}>
+              Selecciona el que mejor describe tu negocio. Si no aparece, elige “Otro”.
+            </Text>
+            <ScrollView showsVerticalScrollIndicator={false}>
+              {BUSINESS_TYPES.map(type => {
+                const isSelected = selectedType === type;
+                const isOther = type === BUSINESS_TYPE_OTHER;
+                return (
+                  <TouchableOpacity
+                    key={type}
+                    style={[
+                      s.typeOption,
+                      isSelected && s.typeOptionSelected,
+                      isOther && s.typeOptionOther,
+                    ]}
+                    onPress={() => {
+                      setSelectedType(type);
+                      setShowTypePicker(false);
+                      // Si selecciona algo que no es 'Otro', limpiamos el customType
+                      if (type !== BUSINESS_TYPE_OTHER) setCustomType('');
+                    }}
+                    activeOpacity={0.7}
+                  >
+                    <Text style={[s.typeOptionText, isSelected && s.typeOptionTextSelected]}>{type}</Text>
+                    {isSelected && <MaterialIcons name="check" size={20} color={colors.primary} />}
+                  </TouchableOpacity>
+                );
+              })}
+            </ScrollView>
+          </View>
+        </View>
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -532,11 +629,15 @@ const s = StyleSheet.create({
   input: { backgroundColor: '#fff', borderRadius: 12, padding: 14, fontSize: 16, color: '#0F172A', borderWidth: 1, borderColor: '#E2E8F0', marginBottom: 16 },
   row2: { flexDirection: 'row', gap: 12 },
 
-  typeGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 16 },
-  typeChip: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 12, paddingVertical: 8, borderRadius: 20, borderWidth: 1, borderColor: '#E2E8F0', backgroundColor: '#fff' },
-  typeChipActive: { backgroundColor: colors.primary, borderColor: colors.primary },
-  typeChipText: { fontSize: 13, color: '#64748B', fontWeight: '600' },
-  typeChipTextActive: { color: '#fff' },
+  // Botón picker (reemplaza el typeGrid de chips)
+  pickerButton: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', backgroundColor: '#fff', borderRadius: 12, paddingHorizontal: 14, paddingVertical: 14, borderWidth: 1, borderColor: '#E2E8F0', marginBottom: 8 },
+  pickerButtonText: { flex: 1, fontSize: 16, color: '#0F172A', fontWeight: '500' },
+  pickerButtonPlaceholder: { color: '#94A3B8', fontWeight: '400' },
+
+  // Input de texto libre cuando es 'Otro'
+  customInputWrap: { backgroundColor: '#FEF3C7', borderRadius: 12, padding: 12, marginTop: 4, marginBottom: 12, borderWidth: 1, borderColor: '#FDE68A' },
+  customInputLabel: { fontSize: 12, fontWeight: '700', color: '#92400E', marginBottom: 6, textTransform: 'uppercase', letterSpacing: 0.4 },
+  customInputHint: { fontSize: 11, color: '#A16207', marginTop: -8, marginBottom: 4, textAlign: 'right' },
 
   daysRow: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 24, gap: 6 },
   dayChip: { flex: 1, alignItems: 'center', paddingVertical: 10, paddingHorizontal: 4, borderRadius: 12, borderWidth: 1.5, borderColor: '#E2E8F0', backgroundColor: '#fff' },
@@ -566,4 +667,17 @@ const s = StyleSheet.create({
   nextBtn: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, backgroundColor: colors.primary, borderRadius: 14, height: 52 },
   nextBtnDisabled: { backgroundColor: '#9CA3AF' },
   nextBtnText: { color: '#fff', fontSize: 16, fontWeight: '700' },
+
+  // Modal selector
+  modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-end' },
+  pickerContainer: { backgroundColor: '#fff', borderTopLeftRadius: 24, borderTopRightRadius: 24, maxHeight: '80%', paddingBottom: 32 },
+  pickerHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 24, paddingTop: 20, paddingBottom: 8 },
+  pickerTitle: { fontSize: 20, fontWeight: '800', color: '#0F172A' },
+  pickerCloseBtn: { padding: 4 },
+  pickerSubtitle: { paddingHorizontal: 24, paddingBottom: 16, fontSize: 13, color: '#64748B', lineHeight: 18 },
+  typeOption: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 24, paddingVertical: 16, borderTopWidth: 1, borderTopColor: '#F1F5F9' },
+  typeOptionSelected: { backgroundColor: '#ECFDF5' },
+  typeOptionOther: { borderTopWidth: 4, borderTopColor: '#FDE68A', backgroundColor: '#FFFBEB' },
+  typeOptionText: { fontSize: 16, color: '#0F172A', fontWeight: '500' },
+  typeOptionTextSelected: { color: colors.primary, fontWeight: '700' },
 });
