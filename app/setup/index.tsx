@@ -26,6 +26,11 @@ import {
 //
 // PASO 1 (Negocio): Lista de 31 tipos + opción 'Otro' con input de texto libre.
 // La lista vive en /constants/businessTypes.ts (single source of truth).
+//
+// PASO 2 (Servicio): Placeholder inclusivo cubre 3 sectores en 3 ejemplos:
+//   - Consulta Médica (salud) → médicos, clínicas, especialistas
+//   - Corte de cabello (belleza tradicional) → barberías, salones
+//   - Poligel (belleza premium) → nail techs modernas
 // ═════════════════════════════════════════════════════════════════
 
 const DAYS_OF_WEEK = ['L', 'M', 'M', 'J', 'V', 'S', 'D'];
@@ -359,7 +364,7 @@ export default function SetupWizard() {
                 <Text style={s.label}>Nombre del servicio</Text>
                 <TextInput
                   style={s.input}
-                  placeholder="Ej. Corte de cabello, Manicure, Facial"
+                  placeholder="Ej. Consulta Médica, Corte de cabello, Poligel"
                   placeholderTextColor="#94A3B8"
                   value={serviceName}
                   onChangeText={setServiceName}
