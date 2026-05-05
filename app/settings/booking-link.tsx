@@ -8,6 +8,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useFocusEffect } from '@react-navigation/native';
 import { usePlan } from '@/contexts/PlanContext';
+import { useGratuitoUsage } from '@/contexts/useGratuitoUsage';
 import { useAuth } from '@/contexts/AuthContext';
 import { supabase } from '@/lib/supabase';
 import MaterialIcons from '@expo/vector-icons/MaterialIcons';
@@ -28,6 +29,7 @@ export default function BookingLinkScreen() {
   const router = useRouter();
   const { user } = useAuth();
   const { isGratuito } = usePlan();
+  const usage = useGratuitoUsage();
 
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -45,12 +47,12 @@ export default function BookingLinkScreen() {
   const loadData = async () => {
     setLoading(true);
     try {
-      const { data } = await supabase.from('booking_links').select('*').eq('user_id', user?.id).single();
+      const { data } = await supabase.from('booking_links').select('*').eq('user_id', user?.id).maybeSingle();
       if (data) {
         setLinkData(data); setSlug(data.slug); setIsActive(data.is_active);
         setRequireApproval(data.require_approval); setWhatsappConfirm(data.whatsapp_confirmation);
       } else {
-        const { data: bp } = await supabase.from('business_profiles').select('business_name').eq('user_id', user?.id).single();
+        const { data: bp } = await supabase.from('business_profiles').select('business_name').eq('user_id', user?.id).maybeSingle();
         if (bp?.business_name) {
           const suggested = bp.business_name.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/[^a-z0-9]+/g,'-').replace(/^-|-$/g,'').slice(0,40);
           setSlug(suggested);
@@ -95,7 +97,6 @@ export default function BookingLinkScreen() {
     } finally { setSaving(false); }
   };
 
-  // FIX: Copia al clipboard directamente — un tap, sin sheet de compartir
   const handleCopy = async () => {
     const url = `${BASE_URL}/${slug}`;
     try {
@@ -151,29 +152,11 @@ export default function BookingLinkScreen() {
     );
   }
 
-  if (isGratuito) {
-    return (
-      <SafeAreaView style={st.container}>
-        <View style={st.header}>
-          <TouchableOpacity onPress={() => router.back()} style={st.backBtn}>
-            <MaterialIcons name="arrow-back-ios" size={18} color="#64748B" />
-            <Text style={st.backText}>Ajustes</Text>
-          </TouchableOpacity>
-          <Text style={st.title}>Link de citas</Text>
-          <View style={{ width: 80 }} />
-        </View>
-        <View style={st.paywall}>
-          <View style={st.paywallIconWrap}><MaterialIcons name="link" size={36} color="#10B981" /></View>
-          <Text style={st.paywallTitle}>Link de cita pública</Text>
-          <Text style={st.paywallDesc}>Comparte un link con tus clientes para que agenden citas 24/7 desde Instagram, WhatsApp o Facebook.</Text>
-          <TouchableOpacity style={st.paywallBtn} onPress={() => router.push('/settings/subscription')}>
-            <Text style={st.paywallBtnText}>Ver Plan Básico</Text>
-            <MaterialIcons name="arrow-forward" size={18} color="#fff" />
-          </TouchableOpacity>
-        </View>
-      </SafeAreaView>
-    );
-  }
+  // ── PLAN BÁSICO/GRATUITO ──
+  // El link público ahora está disponible para Plan Básico también.
+  // El límite de 10 citas/mes ya está enforced server-side en la Edge Function
+  // create-booking-request, por lo que no hay riesgo de abuso.
+  // Mostramos un banner informativo con el contador X/10 cuando es Gratuito.
 
   const publicUrl = `${BASE_URL}/${slug}`;
   const hasLink = !!linkData;
@@ -193,6 +176,54 @@ export default function BookingLinkScreen() {
 
       <ScrollView contentContainerStyle={st.scroll} showsVerticalScrollIndicator={false}>
 
+        {/* Banner contador X/10 (solo Plan Básico/Gratuito) */}
+        {isGratuito && !usage.loading && (
+          <TouchableOpacity
+            style={[
+              st.usageBanner,
+              {
+                backgroundColor: usage.isAtLimit ? '#450A0A' : usage.isNearLimit ? '#451A03' : '#0F3D2E',
+                borderColor: usage.isAtLimit ? '#7F1D1D' : usage.isNearLimit ? '#78350F' : '#065F46',
+              },
+            ]}
+            onPress={() => router.push('/settings/subscription')}
+            activeOpacity={0.85}
+          >
+            <View style={st.usageHeader}>
+              <MaterialIcons
+                name={usage.isAtLimit ? 'block' : usage.isNearLimit ? 'warning' : 'event-available'}
+                size={20}
+                color={usage.isAtLimit ? '#EF4444' : usage.isNearLimit ? '#F59E0B' : '#10B981'}
+              />
+              <View style={{ flex: 1 }}>
+                <Text style={[
+                  st.usageTitle,
+                  { color: usage.isAtLimit ? '#EF4444' : usage.isNearLimit ? '#F59E0B' : '#10B981' },
+                ]}>
+                  {usage.isAtLimit
+                    ? `Límite alcanzado · ${usage.used}/${usage.limit} citas`
+                    : `${usage.used}/${usage.limit} citas usadas este mes`}
+                </Text>
+                <Text style={st.usageDesc}>
+                  {usage.isAtLimit
+                    ? 'Tu link no aceptará nuevas citas hasta el próximo mes. Toca para mejorar.'
+                    : 'Plan Básico — Toca para ver Premium con citas ilimitadas'}
+                </Text>
+              </View>
+              <MaterialIcons name="arrow-forward-ios" size={14} color={usage.isAtLimit ? '#EF4444' : usage.isNearLimit ? '#F59E0B' : '#10B981'} />
+            </View>
+            <View style={st.usageProgressBg}>
+              <View style={[
+                st.usageProgressFill,
+                {
+                  width: `${usage.percentage}%`,
+                  backgroundColor: usage.isAtLimit ? '#EF4444' : usage.isNearLimit ? '#F59E0B' : '#10B981',
+                },
+              ]} />
+            </View>
+          </TouchableOpacity>
+        )}
+
         {/* Hero card con link y acciones */}
         <View style={st.heroCard}>
           <View style={st.heroRow}>
@@ -209,7 +240,6 @@ export default function BookingLinkScreen() {
             </View>
           </View>
 
-          {/* FIX: Botón Copiar usa Clipboard — un tap y ya está en el portapapeles */}
           <View style={st.actionRow}>
             <TouchableOpacity
               style={[st.actionBtn, copied && st.actionBtnSuccess]}
@@ -231,7 +261,6 @@ export default function BookingLinkScreen() {
             </TouchableOpacity>
           </View>
 
-          {/* Hint de copiado */}
           {copied && (
             <View style={st.copiedHint}>
               <MaterialIcons name="check-circle" size={13} color="#10B981" />
@@ -356,6 +385,15 @@ const st = StyleSheet.create({
   saveHeaderBtn:    { minWidth: 80, alignItems: 'flex-end' },
   saveHeaderText:   { fontSize: 15, fontWeight: '700', color: '#10B981' },
   scroll:           { padding: 16, paddingBottom: 60, gap: 16 },
+
+  // Banner X/10 para Plan Básico
+  usageBanner:      { borderRadius: 14, padding: 14, borderWidth: 1 },
+  usageHeader:      { flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 12 },
+  usageTitle:       { fontSize: 13, fontWeight: '800', marginBottom: 2 },
+  usageDesc:        { fontSize: 11, color: '#94A3B8', lineHeight: 15 },
+  usageProgressBg:  { height: 6, backgroundColor: 'rgba(255,255,255,0.08)', borderRadius: 3, overflow: 'hidden' },
+  usageProgressFill: { height: '100%', borderRadius: 3 },
+
   heroCard:         { backgroundColor: '#1E293B', borderRadius: 18, padding: 16, borderWidth: 1, borderColor: '#334155' },
   heroRow:          { flexDirection: 'row', alignItems: 'center', gap: 12, marginBottom: 14 },
   heroIconWrap:     { width: 40, height: 40, borderRadius: 12, backgroundColor: '#0F3D2E', justifyContent: 'center', alignItems: 'center' },
@@ -408,10 +446,4 @@ const st = StyleSheet.create({
   tipText:          { fontSize: 13, color: '#64748B' },
   saveBtn:          { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, backgroundColor: '#10B981', borderRadius: 14, padding: 16 },
   saveBtnText:      { color: '#fff', fontWeight: '800', fontSize: 16 },
-  paywall:          { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 36, gap: 16 },
-  paywallIconWrap:  { width: 72, height: 72, borderRadius: 22, backgroundColor: '#0F3D2E', justifyContent: 'center', alignItems: 'center' },
-  paywallTitle:     { fontSize: 22, fontWeight: '800', color: '#F8FAFC', textAlign: 'center' },
-  paywallDesc:      { fontSize: 15, color: '#64748B', textAlign: 'center', lineHeight: 24 },
-  paywallBtn:       { flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: '#10B981', paddingHorizontal: 28, paddingVertical: 14, borderRadius: 14 },
-  paywallBtnText:   { color: '#fff', fontWeight: '700', fontSize: 15 },
 });
