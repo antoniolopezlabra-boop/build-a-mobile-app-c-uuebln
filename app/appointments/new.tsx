@@ -41,11 +41,8 @@ interface TimeSlot {
   available: boolean;
   endTime?: string;
   isOverlap?: boolean;
-  isBlocked?: boolean;       // Si el slot cae en un bloqueo de tiempo
-  blockedLabel?: string;     // Etiqueta del bloqueo (ej. "Comida")
-  // Razón por la que un slot inicial no es elegible para el servicio seleccionado.
-  // Solo se llena cuando la duración del servicio hace que el rango [t, t+dur]
-  // atraviese un conflicto (cita, bloqueo, fuera de horario).
+  isBlocked?: boolean;
+  blockedLabel?: string;
   unavailableReason?: 'block' | 'booked' | 'closed' | null;
 }
 
@@ -71,12 +68,14 @@ const { height: SCREEN_HEIGHT } = Dimensions.get('window');
 
 // Helper: minutos desde medianoche
 const timeToMin = (t: string): number => {
-  const [h, m] = t.split(':').map(Number);
-  return h * 60 + m;
+  if (!t || typeof t !== 'string') return 0;
+  const parts = t.split(':');
+  const h = parseInt(parts[0] || '0', 10);
+  const m = parseInt(parts[1] || '0', 10);
+  return (isNaN(h) ? 0 : h) * 60 + (isNaN(m) ? 0 : m);
 };
 
 // Helper: encuentra un bloqueo aplicable para el slot dado.
-// Convierte day_of_week JS (0=Dom..6=Sab) a convención del proyecto (0=Lun..6=Dom).
 function findBlockForSlot(
   slotStartMin: number,
   slotEndMin: number,
@@ -85,8 +84,12 @@ function findBlockForSlot(
   staffId: string | null,
   blocks: TimeBlockData[]
 ): TimeBlockData | null {
+  // Defensa: si no hay bloques, retornar null inmediatamente
+  if (!Array.isArray(blocks) || blocks.length === 0) return null;
+
   const projectDay = jsDay === 0 ? 6 : jsDay - 1; // 0=Lun..6=Dom
   for (const b of blocks) {
+    if (!b || typeof b !== 'object') continue; // defensa
     if (b.staff_id) {
       if (b.staff_id !== staffId) continue;
     }
@@ -102,12 +105,63 @@ function findBlockForSlot(
   return null;
 }
 
-export default function NewAppointmentScreen() {
+// ════════════════════════════════════════════════════════════════
+// ErrorBoundary local — captura cualquier error de render y muestra
+// un fallback amigable en lugar de dejar la pantalla en blanco.
+// CRÍTICO: sin este boundary, un error en un hook deja a Android
+// con pantalla totalmente blanca y JS muerto.
+// ════════════════════════════════════════════════════════════════
+class ScreenErrorBoundary extends React.Component<
+  { children: React.ReactNode; onBack: () => void },
+  { hasError: boolean; errorMsg: string }
+> {
+  constructor(props: any) {
+    super(props);
+    this.state = { hasError: false, errorMsg: '' };
+  }
+
+  static getDerivedStateFromError(error: any) {
+    return {
+      hasError: true,
+      errorMsg: error?.message || 'Ocurrió un error inesperado',
+    };
+  }
+
+  componentDidCatch(error: any, info: any) {
+    console.warn('[NewAppointment ErrorBoundary]', error, info);
+  }
+
+  render() {
+    if (this.state.hasError) {
+      return (
+        <SafeAreaView style={errorStyles.container} edges={['top']}>
+          <View style={errorStyles.content}>
+            <View style={errorStyles.iconWrap}>
+              <MaterialIcons name="error-outline" size={56} color="#EF4444" />
+            </View>
+            <Text style={errorStyles.title}>No pudimos cargar esta pantalla</Text>
+            <Text style={errorStyles.desc}>
+              Ocurrió un error al preparar el formulario de cita. Por favor intenta de nuevo.
+            </Text>
+            <Text style={errorStyles.errorMsg} numberOfLines={2}>{this.state.errorMsg}</Text>
+            <TouchableOpacity style={errorStyles.backBtn} onPress={this.props.onBack}>
+              <Text style={errorStyles.backBtnText}>Volver</Text>
+            </TouchableOpacity>
+          </View>
+        </SafeAreaView>
+      );
+    }
+    return this.props.children;
+  }
+}
+
+function NewAppointmentInner() {
   const router = useRouter();
   const { user } = useAuth();
   const { isGratuito } = usePlan();
   const usage = useGratuitoUsage();
   const [loading, setLoading] = useState(false);
+  const [initialLoading, setInitialLoading] = useState(true); // ← NUEVO: spinner inicial
   const saveLockRef = useRef(false);
 
   const [clients, setClients] = useState<Client[]>([]);
@@ -185,47 +239,81 @@ export default function NewAppointmentScreen() {
 
   const clearCatalogService = () => { setSelectedCatalogService(null); setService(''); setServiceCost(''); };
 
+  // ── Carga inicial: TODO con Promise.allSettled para que ningún fallo aislado
+  //    deje la pantalla colgada. Cada loader interno también tiene try/catch.
   useEffect(() => {
-    loadClients();
-    loadOverlapConfig();
-    loadCatalogServices();
-    loadStaffMembers();
-    loadTimeBlocks();
+    let mounted = true;
+    const loadAll = async () => {
+      try {
+        await Promise.allSettled([
+          loadClients(),
+          loadOverlapConfig(),
+          loadCatalogServices(),
+          loadStaffMembers(),
+          loadTimeBlocks(),
+        ]);
+      } catch (e) {
+        console.warn('[new-appointment] loadAll error:', e);
+      } finally {
+        if (mounted) setInitialLoading(false);
+      }
+    };
+    loadAll();
+    return () => { mounted = false; };
   }, []);
 
-  // IMPORTANTE: recalcular disponibilidad cuando cambia el servicio (porque la duración
-  // cambia el rango requerido), la fecha, el colaborador o los bloqueos cargados.
-  useEffect(() => { checkAvailability(); }, [date, selectedStaff, timeBlocks, selectedCatalogService]);
+  // Recalcular disponibilidad cuando cambia el servicio, fecha, colaborador o bloqueos
+  useEffect(() => {
+    if (initialLoading) return; // no calcular hasta que la carga inicial termine
+    checkAvailability();
+  }, [date, selectedStaff, timeBlocks, selectedCatalogService, initialLoading]);
 
   const loadCatalogServices = async () => {
-    try { const data = await apiGet<CatalogService[]>('/api/services'); setCatalogServices(data); } catch {}
+    try {
+      const data = await apiGet<CatalogService[]>('/api/services');
+      setCatalogServices(Array.isArray(data) ? data : []);
+    } catch (e) {
+      console.warn('[new-appointment] loadCatalogServices error:', e);
+      setCatalogServices([]);
+    }
   };
 
   const loadOverlapConfig = async () => {
     try {
       const { getCurrentUserId } = await import('@/utils/api');
       const userId = await getCurrentUserId();
-      const { data } = await supabase.from('business_profiles').select('allow_overlapping').eq('user_id', userId).single();
-      if (data) setAllowOverlapping(data.allow_overlapping || false);
-    } catch {}
+      if (!userId) return;
+      const { data } = await supabase
+        .from('business_profiles')
+        .select('allow_overlapping')
+        .eq('user_id', userId)
+        .maybeSingle(); // ← maybeSingle en vez de single para no tronar si no existe
+      if (data) setAllowOverlapping(!!data.allow_overlapping);
+    } catch (e) {
+      console.warn('[new-appointment] loadOverlapConfig error:', e);
+    }
   };
 
   const loadStaffMembers = async () => {
     try {
+      if (!user?.id) { setStaffMembers([]); return; }
       const { data } = await supabase
         .from('staff_members')
         .select('id, name, role, color')
-        .eq('user_id', user?.id)
+        .eq('user_id', user.id)
         .eq('is_active', true)
         .order('sort_order');
-      setStaffMembers(data || []);
-    } catch {}
+      setStaffMembers(Array.isArray(data) ? data : []);
+    } catch (e) {
+      console.warn('[new-appointment] loadStaffMembers error:', e);
+      setStaffMembers([]);
+    }
   };
 
   const loadTimeBlocks = async () => {
     try {
       const data = await apiGet<TimeBlockData[]>('/api/time-blocks');
-      setTimeBlocks(data || []);
+      setTimeBlocks(Array.isArray(data) ? data : []);
     } catch (e) {
       console.warn('[new-appointment] loadTimeBlocks error:', e);
       setTimeBlocks([]);
@@ -233,30 +321,49 @@ export default function NewAppointmentScreen() {
   };
 
   const loadClients = async () => {
-    try { const data = await apiGet<Client[]>('/api/clients'); setClients(data); }
-    catch { setErrorModal({ visible: true, message: 'Error al cargar los clientes' }); }
+    try {
+      const data = await apiGet<Client[]>('/api/clients');
+      setClients(Array.isArray(data) ? data : []);
+    } catch (e) {
+      console.warn('[new-appointment] loadClients error:', e);
+      setClients([]);
+      // No mostramos modal en carga inicial — sólo loggeamos.
+      // Si fallara mostrar modal aquí dejaría la pantalla con un modal arriba
+      // antes de que termine de renderizarse, lo cual es mala UX.
+    }
   };
 
   const checkAvailability = async () => {
     try {
       const dateString = `${date.getFullYear()}-${String(date.getMonth()+1).padStart(2,'0')}-${String(date.getDate()).padStart(2,'0')}`;
-      const [appointments, businessHours] = await Promise.all([
+
+      // Promise.allSettled para que un fallo en una API no bloquee la otra
+      const results = await Promise.allSettled([
         apiGet<any[]>(`/api/appointments/date/${dateString}`),
         apiGet<any[]>('/api/business-hours'),
       ]);
 
+      const appointments: any[] = results[0].status === 'fulfilled' && Array.isArray(results[0].value)
+        ? results[0].value : [];
+      const businessHours: any[] = results[1].status === 'fulfilled' && Array.isArray(results[1].value)
+        ? results[1].value : [];
+
       const dayOfWeek = date.getDay(); // JS: 0=Dom..6=Sab
 
       let dayConfig: any = null;
-      if (selectedStaff) {
-        const { data: sh } = await supabase
-          .from('staff_hours')
-          .select('*')
-          .eq('staff_id', selectedStaff.id)
-          .eq('day_of_week', dayOfWeek)
-          .single();
-        if (sh) {
-          dayConfig = { isOpen: sh.is_open, startTime: sh.start_time, endTime: sh.end_time };
+      if (selectedStaff?.id) {
+        try {
+          const { data: sh } = await supabase
+            .from('staff_hours')
+            .select('*')
+            .eq('staff_id', selectedStaff.id)
+            .eq('day_of_week', dayOfWeek)
+            .maybeSingle();
+          if (sh) {
+            dayConfig = { isOpen: sh.is_open, startTime: sh.start_time, endTime: sh.end_time };
+          }
+        } catch (e) {
+          console.warn('[new-appointment] staff_hours error:', e);
         }
       }
 
@@ -264,29 +371,45 @@ export default function NewAppointmentScreen() {
         const defaultHours = [0,1,2,3,4,5,6].map(d => ({
           dayOfWeek: d, isOpen: d >= 1 && d <= 5, startTime: '09:00', endTime: '18:00',
         }));
-        const hoursToUse = (businessHours as any[]).length > 0 ? businessHours as any[] : defaultHours;
-        const found = hoursToUse.find((d: any) => d.dayOfWeek === dayOfWeek);
+        const hoursToUse = businessHours.length > 0 ? businessHours : defaultHours;
+        const found = hoursToUse.find((d: any) => d && d.dayOfWeek === dayOfWeek);
         dayConfig = found ? { isOpen: found.isOpen, startTime: found.startTime, endTime: found.endTime } : null;
       }
 
       if (!dayConfig || !dayConfig.isOpen) { setDayIsClosed(true); setTimeSlots([]); return; }
+
+      // Defensa: si startTime/endTime vienen mal, abortar amigablemente
+      if (!dayConfig.startTime || !dayConfig.endTime ||
+          typeof dayConfig.startTime !== 'string' ||
+          typeof dayConfig.endTime !== 'string') {
+        console.warn('[new-appointment] dayConfig inválido:', dayConfig);
+        setDayIsClosed(true); setTimeSlots([]); return;
+      }
+
       setDayIsClosed(false);
       setSelectedBlocks([]);
 
-      const startHour = parseInt(dayConfig.startTime.split(':')[0]);
-      const startMin  = parseInt(dayConfig.startTime.split(':')[1]);
-      const endHour   = parseInt(dayConfig.endTime.split(':')[0]);
-      const endMin    = parseInt(dayConfig.endTime.split(':')[1]);
-      const dayStartMin = startHour * 60 + startMin;
-      const dayEndMin   = endHour * 60 + endMin;
+      const startParts = dayConfig.startTime.split(':');
+      const endParts   = dayConfig.endTime.split(':');
+      const startHour = parseInt(startParts[0] || '9', 10);
+      const startMin  = parseInt(startParts[1] || '0', 10);
+      const endHour   = parseInt(endParts[0] || '18', 10);
+      const endMin    = parseInt(endParts[1] || '0', 10);
+      const dayStartMin = (isNaN(startHour) ? 9 : startHour) * 60 + (isNaN(startMin) ? 0 : startMin);
+      const dayEndMin   = (isNaN(endHour) ? 18 : endHour) * 60 + (isNaN(endMin) ? 0 : endMin);
 
-      const allDateAppointments = appointments as any[];
+      // Defensa: si end <= start, no generar slots
+      if (dayEndMin <= dayStartMin) {
+        setDayIsClosed(true); setTimeSlots([]); return;
+      }
+
+      const allDateAppointments = appointments;
 
       let staffAppointments: any[]    = [];
       let generalAppointments: any[]  = [];
 
       if (selectedStaff) {
-        staffAppointments   = allDateAppointments.filter((a: any) => a.staff_id === selectedStaff.id);
+        staffAppointments   = allDateAppointments.filter((a: any) => a && a.staff_id === selectedStaff.id);
         generalAppointments = [];
       } else {
         staffAppointments   = [];
@@ -297,10 +420,7 @@ export default function NewAppointmentScreen() {
       const todayString = `${today.getFullYear()}-${String(today.getMonth()+1).padStart(2,'0')}-${String(today.getDate()).padStart(2,'0')}`;
       const isToday = dateString === todayString;
 
-      // ─────────────────────────────────────────────────────────────
-      // PASADA 1 — Construir slots base (estado "atómico" del slot de 30 min):
-      //            ¿Está bookeado? ¿Bloqueado por comida? ¿En el pasado?
-      // ─────────────────────────────────────────────────────────────
+      // ─── PASADA 1 — Slots base ───
       const slots: TimeSlot[] = [];
 
       for (let totalMin = dayStartMin; totalMin < dayEndMin; totalMin += 30) {
@@ -310,21 +430,30 @@ export default function NewAppointmentScreen() {
         const slotEndMin = totalMin + 30;
 
         const blockedByStaff = staffAppointments.some((appt: any) => {
-          const [sh2, sm2] = (appt.time || appt.startTime || '00:00').split(':').map(Number);
-          const [eh2, em2] = (appt.endTime || appt.end_time || '00:00').split(':').map(Number);
-          return totalMin >= sh2*60+sm2 && totalMin < eh2*60+em2;
+          if (!appt) return false;
+          const startStr = appt.time || appt.startTime || '00:00';
+          const endStr   = appt.endTime || appt.end_time || '00:00';
+          const aStart = timeToMin(startStr);
+          const aEnd   = timeToMin(endStr);
+          return totalMin >= aStart && totalMin < aEnd;
         });
 
         const blockedByGeneral = !allowOverlapping && generalAppointments.some((appt: any) => {
-          const [sh2, sm2] = (appt.time || appt.startTime || '00:00').split(':').map(Number);
-          const [eh2, em2] = (appt.endTime || appt.end_time || '00:00').split(':').map(Number);
-          return totalMin >= sh2*60+sm2 && totalMin < eh2*60+em2;
+          if (!appt) return false;
+          const startStr = appt.time || appt.startTime || '00:00';
+          const endStr   = appt.endTime || appt.end_time || '00:00';
+          const aStart = timeToMin(startStr);
+          const aEnd   = timeToMin(endStr);
+          return totalMin >= aStart && totalMin < aEnd;
         });
 
         const isOverlap = !selectedStaff && allowOverlapping && generalAppointments.some((appt: any) => {
-          const [sh2, sm2] = (appt.time || appt.startTime || '00:00').split(':').map(Number);
-          const [eh2, em2] = (appt.endTime || appt.end_time || '00:00').split(':').map(Number);
-          return totalMin >= sh2*60+sm2 && totalMin < eh2*60+em2;
+          if (!appt) return false;
+          const startStr = appt.time || appt.startTime || '00:00';
+          const endStr   = appt.endTime || appt.end_time || '00:00';
+          const aStart = timeToMin(startStr);
+          const aEnd   = timeToMin(endStr);
+          return totalMin >= aStart && totalMin < aEnd;
         });
 
         const isBooked = blockedByStaff || blockedByGeneral;
@@ -345,53 +474,30 @@ export default function NewAppointmentScreen() {
         });
       }
 
-      // ─────────────────────────────────────────────────────────────
-      // PASADA 2 — Validación por DURACIÓN DEL SERVICIO.
-      //
-      // Para cada slot que sería un INICIO válido, verificamos que el rango
-      // [t, t + duración] esté completamente libre (no toca citas, ni bloqueos,
-      // ni se sale del horario laboral).
-      //
-      // Si la duración del servicio es 30 min (1 sub-bloque), esta pasada
-      // es equivalente a la pasada 1 — no cambia nada.
-      //
-      // Si la duración es 90 min (3 sub-bloques) y el slot 13:30 está libre
-      // pero el 14:00 está bloqueado por comida, marcamos 13:30 como
-      // NO disponible con razón 'block'.
-      // ─────────────────────────────────────────────────────────────
+      // ─── PASADA 2 — Validación por DURACIÓN ───
       const durationMin = selectedCatalogService?.durationMinutes ?? 30;
       const subBlocksNeeded = Math.ceil(durationMin / 30);
 
       if (subBlocksNeeded > 1) {
         for (let i = 0; i < slots.length; i++) {
           const startSlot = slots[i];
-          // Si el slot ya está marcado como no disponible por su propia causa,
-          // no necesitamos hacer nada extra (mantiene su isBlocked / etc.).
           if (!startSlot.available && !startSlot.isOverlap) continue;
 
-          // Verificar el rango requerido por la duración del servicio.
-          // Cualquier sub-slot que falte, esté bookeado, o esté bloqueado → invalida el inicio.
           let rangeOK = true;
           let reason: 'block' | 'booked' | 'closed' | null = null;
 
           for (let j = 0; j < subBlocksNeeded; j++) {
             const subSlot = slots[i + j];
             if (!subSlot) {
-              // Se sale del horario laboral
               rangeOK = false;
               reason = 'closed';
               break;
             }
-            // Si el sub-slot está bloqueado por comida/descanso → todo el rango falla.
             if (subSlot.isBlocked) {
               rangeOK = false;
               reason = 'block';
               break;
             }
-            // Si NO permite empalme y el sub-slot está bookeado → falla.
-            // (Nota: si allowOverlapping=true sin staff, el slot está marcado como
-            //  isOverlap pero NO como bookeado en `available`, así pasa el rango;
-            //  el server validará el conflicto real al insertar.)
             if (!subSlot.available && !subSlot.isOverlap) {
               rangeOK = false;
               reason = subSlot.isBlocked ? 'block' : 'booked';
@@ -402,17 +508,16 @@ export default function NewAppointmentScreen() {
           if (!rangeOK) {
             slots[i].available = false;
             slots[i].unavailableReason = reason;
-            // Nota: NO sobrescribimos isBlocked/blockedLabel del slot inicial,
-            // porque visualmente queremos diferenciar:
-            //   - slot 13:30 no es comida (su isBlocked sigue false), pero
-            //     no se puede usar de inicio porque el rango invade comida.
           }
         }
       }
 
       setTimeSlots(slots);
-    } catch {
-      // Si falla, no bloquear la pantalla
+    } catch (e) {
+      // Defensa final: cualquier excepción no esperada NO debe colgar la pantalla.
+      console.warn('[new-appointment] checkAvailability error:', e);
+      setTimeSlots([]);
+      setDayIsClosed(false);
     }
   };
 
@@ -483,8 +588,26 @@ export default function NewAppointmentScreen() {
     ? 'No puedes crear más citas este mes. Toca para mejorar a Premium.'
     : 'Plan Básico — Mejora a Premium para citas ilimitadas';
 
-  // Si hay servicio del catálogo seleccionado, ¿hay slots inválidos por duración?
   const hasInvalidByDuration = !!selectedCatalogService && timeSlots.some(s => s.unavailableReason);
+
+  // ── Loading inicial: spinner con header (NO pantalla blanca) ──
+  if (initialLoading) {
+    return (
+      <SafeAreaView style={styles.container} edges={['top']}>
+        <View style={styles.header}>
+          <TouchableOpacity onPress={() => router.back()} style={styles.backButton}>
+            <IconSymbol android_material_icon_name="arrow-back" size={24} color={colors.text} />
+          </TouchableOpacity>
+          <Text style={styles.title}>Nueva Cita</Text>
+          <View style={styles.placeholder} />
+        </View>
+        <View style={styles.loadingWrap}>
+          <ActivityIndicator size="large" color={colors.primary} />
+          <Text style={styles.loadingText}>Preparando formulario...</Text>
+        </View>
+      </SafeAreaView>
+    );
+  }
 
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
@@ -646,9 +769,6 @@ export default function NewAppointmentScreen() {
                     const isSelected = selectedBlocks.includes(slot.time);
                     const isOverlap  = slot.isOverlap && !isSelected;
                     const isBlocked  = slot.isBlocked;
-                    // Slot inicial NO usable porque la duración del servicio
-                    // hace que el rango invada un conflicto. Visualmente
-                    // distinguimos esto del "bloqueado por comida":
                     const isInvalidByDuration = !!slot.unavailableReason && !isBlocked;
                     return (
                       <TouchableOpacity
@@ -709,7 +829,6 @@ export default function NewAppointmentScreen() {
                   })}
                 </ScrollView>
 
-                {/* Leyenda visual */}
                 {(timeSlots.some(s => s.isBlocked) || hasInvalidByDuration) && (
                   <View style={styles.legendCol}>
                     {timeSlots.some(s => s.isBlocked) && (
@@ -1034,8 +1153,22 @@ export default function NewAppointmentScreen() {
   );
 }
 
+// ── EXPORT con ErrorBoundary envolviendo el componente ──
+// Si algún hook o render falla, en lugar de pantalla blanca el usuario ve
+// un mensaje amigable y un botón para volver.
+export default function NewAppointmentScreen() {
+  const router = useRouter();
+  return (
+    <ScreenErrorBoundary onBack={() => router.back()}>
+      <NewAppointmentInner />
+    </ScreenErrorBoundary>
+  );
+}
+
 const styles = StyleSheet.create({
   container:              { flex: 1, backgroundColor: colors.background },
+  loadingWrap:            { flex: 1, justifyContent: 'center', alignItems: 'center', gap: 12, backgroundColor: colors.background },
+  loadingText:            { fontSize: 14, color: colors.textSecondary },
   header:                 { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 20, paddingVertical: 16, backgroundColor: '#ffffff', borderBottomWidth: 1, borderBottomColor: '#E5E7EB' },
   backButton:             { padding: 4 },
   title:                  { fontSize: 20, fontWeight: '600', color: colors.text },
@@ -1082,7 +1215,6 @@ const styles = StyleSheet.create({
   timeSlotSelected:       { backgroundColor: colors.primary, borderColor: colors.primary },
   timeSlotDisabled:       { backgroundColor: '#F3F4F6', borderColor: '#E5E7EB' },
   timeSlotBlocked:        { backgroundColor: '#FEF3C7', borderColor: '#FDE68A' },
-  // Slot inicial inválido por duración del servicio (rosa rojizo)
   timeSlotDurationInvalid: { backgroundColor: '#FEE2E2', borderColor: '#FCA5A5' },
   timeSlotText:           { fontSize: 14, fontWeight: '500', color: colors.text },
   timeSlotTextSelected:   { color: '#ffffff' },
@@ -1155,4 +1287,16 @@ const styles = StyleSheet.create({
   clientInfo:             { flex: 1 },
   clientName:             { fontSize: 16, fontWeight: '600', color: colors.text },
   clientPhone:            { fontSize: 14, color: colors.textSecondary, marginTop: 2 },
+});
+
+// Estilos del ErrorBoundary fallback
+const errorStyles = StyleSheet.create({
+  container:    { flex: 1, backgroundColor: colors.background },
+  content:      { flex: 1, justifyContent: 'center', alignItems: 'center', padding: 32, gap: 16 },
+  iconWrap:     { width: 96, height: 96, borderRadius: 48, backgroundColor: '#FEF2F2', justifyContent: 'center', alignItems: 'center', marginBottom: 8 },
+  title:        { fontSize: 20, fontWeight: '700', color: colors.text, textAlign: 'center' },
+  desc:         { fontSize: 14, color: colors.textSecondary, textAlign: 'center', lineHeight: 20 },
+  errorMsg:     { fontSize: 12, color: '#EF4444', fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace', textAlign: 'center', marginTop: 8, padding: 12, backgroundColor: '#FEF2F2', borderRadius: 8, alignSelf: 'stretch' },
+  backBtn:      { backgroundColor: colors.primary, paddingVertical: 14, paddingHorizontal: 32, borderRadius: 12, marginTop: 16 },
+  backBtnText:  { color: '#fff', fontSize: 15, fontWeight: '700' },
 });
