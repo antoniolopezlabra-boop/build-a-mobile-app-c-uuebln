@@ -1,7 +1,7 @@
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useRef } from 'react';
 import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity,
-  TextInput, Switch, ActivityIndicator, Share, Linking, Alert,
+  TextInput, Switch, ActivityIndicator, Share, Linking, Alert, Modal,
   Clipboard,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -12,6 +12,8 @@ import { useGratuitoUsage } from '@/contexts/useGratuitoUsage';
 import { useAuth } from '@/contexts/AuthContext';
 import { supabase } from '@/lib/supabase';
 import MaterialIcons from '@expo/vector-icons/MaterialIcons';
+import QRCode from 'react-native-qrcode-svg';
+import { generateAndShareQrPdf } from '@/utils/generateQrPdf';
 
 const BASE_URL = 'https://book.vylta.lat';
 
@@ -28,8 +30,12 @@ interface BookingRequest {
 export default function BookingLinkScreen() {
   const router = useRouter();
   const { user } = useAuth();
-  const { isGratuito } = usePlan();
+  const { isGratuito, isBasico, isPremium } = usePlan();
   const usage = useGratuitoUsage();
+
+  // QR feature gating: solo planes pagados (Basico=$399 / Premium=$799)
+  // que en UI son Plan Premium y Plan Luxury respectivamente
+  const canDownloadQr = isBasico || isPremium;
 
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -42,17 +48,36 @@ export default function BookingLinkScreen() {
   const [slugError, setSlugError] = useState('');
   const [requests, setRequests] = useState<BookingRequest[]>([]);
 
+  // QR modal state
+  const [qrModalVisible, setQrModalVisible] = useState(false);
+  const [upgradeModalVisible, setUpgradeModalVisible] = useState(false);
+  const [generatingPdf, setGeneratingPdf] = useState(false);
+  const [businessName, setBusinessName] = useState<string>('Mi Negocio');
+  const [logoUrl, setLogoUrl] = useState<string | null>(null);
+
+  const qrRef = useRef<any>(null);
+
   useFocusEffect(useCallback(() => { loadData(); }, []));
 
   const loadData = async () => {
     setLoading(true);
     try {
+      const { data: bp } = await supabase
+        .from('business_profiles')
+        .select('business_name, logo_url')
+        .eq('user_id', user?.id)
+        .maybeSingle();
+
+      if (bp) {
+        if (bp.business_name) setBusinessName(bp.business_name);
+        setLogoUrl(bp.logo_url || null);
+      }
+
       const { data } = await supabase.from('booking_links').select('*').eq('user_id', user?.id).maybeSingle();
       if (data) {
         setLinkData(data); setSlug(data.slug); setIsActive(data.is_active);
         setRequireApproval(data.require_approval); setWhatsappConfirm(data.whatsapp_confirmation);
       } else {
-        const { data: bp } = await supabase.from('business_profiles').select('business_name').eq('user_id', user?.id).maybeSingle();
         if (bp?.business_name) {
           const suggested = bp.business_name.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/[^a-z0-9]+/g,'-').replace(/^-|-$/g,'').slice(0,40);
           setSlug(suggested);
@@ -116,6 +141,84 @@ export default function BookingLinkScreen() {
     if (await Linking.canOpenURL(url)) Linking.openURL(url);
   };
 
+  // ──────── QR PDF Handlers ────────
+
+  const handleQrButtonPress = () => {
+    if (!linkData) {
+      Alert.alert(
+        'Primero activa tu link',
+        'Para generar tu código QR necesitas tener un link de citas activo. Guárdalo primero abajo.',
+      );
+      return;
+    }
+    if (!linkData.is_active) {
+      Alert.alert(
+        'Link desactivado',
+        'Tu link público está desactivado. Actívalo arriba para generar tu QR.',
+      );
+      return;
+    }
+
+    if (!canDownloadQr) {
+      setUpgradeModalVisible(true);
+      return;
+    }
+
+    setQrModalVisible(true);
+  };
+
+  const handleDownloadPdf = async () => {
+    if (generatingPdf) return;
+
+    if (!qrRef.current) {
+      Alert.alert('Error', 'No se pudo generar el código QR. Intenta de nuevo.');
+      return;
+    }
+
+    setGeneratingPdf(true);
+    try {
+      const qrSvgString = await new Promise<string>((resolve, reject) => {
+        try {
+          qrRef.current.toDataURL((dataURL: string) => {
+            if (!dataURL) {
+              reject(new Error('QR generation returned empty'));
+              return;
+            }
+            const svgWrapper = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 300 300" width="300" height="300"><image href="data:image/png;base64,${dataURL}" width="300" height="300"/></svg>`;
+            resolve(svgWrapper);
+          });
+        } catch (err) {
+          reject(err);
+        }
+      });
+
+      const result = await generateAndShareQrPdf(
+        {
+          businessName,
+          publicUrl: `${BASE_URL}/${slug}`,
+          logoUrl,
+        },
+        qrSvgString,
+      );
+
+      if (!result.ok) {
+        Alert.alert('No se pudo generar el PDF', result.error);
+      } else {
+        setQrModalVisible(false);
+      }
+    } catch (err: any) {
+      console.error('[BookingLink] PDF generation error:', err);
+      Alert.alert('Error', err?.message || 'No se pudo generar el PDF. Intenta de nuevo.');
+    } finally {
+      setGeneratingPdf(false);
+    }
+  };
+
+  const handleGoToUpgrade = () => {
+    setUpgradeModalVisible(false);
+    router.push('/settings/subscription');
+  };
+
   const handleApprove = async (id: string) => {
     await supabase.from('appointments').update({ status: 'Confirmada', updated_at: new Date().toISOString() }).eq('id', id);
     setRequests(prev => prev.filter(r => r.id !== id));
@@ -152,12 +255,6 @@ export default function BookingLinkScreen() {
     );
   }
 
-  // ── PLAN BÁSICO/GRATUITO ──
-  // El link público ahora está disponible para Plan Básico también.
-  // El límite de 10 citas/mes ya está enforced server-side en la Edge Function
-  // create-booking-request, por lo que no hay riesgo de abuso.
-  // Mostramos un banner informativo con el contador X/10 cuando es Gratuito.
-
   const publicUrl = `${BASE_URL}/${slug}`;
   const hasLink = !!linkData;
 
@@ -176,7 +273,6 @@ export default function BookingLinkScreen() {
 
       <ScrollView contentContainerStyle={st.scroll} showsVerticalScrollIndicator={false}>
 
-        {/* Banner contador X/10 (solo Plan Básico/Gratuito) */}
         {isGratuito && !usage.loading && (
           <TouchableOpacity
             style={[
@@ -224,7 +320,6 @@ export default function BookingLinkScreen() {
           </TouchableOpacity>
         )}
 
-        {/* Hero card con link y acciones */}
         <View style={st.heroCard}>
           <View style={st.heroRow}>
             <View style={st.heroIconWrap}>
@@ -269,7 +364,35 @@ export default function BookingLinkScreen() {
           )}
         </View>
 
-        {/* Solicitudes pendientes */}
+        <TouchableOpacity
+          style={st.qrCard}
+          onPress={handleQrButtonPress}
+          activeOpacity={0.85}
+        >
+          <View style={st.qrCardLeft}>
+            <View style={st.qrIconWrap}>
+              <MaterialIcons name="qr-code-2" size={26} color="#10B981" />
+            </View>
+            <View style={{ flex: 1 }}>
+              <View style={st.qrTitleRow}>
+                <Text style={st.qrTitle}>Código QR para imprimir</Text>
+                {!canDownloadQr && (
+                  <View style={st.proPill}>
+                    <MaterialIcons name="star" size={9} color="#FBBF24" />
+                    <Text style={st.proPillText}>PREMIUM</Text>
+                  </View>
+                )}
+              </View>
+              <Text style={st.qrSub}>
+                {canDownloadQr
+                  ? 'Imprime y pega en tu local — tus clientas escanean y agendan al instante'
+                  : 'Descarga un QR profesional con tu logo para pegar en tu local'}
+              </Text>
+            </View>
+          </View>
+          <MaterialIcons name="arrow-forward-ios" size={14} color="#475569" />
+        </TouchableOpacity>
+
         {requests.length > 0 && (
           <View style={st.section}>
             <View style={st.sectionTitleRow}>
@@ -299,7 +422,6 @@ export default function BookingLinkScreen() {
           </View>
         )}
 
-        {/* Configuración */}
         <View style={st.section}>
           <Text style={st.sectionTitle}>Configuración</Text>
           <View style={st.configCard}>
@@ -347,7 +469,6 @@ export default function BookingLinkScreen() {
           </View>
         </View>
 
-        {/* Dónde compartir */}
         <View style={st.tipsCard}>
           <View style={st.tipsHeader}>
             <MaterialIcons name="lightbulb-outline" size={16} color="#F59E0B" />
@@ -371,6 +492,119 @@ export default function BookingLinkScreen() {
         </TouchableOpacity>
 
       </ScrollView>
+
+      <Modal
+        visible={qrModalVisible}
+        transparent
+        animationType="fade"
+        onRequestClose={() => !generatingPdf && setQrModalVisible(false)}
+      >
+        <View style={st.modalBackdrop}>
+          <View style={st.qrModalCard}>
+            <View style={st.modalHeader}>
+              <Text style={st.modalTitle}>Tu código QR</Text>
+              <TouchableOpacity
+                onPress={() => !generatingPdf && setQrModalVisible(false)}
+                disabled={generatingPdf}
+                hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+              >
+                <MaterialIcons name="close" size={22} color="#94A3B8" />
+              </TouchableOpacity>
+            </View>
+
+            <Text style={st.modalBusinessName}>{businessName}</Text>
+            <Text style={st.modalUrl}>{`${BASE_URL}/${slug}`}</Text>
+
+            <View style={st.qrPreviewWrap}>
+              <QRCode
+                value={`${BASE_URL}/${slug}`}
+                size={200}
+                color="#0F172A"
+                backgroundColor="#FFFFFF"
+                ecl="H"
+                getRef={(r) => { qrRef.current = r; }}
+              />
+            </View>
+
+            <View style={st.qrInfoBox}>
+              <MaterialIcons name="info-outline" size={14} color="#64748B" />
+              <Text style={st.qrInfoText}>
+                El PDF tendrá tamaño carta, listo para imprimir.
+                {logoUrl ? ' Tu logo aparecerá en el centro.' : ''}
+              </Text>
+            </View>
+
+            <TouchableOpacity
+              style={[st.downloadBtn, generatingPdf && { opacity: 0.7 }]}
+              onPress={handleDownloadPdf}
+              disabled={generatingPdf}
+              activeOpacity={0.85}
+            >
+              {generatingPdf ? (
+                <>
+                  <ActivityIndicator size="small" color="#fff" />
+                  <Text style={st.downloadBtnText}>Generando PDF...</Text>
+                </>
+              ) : (
+                <>
+                  <MaterialIcons name="file-download" size={18} color="#fff" />
+                  <Text style={st.downloadBtnText}>Descargar PDF</Text>
+                </>
+              )}
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
+
+      <Modal
+        visible={upgradeModalVisible}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setUpgradeModalVisible(false)}
+      >
+        <View style={st.modalBackdrop}>
+          <View style={st.upgradeModalCard}>
+            <View style={st.upgradeIconWrap}>
+              <MaterialIcons name="qr-code-2" size={40} color="#10B981" />
+            </View>
+
+            <Text style={st.upgradeTitle}>Disponible en Premium y Luxury</Text>
+            <Text style={st.upgradeDesc}>
+              Genera un código QR profesional con tu logo para imprimir y pegar en tu local. Tus clientas escanearán y agendarán al instante.
+            </Text>
+
+            <View style={st.upgradeBenefits}>
+              {[
+                'Código QR de alta calidad listo para imprimir',
+                'Tu logo del negocio embebido en el centro',
+                'PDF profesional tamaño carta',
+                'Tus clientas agendan sin escribir nada',
+              ].map((benefit) => (
+                <View key={benefit} style={st.upgradeBenefitRow}>
+                  <MaterialIcons name="check-circle" size={16} color="#10B981" />
+                  <Text style={st.upgradeBenefitText}>{benefit}</Text>
+                </View>
+              ))}
+            </View>
+
+            <TouchableOpacity
+              style={st.upgradePrimaryBtn}
+              onPress={handleGoToUpgrade}
+              activeOpacity={0.85}
+            >
+              <Text style={st.upgradePrimaryBtnText}>Ver planes Premium y Luxury</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={st.upgradeSecondaryBtn}
+              onPress={() => setUpgradeModalVisible(false)}
+              activeOpacity={0.7}
+            >
+              <Text style={st.upgradeSecondaryBtnText}>Tal vez después</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -385,15 +619,12 @@ const st = StyleSheet.create({
   saveHeaderBtn:    { minWidth: 80, alignItems: 'flex-end' },
   saveHeaderText:   { fontSize: 15, fontWeight: '700', color: '#10B981' },
   scroll:           { padding: 16, paddingBottom: 60, gap: 16 },
-
-  // Banner X/10 para Plan Básico
   usageBanner:      { borderRadius: 14, padding: 14, borderWidth: 1 },
   usageHeader:      { flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 12 },
   usageTitle:       { fontSize: 13, fontWeight: '800', marginBottom: 2 },
   usageDesc:        { fontSize: 11, color: '#94A3B8', lineHeight: 15 },
   usageProgressBg:  { height: 6, backgroundColor: 'rgba(255,255,255,0.08)', borderRadius: 3, overflow: 'hidden' },
   usageProgressFill: { height: '100%', borderRadius: 3 },
-
   heroCard:         { backgroundColor: '#1E293B', borderRadius: 18, padding: 16, borderWidth: 1, borderColor: '#334155' },
   heroRow:          { flexDirection: 'row', alignItems: 'center', gap: 12, marginBottom: 14 },
   heroIconWrap:     { width: 40, height: 40, borderRadius: 12, backgroundColor: '#0F3D2E', justifyContent: 'center', alignItems: 'center' },
@@ -446,4 +677,34 @@ const st = StyleSheet.create({
   tipText:          { fontSize: 13, color: '#64748B' },
   saveBtn:          { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, backgroundColor: '#10B981', borderRadius: 14, padding: 16 },
   saveBtnText:      { color: '#fff', fontWeight: '800', fontSize: 16 },
+  qrCard:           { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', backgroundColor: '#1E293B', borderRadius: 14, padding: 14, borderWidth: 1, borderColor: '#334155' },
+  qrCardLeft:       { flexDirection: 'row', alignItems: 'center', flex: 1, gap: 12 },
+  qrIconWrap:       { width: 44, height: 44, borderRadius: 12, backgroundColor: '#022C22', justifyContent: 'center', alignItems: 'center', borderWidth: 1, borderColor: '#065F46' },
+  qrTitleRow:       { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 3 },
+  qrTitle:          { fontSize: 14, fontWeight: '700', color: '#F8FAFC' },
+  qrSub:            { fontSize: 12, color: '#64748B', lineHeight: 16 },
+  proPill:          { flexDirection: 'row', alignItems: 'center', gap: 3, backgroundColor: '#451A03', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 6, borderWidth: 0.5, borderColor: '#78350F' },
+  proPillText:      { fontSize: 9, fontWeight: '800', color: '#FBBF24', letterSpacing: 0.5 },
+  modalBackdrop:    { flex: 1, backgroundColor: 'rgba(0,0,0,0.7)', justifyContent: 'center', alignItems: 'center', padding: 20 },
+  modalHeader:      { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 },
+  modalTitle:       { fontSize: 18, fontWeight: '800', color: '#F8FAFC' },
+  qrModalCard:      { backgroundColor: '#1E293B', borderRadius: 20, padding: 22, width: '100%', maxWidth: 360, borderWidth: 1, borderColor: '#334155' },
+  modalBusinessName: { fontSize: 17, fontWeight: '700', color: '#F8FAFC', textAlign: 'center', marginBottom: 4 },
+  modalUrl:         { fontSize: 11, color: '#10B981', fontFamily: 'monospace', textAlign: 'center', marginBottom: 18 },
+  qrPreviewWrap:    { backgroundColor: '#FFFFFF', padding: 16, borderRadius: 12, alignSelf: 'center', marginBottom: 16 },
+  qrInfoBox:        { flexDirection: 'row', alignItems: 'flex-start', gap: 8, backgroundColor: '#0F172A', borderRadius: 10, padding: 10, marginBottom: 16, borderWidth: 0.5, borderColor: '#334155' },
+  qrInfoText:       { flex: 1, fontSize: 11, color: '#94A3B8', lineHeight: 15 },
+  downloadBtn:      { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, backgroundColor: '#10B981', borderRadius: 12, padding: 14 },
+  downloadBtnText:  { color: '#fff', fontWeight: '700', fontSize: 15 },
+  upgradeModalCard: { backgroundColor: '#1E293B', borderRadius: 20, padding: 28, width: '100%', maxWidth: 360, borderWidth: 1, borderColor: '#334155', alignItems: 'center' },
+  upgradeIconWrap:  { width: 80, height: 80, borderRadius: 24, backgroundColor: '#022C22', justifyContent: 'center', alignItems: 'center', marginBottom: 20, borderWidth: 1, borderColor: '#065F46' },
+  upgradeTitle:     { fontSize: 20, fontWeight: '800', color: '#F8FAFC', textAlign: 'center', marginBottom: 10 },
+  upgradeDesc:      { fontSize: 14, color: '#94A3B8', textAlign: 'center', lineHeight: 21, marginBottom: 22 },
+  upgradeBenefits:  { width: '100%', gap: 10, marginBottom: 24 },
+  upgradeBenefitRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  upgradeBenefitText: { flex: 1, fontSize: 13, color: '#CBD5E1', lineHeight: 19 },
+  upgradePrimaryBtn: { width: '100%', backgroundColor: '#10B981', borderRadius: 12, padding: 14, alignItems: 'center', marginBottom: 8 },
+  upgradePrimaryBtnText: { color: '#fff', fontWeight: '800', fontSize: 15 },
+  upgradeSecondaryBtn: { padding: 10 },
+  upgradeSecondaryBtnText: { color: '#94A3B8', fontSize: 14, fontWeight: '500' },
 });
