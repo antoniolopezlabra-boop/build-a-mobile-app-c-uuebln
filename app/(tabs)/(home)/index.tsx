@@ -39,7 +39,6 @@ interface UnpaidAppointment {
   client: { name: string } | null; client_name_temp: string | null;
   staff: { name: string; color: string } | null;
 }
-interface WhatsAppConfig { isConnected: boolean; phoneNumber?: string; }
 
 export default function HomeScreen() {
   const router   = useRouter();
@@ -58,7 +57,6 @@ export default function HomeScreen() {
   });
   const [todayAppointments, setTodayAppointments] = useState<TodayAppointment[]>([]);
   const [weekAppointments,  setWeekAppointments]  = useState<TodayAppointment[]>([]);
-  const [waConnected,       setWaConnected]       = useState(false);
   const [staffMembers,      setStaffMembers]      = useState<StaffMember[]>([]);
   const [selectedStaffId,   setSelectedStaffId]   = useState<string | null>(null);
   const [unpaidAppointments, setUnpaidAppointments] = useState<UnpaidAppointment[]>([]);
@@ -108,11 +106,9 @@ export default function HomeScreen() {
       const cachedStats = getCached<DashboardStats>('dashboard_stats');
       const cachedApts  = getCached<TodayAppointment[]>('today_appointments');
       const cachedWeek  = getCached<TodayAppointment[]>('week_appointments');
-      const cachedWa    = getCached<WhatsAppConfig>('settings_whatsapp');
       if (!forceRefresh && cachedStats && cachedApts) {
         setStats(cachedStats); setTodayAppointments(cachedApts);
         if (cachedWeek) setWeekAppointments(cachedWeek);
-        if (cachedWa)   setWaConnected(cachedWa.isConnected || false);
         setLoading(false); loadStaffMembers(userId); return;
       }
       if (isPullRefresh) setRefreshing(true); else setLoading(true);
@@ -120,12 +116,10 @@ export default function HomeScreen() {
         apiGet<DashboardStats>('/api/stats/dashboard'),
         apiGet<TodayAppointment[]>('/api/appointments/today'),
         apiGet<TodayAppointment[]>('/api/appointments/week'),
-        apiGet<WhatsAppConfig>('/api/whatsapp-config'),
       ]);
       if (results[0].status === 'fulfilled') { setStats(results[0].value); setCached('dashboard_stats', results[0].value, CACHE_TTL.DASHBOARD); }
       if (results[1].status === 'fulfilled') { setTodayAppointments(results[1].value); setCached('today_appointments', results[1].value, CACHE_TTL.APPOINTMENTS); }
       if (results[2].status === 'fulfilled') { setWeekAppointments(results[2].value); setCached('week_appointments', results[2].value, CACHE_TTL.APPOINTMENTS); }
-      if (results[3].status === 'fulfilled') { const wa = results[3].value; setWaConnected(wa?.isConnected || false); setCached('settings_whatsapp', wa, CACHE_TTL.SETTINGS); }
       await loadStaffMembers(userId);
     } catch {} finally {
       setLoading(false); setRefreshing(false); loadingRef.current = false;
@@ -512,24 +506,6 @@ export default function HomeScreen() {
           ))}
         </View>
 
-        {/* BANNER WHATSAPP */}
-        {(isBasico || isPremium) && !waConnected && (
-          <TouchableOpacity
-            style={[s.waBanner, { backgroundColor: tc.surface, borderColor: '#16683466' }]}
-            onPress={() => router.push('/settings/whatsapp')}
-            activeOpacity={0.8}
-          >
-            <View style={[s.waIconBox, { backgroundColor: '#052E16' }]}>
-              <MaterialIcons name="chat" size={20} color="#25D366" />
-            </View>
-            <View style={{ flex: 1 }}>
-              <Text style={[s.waTitle, { color: tc.text }]}>Conecta WhatsApp</Text>
-              <Text style={[s.waDesc, { color: tc.textMuted }]}>Activa recordatorios automaticos para tus clientes</Text>
-            </View>
-            <MaterialIcons name="arrow-forward-ios" size={13} color="#25D366" />
-          </TouchableOpacity>
-        )}
-
       </ScrollView>
     </SafeAreaView>
   );
@@ -611,8 +587,4 @@ const s = StyleSheet.create({
   qaBtn:           { width: '48%', borderRadius: 16, padding: 14, marginBottom: 10, borderWidth: 1, flexDirection: 'row', alignItems: 'center', gap: 10 },
   qaIconWrap:      { width: 38, height: 38, borderRadius: 11, justifyContent: 'center', alignItems: 'center' },
   qaLabel:         { fontSize: 12, fontWeight: '600', flex: 1 },
-  waBanner:        { borderRadius: 16, padding: 14, flexDirection: 'row', alignItems: 'center', gap: 12, borderWidth: 1 },
-  waIconBox:       { width: 40, height: 40, borderRadius: 12, justifyContent: 'center', alignItems: 'center' },
-  waTitle:         { fontSize: 14, fontWeight: '700', marginBottom: 2 },
-  waDesc:          { fontSize: 11 },
 });
