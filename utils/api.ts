@@ -493,7 +493,7 @@ export async function apiPost<T>(path: string, body: any): Promise<T> {
       status: requestedOverlap ? 'En espera' : 'Pendiente',
       notes: body.notes || null,
       service_cost: body.service_cost || 0,
-      whatsapp_notification: body.sendWhatsApp || false,
+      whatsapp_notification: body.sendWhatsApp ?? true,
       staff_id: body.staff_id || null,
     }).select().single();
     if (error) throw error;
