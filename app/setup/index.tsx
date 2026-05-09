@@ -17,6 +17,8 @@ import {
   isCustomBusinessType,
   validateCustomBusinessType,
 } from '@/constants/businessTypes';
+import { generateSlug, ensureUniqueSlug } from '@/utils/slugGenerator';
+import { logger } from '@/utils/logger';
 
 // ═════════════════════════════════════════════════════════════════
 // SETUP WIZARD — Onboarding post-registro
@@ -167,6 +169,40 @@ export default function SetupWizard() {
         phone: phone.trim() || null,
         updated_at: new Date().toISOString(),
       }, { onConflict: 'user_id' });
+
+      // ─────────────────────────────────────────────────────────────────
+      // AUTO-CREACIÓN DEL BOOKING_LINK (May 2026):
+      // Genera el link público automáticamente para que el flujo de
+      // [Reagendar] desde WhatsApp siempre tenga un slug válido al cual
+      // dirigir al cliente. El usuario no necesita configurar nada más.
+      //
+      // Si falla la creación, NO bloqueamos el wizard — el usuario puede
+      // crear el link manualmente desde Ajustes después. Solo loggeamos.
+      // ─────────────────────────────────────────────────────────────────
+      try {
+        const { data: existing } = await supabase
+          .from('booking_links')
+          .select('id')
+          .eq('user_id', user.id)
+          .maybeSingle();
+
+        if (!existing) {
+          const baseSlug = generateSlug(businessName.trim());
+          const finalSlug = await ensureUniqueSlug(baseSlug, supabase);
+          await supabase.from('booking_links').insert({
+            user_id: user.id,
+            slug: finalSlug,
+            is_active: true,
+            require_approval: false,
+            whatsapp_confirmation: true,
+          });
+          logger.log('[Setup] booking_link auto-creado:', finalSlug);
+        }
+      } catch (linkErr: any) {
+        logger.warn('[Setup] No se pudo auto-crear el booking_link:', linkErr?.message);
+        // No bloqueamos el wizard — el negocio sí se guardó correctamente
+      }
+
       if (refreshBusinessProfile) await refreshBusinessProfile();
       animateStepChange(1);
     } catch (err: any) {
