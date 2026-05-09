@@ -1,13 +1,13 @@
 import React, { useState, useEffect } from 'react';
 import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity,
-  ActivityIndicator, Switch,
+  ActivityIndicator,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { colors } from '@/styles/commonStyles';
 import { ConfirmModal } from '@/components/button';
-import { apiGet, apiPut } from '@/utils/api';
+import { apiGet } from '@/utils/api';
 import { usePlan } from '@/contexts/PlanContext';
 import { useTheme } from '@/contexts/ThemeContext';
 import MaterialIcons from '@expo/vector-icons/MaterialIcons';
@@ -51,9 +51,7 @@ const wb = StyleSheet.create({
 // ─── Pantalla ACTIVA (todos los planes) ──────────────────────────────────────
 // WhatsApp está incluido en todos los planes (Básico, Premium, Luxury).
 // Los mensajes salen desde el número compartido VYLTA verificado por Meta.
-function ActiveScreen({ config, onToggle, isGratuito }: {
-  config: WhatsAppConfig;
-  onToggle: (field: keyof WhatsAppConfig, value: boolean) => void;
+function ActiveScreen({ isGratuito }: {
   isGratuito: boolean;
 }) {
   return (
@@ -122,40 +120,14 @@ function ActiveScreen({ config, onToggle, isGratuito }: {
         </View>
       )}
 
-      {/* Toggles */}
-      <Text style={s.sectionLabel}>ACTIVAR / DESACTIVAR MENSAJES</Text>
-      <View style={s.togglesCard}>
-        {[
-          { field: 'confirmationOnBooking' as const, icon: 'check-circle', color: '#10B981', bg: '#ECFDF5', title: 'Confirmación al agendar', desc: 'Mensaje inmediato cuando registras una cita' },
-          { field: 'reminder24h'           as const, icon: 'schedule',     color: '#3B82F6', bg: '#EFF6FF', title: 'Recordatorio 24h antes',  desc: 'Un día antes de la cita' },
-          { field: 'reminder2h'            as const, icon: 'alarm',        color: '#F59E0B', bg: '#FFFBEB', title: 'Recordatorio 2h antes',   desc: 'El mismo día, 2 horas antes' },
-        ].map((item, i, arr) => (
-          <View key={item.field}>
-            <View style={s.toggleRow}>
-              <View style={[s.toggleIcon, { backgroundColor: item.bg }]}>
-                <MaterialIcons name={item.icon as any} size={20} color={item.color} />
-              </View>
-              <View style={s.toggleInfo}>
-                <Text style={s.toggleTitle}>{item.title}</Text>
-                <Text style={s.toggleDesc}>{item.desc}</Text>
-              </View>
-              <Switch
-                value={config[item.field] as boolean}
-                onValueChange={v => onToggle(item.field, v)}
-                trackColor={{ false: '#E2E8F0', true: item.color }}
-                thumbColor="#fff"
-              />
-            </View>
-            {i < arr.length - 1 && <View style={s.toggleDivider} />}
-          </View>
-        ))}
-      </View>
-
-      {/* Estado pendiente de activación WhatsApp */}
-      <View style={s.pendingBox}>
-        <Text style={s.pendingTitle}>⏳ Activación en progreso</Text>
-        <Text style={s.pendingDesc}>
-          Los mensajes automáticos se activarán en cuanto VYLTA complete el registro del número con Meta (WhatsApp). Mientras tanto puedes registrar clientes y citas con normalidad.
+      {/* Estado: Sistema Activo */}
+      <View style={s.systemActiveBox}>
+        <View style={s.systemActiveTop}>
+          <MaterialIcons name="verified" size={22} color="#10B981" />
+          <Text style={s.systemActiveTitle}>Sistema activo</Text>
+        </View>
+        <Text style={s.systemActiveDesc}>
+          Tus clientes reciben mensajes automáticos desde el número oficial de VYLTA verificado por Meta. No necesitas configurar nada.
         </Text>
       </View>
 
@@ -170,32 +142,12 @@ export default function WhatsAppSettingsScreen() {
   const { isGratuito } = usePlan();
   const { colors: tc } = useTheme();
   const [loading, setLoading] = useState(true);
-  const [config, setConfig] = useState<WhatsAppConfig>({
-    isConnected: false, reminder24h: true, reminder2h: true,
-    confirmationOnBooking: true, waitlistNotification: false,
-  });
   const [errorModal, setErrorModal] = useState({ visible: false, message: '' });
 
-  useEffect(() => { loadConfig(); }, []);
-
-  const loadConfig = async () => {
-    setLoading(true);
-    try {
-      const data = await apiGet<WhatsAppConfig | null>('/api/whatsapp-config');
-      if (data) setConfig(data);
-    } catch { /* usar defaults */ } finally { setLoading(false); }
-  };
-
-  const handleToggle = async (field: keyof WhatsAppConfig, value: boolean) => {
-    const prev = config;
-    setConfig(c => ({ ...c, [field]: value }));
-    try {
-      await apiPut('/api/whatsapp-config', { ...config, [field]: value });
-    } catch {
-      setConfig(prev);
-      setErrorModal({ visible: true, message: 'Error al guardar la configuración' });
-    }
-  };
+  useEffect(() => {
+    // Carga rápida — la pantalla es informativa, no requiere config del backend
+    setLoading(false);
+  }, []);
 
   if (loading) {
     return (
@@ -227,9 +179,9 @@ export default function WhatsAppSettingsScreen() {
         <View style={{ width: 32 }} />
       </View>
 
-      {/* Todos los planes tienen acceso a la pantalla con toggles.
+      {/* Todos los planes tienen acceso a la pantalla informativa.
           isGratuito se pasa solo para mostrar el aviso del límite de 10 citas/mes. */}
-      <ActiveScreen config={config} onToggle={handleToggle} isGratuito={isGratuito} />
+      <ActiveScreen isGratuito={isGratuito} />
     </SafeAreaView>
   );
 }
@@ -271,15 +223,9 @@ const s = StyleSheet.create({
   limitNoteBox:     { flexDirection: 'row', gap: 10, backgroundColor: '#E0F2FE', borderRadius: 12, padding: 12, borderWidth: 0.5, borderColor: '#7DD3FC', marginTop: 10 },
   limitNoteText:    { flex: 1, fontSize: 12, color: '#0369A1', lineHeight: 18 },
 
-  togglesCard:      { backgroundColor: '#fff', borderRadius: 16, overflow: 'hidden', shadowColor: '#000', shadowOpacity: 0.04, shadowRadius: 6, elevation: 1, marginBottom: 4 },
-  toggleRow:        { flexDirection: 'row', alignItems: 'center', padding: 16, gap: 14 },
-  toggleIcon:       { width: 38, height: 38, borderRadius: 10, justifyContent: 'center', alignItems: 'center' },
-  toggleInfo:       { flex: 1 },
-  toggleTitle:      { fontSize: 14, fontWeight: '600', color: '#0F172A' },
-  toggleDesc:       { fontSize: 12, color: '#94A3B8', marginTop: 2 },
-  toggleDivider:    { height: 0.5, backgroundColor: '#F1F5F9', marginLeft: 68 },
-
-  pendingBox:       { backgroundColor: '#FFFBEB', borderRadius: 14, padding: 16, borderWidth: 0.5, borderColor: '#FDE68A', marginBottom: 12 },
-  pendingTitle:     { fontSize: 14, fontWeight: '700', color: '#92400E', marginBottom: 6 },
-  pendingDesc:      { fontSize: 13, color: '#B45309', lineHeight: 20 },
+  // Banner sistema activo (reemplaza al pendingBox)
+  systemActiveBox:  { backgroundColor: '#F0FDF4', borderRadius: 14, padding: 16, borderWidth: 0.5, borderColor: '#BBF7D0', marginTop: 20, marginBottom: 12 },
+  systemActiveTop:  { flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 8 },
+  systemActiveTitle:{ fontSize: 14, fontWeight: '700', color: '#065F46' },
+  systemActiveDesc: { fontSize: 13, color: '#047857', lineHeight: 20 },
 });
