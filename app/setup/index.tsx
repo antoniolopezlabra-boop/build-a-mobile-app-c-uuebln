@@ -41,7 +41,7 @@ const DAY_NAMES = ['Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábad
 
 export default function SetupWizard() {
   const router = useRouter();
-  const { user, businessProfile, refreshBusinessProfile } = useAuth();
+  const { user, businessProfile, isStaffAccount, refreshBusinessProfile } = useAuth();
   const [step, setStep] = useState(0);
   const [saving, setSaving] = useState(false);
   const fadeAnim = useRef(new Animated.Value(1)).current;
@@ -176,31 +176,37 @@ export default function SetupWizard() {
       // [Reagendar] desde WhatsApp siempre tenga un slug válido al cual
       // dirigir al cliente. El usuario no necesita configurar nada más.
       //
+      // GUARD: Solo se crea para cuentas de DUEÑO, no para staff.
+      // Los staff accounts (empleados de un dueño) NO deben tener su propio
+      // booking_link público — operan dentro del negocio del dueño.
+      //
       // Si falla la creación, NO bloqueamos el wizard — el usuario puede
       // crear el link manualmente desde Ajustes después. Solo loggeamos.
       // ─────────────────────────────────────────────────────────────────
-      try {
-        const { data: existing } = await supabase
-          .from('booking_links')
-          .select('id')
-          .eq('user_id', user.id)
-          .maybeSingle();
+      if (!isStaffAccount) {
+        try {
+          const { data: existing } = await supabase
+            .from('booking_links')
+            .select('id')
+            .eq('user_id', user.id)
+            .maybeSingle();
 
-        if (!existing) {
-          const baseSlug = generateSlug(businessName.trim());
-          const finalSlug = await ensureUniqueSlug(baseSlug, supabase);
-          await supabase.from('booking_links').insert({
-            user_id: user.id,
-            slug: finalSlug,
-            is_active: true,
-            require_approval: false,
-            whatsapp_confirmation: true,
-          });
-          logger.log('[Setup] booking_link auto-creado:', finalSlug);
+          if (!existing) {
+            const baseSlug = generateSlug(businessName.trim());
+            const finalSlug = await ensureUniqueSlug(baseSlug, supabase);
+            await supabase.from('booking_links').insert({
+              user_id: user.id,
+              slug: finalSlug,
+              is_active: true,
+              require_approval: false,
+              whatsapp_confirmation: true,
+            });
+            logger.log('[Setup] booking_link auto-creado:', finalSlug);
+          }
+        } catch (linkErr: any) {
+          logger.warn('[Setup] No se pudo auto-crear el booking_link:', linkErr?.message);
+          // No bloqueamos el wizard — el negocio sí se guardó correctamente
         }
-      } catch (linkErr: any) {
-        logger.warn('[Setup] No se pudo auto-crear el booking_link:', linkErr?.message);
-        // No bloqueamos el wizard — el negocio sí se guardó correctamente
       }
 
       if (refreshBusinessProfile) await refreshBusinessProfile();
