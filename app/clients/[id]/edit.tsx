@@ -9,6 +9,7 @@ import {
   TouchableOpacity,
   TextInput,
   ActivityIndicator,
+  Platform,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useLocalSearchParams } from 'expo-router';
@@ -29,11 +30,76 @@ interface Client {
 }
 
 const extraStyles = {
-  datePickerModal: { position: 'absolute' as const, bottom: 0, left: 0, right: 0, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-end' as const, zIndex: 999 },
-  datePickerContainer: { backgroundColor: '#fff', borderTopLeftRadius: 20, borderTopRightRadius: 20, padding: 20 },
-  datePickerTitle: { fontSize: 17, fontWeight: '600' as const, color: '#0F172A', textAlign: 'center' as const, marginBottom: 8 },
-  datePickerConfirm: { backgroundColor: '#10B981', borderRadius: 12, padding: 14, alignItems: 'center' as const, marginTop: 8 },
-  datePickerConfirmText: { color: '#fff', fontSize: 16, fontWeight: '600' as const },
+  // Overlay con fondo semi-transparente
+  datePickerOverlay: {
+    position: 'absolute' as const,
+    top: 0, left: 0, right: 0, bottom: 0,
+    backgroundColor: 'rgba(0,0,0,0.4)',
+    zIndex: 999,
+  },
+  // Contenedor del picker iOS — fondo blanco con bordes redondeados arriba
+  datePickerSheet: {
+    position: 'absolute' as const,
+    bottom: 0, left: 0, right: 0,
+    backgroundColor: '#FFFFFF',
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+    paddingBottom: 40,
+  },
+  datePickerHeader: {
+    flexDirection: 'row' as const,
+    alignItems: 'center' as const,
+    justifyContent: 'space-between' as const,
+    paddingHorizontal: 20,
+    paddingTop: 18,
+    paddingBottom: 14,
+    borderBottomWidth: 0.5,
+    borderBottomColor: '#E2E8F0',
+  },
+  datePickerTitle: {
+    fontSize: 16,
+    fontWeight: '700' as const,
+    color: '#0F172A',
+  },
+  datePickerCancel: {
+    fontSize: 15,
+    color: '#94A3B8',
+    fontWeight: '500' as const,
+  },
+  datePickerDoneText: {
+    fontSize: 15,
+    color: '#10B981',
+    fontWeight: '700' as const,
+  },
+  datePickerPreview: {
+    alignItems: 'center' as const,
+    paddingVertical: 12,
+    marginHorizontal: 20,
+    marginTop: 14,
+    backgroundColor: '#F0FDF4',
+    borderRadius: 12,
+    borderWidth: 0.5,
+    borderColor: '#BBF7D0',
+  },
+  datePickerPreviewText: {
+    fontSize: 15,
+    fontWeight: '600' as const,
+    color: '#10B981',
+    textTransform: 'capitalize' as const,
+  },
+  datePickerConfirm: {
+    backgroundColor: '#10B981',
+    marginHorizontal: 20,
+    marginTop: 12,
+    paddingVertical: 16,
+    borderRadius: 14,
+    alignItems: 'center' as const,
+  },
+  datePickerConfirmText: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: '700' as const,
+  },
 };
 
 export default function EditClientScreen() {
@@ -42,7 +108,12 @@ export default function EditClientScreen() {
   const id = Array.isArray(params.id) ? params.id[0] : params.id;
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
-  const [showDatePicker, setShowDatePicker] = useState(false);
+
+  // Date picker state — separamos iOS/Android para mejor UX
+  const [showDatePickerIOS, setShowDatePickerIOS] = useState(false);
+  const [showDatePickerAndroid, setShowDatePickerAndroid] = useState(false);
+  const [tempBirthday, setTempBirthday] = useState<Date>(new Date());
+
   const [errorModal, setErrorModal] = useState<{ visible: boolean; message: string }>({
     visible: false,
     message: '',
@@ -68,9 +139,8 @@ export default function EditClientScreen() {
     console.log('[EditClient] Loading client:', id);
     setLoading(true);
     try {
-      // Fetch all clients and find the one with matching id
       const allClients = await apiGet<Client[]>('/api/clients');
-      const data = allClients.find((c) => c.id === id);
+      const data = Array.isArray(allClients) ? allClients.find((c) => c.id === id) : null;
       if (!data) {
         throw new Error('Cliente no encontrado');
       }
@@ -134,6 +204,43 @@ export default function EditClientScreen() {
     const month = (date.getMonth() + 1).toString().padStart(2, '0');
     const year = date.getFullYear();
     return `${day}/${month}/${year}`;
+  };
+
+  // Texto preview en español para iOS
+  const formattedTempDate = tempBirthday.toLocaleDateString('es-MX', {
+    weekday: 'long', day: 'numeric', month: 'long', year: 'numeric',
+  });
+
+  // ── Handlers de date picker ──
+  const openDatePicker = () => {
+    // Inicializar tempBirthday con valor actual o fecha por defecto razonable
+    const initialDate = birthday || new Date(1990, 0, 1);
+    setTempBirthday(initialDate);
+    if (Platform.OS === 'ios') {
+      setShowDatePickerIOS(true);
+    } else {
+      // Android: pequeño delay para que el modal anterior se cierre antes de abrir el nativo
+      setTimeout(() => setShowDatePickerAndroid(true), 100);
+    }
+  };
+
+  const confirmDateIOS = () => {
+    setBirthday(tempBirthday);
+    setShowDatePickerIOS(false);
+  };
+
+  const cancelDateIOS = () => {
+    setShowDatePickerIOS(false);
+  };
+
+  // En Android el picker nativo se cierra solo al confirmar/cancelar
+  const onAndroidDateChange = (event: any, selectedDate?: Date) => {
+    setShowDatePickerAndroid(false);
+    // event.type === 'set' significa que el usuario presionó OK
+    // event.type === 'dismissed' significa que canceló
+    if (event.type === 'set' && selectedDate) {
+      setBirthday(selectedDate);
+    }
   };
 
   if (loading) {
@@ -223,7 +330,7 @@ export default function EditClientScreen() {
         />
 
         <Text style={styles.fieldLabel}>Fecha de nacimiento (opcional)</Text>
-        <TouchableOpacity style={styles.dateButton} onPress={() => setShowDatePicker(true)}>
+        <TouchableOpacity style={styles.dateButton} onPress={openDatePicker}>
           <Text style={[styles.dateText, !birthday && styles.datePlaceholder]}>
             {birthday ? formatBirthday(birthday) : 'Seleccionar fecha'}
           </Text>
@@ -233,29 +340,6 @@ export default function EditClientScreen() {
             color={colors.textSecondary}
           />
         </TouchableOpacity>
-
-        {showDatePicker && (
-          <View style={extraStyles.datePickerModal}>
-            <View style={extraStyles.datePickerContainer}>
-              <Text style={extraStyles.datePickerTitle}>Fecha de nacimiento</Text>
-              <DateTimePicker
-                value={birthday || new Date()}
-                mode="date"
-                display="spinner"
-                maximumDate={new Date()}
-                onChange={(event, selectedDate) => {
-                  if (selectedDate) setBirthday(selectedDate);
-                }}
-              />
-              <TouchableOpacity
-                style={extraStyles.datePickerConfirm}
-                onPress={() => setShowDatePicker(false)}
-              >
-                <Text style={extraStyles.datePickerConfirmText}>Confirmar</Text>
-              </TouchableOpacity>
-            </View>
-          </View>
-        )}
 
         <Text style={styles.fieldLabel}>Notas internas (opcional)</Text>
         <TextInput
@@ -305,6 +389,65 @@ export default function EditClientScreen() {
           )}
         </TouchableOpacity>
       </ScrollView>
+
+      {/* ─── iOS Date Picker (modal personalizado con spinner blanco) ─── */}
+      {Platform.OS === 'ios' && showDatePickerIOS && (
+        <>
+          <TouchableOpacity
+            style={extraStyles.datePickerOverlay}
+            activeOpacity={1}
+            onPress={cancelDateIOS}
+          />
+          <View style={extraStyles.datePickerSheet}>
+            <View style={extraStyles.datePickerHeader}>
+              <TouchableOpacity onPress={cancelDateIOS}>
+                <Text style={extraStyles.datePickerCancel}>Cancelar</Text>
+              </TouchableOpacity>
+              <Text style={extraStyles.datePickerTitle}>Fecha de nacimiento</Text>
+              <TouchableOpacity onPress={confirmDateIOS}>
+                <Text style={extraStyles.datePickerDoneText}>Listo</Text>
+              </TouchableOpacity>
+            </View>
+            <View style={extraStyles.datePickerPreview}>
+              <Text style={extraStyles.datePickerPreviewText}>
+                {formattedTempDate.charAt(0).toUpperCase() + formattedTempDate.slice(1)}
+              </Text>
+            </View>
+            <DateTimePicker
+              value={tempBirthday}
+              mode="date"
+              display="spinner"
+              maximumDate={new Date()}
+              locale="es-MX"
+              onChange={(_event, selected) => {
+                if (selected) setTempBirthday(selected);
+              }}
+              style={{ backgroundColor: '#FFFFFF', width: '100%' }}
+              textColor="#0F172A"
+            />
+            <TouchableOpacity style={extraStyles.datePickerConfirm} onPress={confirmDateIOS}>
+              <Text style={extraStyles.datePickerConfirmText}>Confirmar fecha</Text>
+            </TouchableOpacity>
+          </View>
+        </>
+      )}
+
+      {/* ─── Android Date Picker (calendario nativo - SIN modal envuelto) ───
+           CRITICAL FIX: en Android NO se envuelve en modal personalizado porque
+           el picker nativo de Android maneja su propia UI con colores del sistema.
+           Si lo envolvemos en un View con bg blanco, los números también salen
+           blancos y se ven como un "rollo en blanco". El display="default" abre
+           el calendar picker nativo de Material Design, que respeta el tema
+           del sistema y se ve perfecto. */}
+      {Platform.OS === 'android' && showDatePickerAndroid && (
+        <DateTimePicker
+          value={tempBirthday}
+          mode="date"
+          display="default"
+          maximumDate={new Date()}
+          onChange={onAndroidDateChange}
+        />
+      )}
     </SafeAreaView>
   );
 }
