@@ -6,17 +6,18 @@
 //   - Cada "regla" define una ventana de tiempo (minuto/hora/día) y un límite.
 //   - La key incluye dimensión + identificador + ventana.
 //     Ejemplo: "ip:1.2.3.4:minute:2026-05-10T20:30"
-//   - Se incrementa el contador atómicamente con UPSERT.
+//   - El contador se incrementa atómicamente vía RPC `increment_rate_limit`
+//     (INSERT ON CONFLICT DO UPDATE en PostgreSQL).
 //   - Si el contador supera el límite → bloquear.
 //
 // Filosofía:
 //   - Fail-open: si la DB falla, se permite la request (la app no muere por
 //     un problema de rate limiter). Pero se loggea para alertar.
-//   - El rate limiter es defensa, no autenticación. No protege en sí, solo
-//     reduce el daño de un atacante.
+//   - El rate limiter es defensa en profundidad, no autenticación. No
+//     protege en sí, solo reduce el daño de un atacante.
 //
 // Uso típico:
-//   const supabase = createClient(...);
+//   const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY);
 //   const result = await checkRateLimits(supabase, [
 //     { dimension: 'ip',    identifier: clientIp, window: 'minute', limit: 5  },
 //     { dimension: 'ip',    identifier: clientIp, window: 'hour',   limit: 20 },
@@ -29,7 +30,11 @@
 //       error: result.message,
 //       code: 'RATE_LIMITED',
 //       retryAfter: result.retryAfterSeconds,
-//     }), { status: 429, headers: { ...cors, 'Retry-After': String(result.retryAfterSeconds) } });
+//     }), {
+//       status: 429,
+//       headers: { ...cors, 'Content-Type': 'application/json',
+//                  'Retry-After': String(result.retryAfterSeconds) },
+//     });
 //   }
 
 import type { SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2';
@@ -55,8 +60,7 @@ export interface RateLimitResult {
 
 /**
  * Calcula el inicio de la ventana de tiempo (truncado al minuto/hora/día).
- * Esto hace que todas las requests dentro de la misma ventana caigan en
- * el mismo "bucket" sin importar el segundo exacto.
+ * Todas las requests dentro de la misma ventana caen en el mismo "bucket".
  */
 function windowStart(window: RateLimitWindow, now: Date = new Date()): Date {
   const d = new Date(now);
@@ -70,7 +74,7 @@ function windowStart(window: RateLimitWindow, now: Date = new Date()): Date {
 
 /**
  * Segundos hasta el final de la ventana actual.
- * Útil para devolver Retry-After al cliente.
+ * Útil para devolver header Retry-After al cliente.
  */
 function secondsUntilWindowEnds(window: RateLimitWindow, now: Date = new Date()): number {
   const start = windowStart(window, now);
@@ -85,105 +89,14 @@ function secondsUntilWindowEnds(window: RateLimitWindow, now: Date = new Date())
 /**
  * Construye la key única para esta ventana de tiempo.
  * Formato: "<dimension>:<identifier>:<window>:<ISO truncado>"
- *
  * Sanitiza el identifier para evitar caracteres problemáticos.
  */
 function buildKey(rule: RateLimitRule, now: Date = new Date()): string {
   const start = windowStart(rule.window, now);
-  // Sanitizar el identifier: solo alfanuméricos, guion, punto, +
   const safeIdentifier = rule.identifier
     .replace(/[^a-zA-Z0-9.+\-_]/g, '_')
-    .slice(0, 100); // máximo 100 chars para evitar keys gigantes
+    .slice(0, 100); // máximo 100 chars
   return `${rule.dimension}:${safeIdentifier}:${rule.window}:${start.toISOString()}`;
-}
-
-// ── Función pública principal ───────────────────────────────────────
-
-/**
- * Verifica todas las reglas de rate limit y atomicamente incrementa
- * los contadores. Si CUALQUIER regla se excede → bloquea.
- *
- * Si una regla tiene identifier vacío o null, se omite (útil para
- * casos donde el phone no se conoce aún, por ejemplo).
- */
-export async function checkRateLimits(
-  supabase: SupabaseClient,
-  rules: RateLimitRule[],
-): Promise<RateLimitResult> {
-  const now = new Date();
-
-  // Filtrar reglas con identificador inválido (vacío, undefined, "anon")
-  const validRules = rules.filter(r => r.identifier && r.identifier !== 'anon' && r.identifier.length > 0);
-
-  for (const rule of validRules) {
-    const key = buildKey(rule, now);
-
-    try {
-      // UPSERT atómico: si la key no existe, la crea con count=1.
-      // Si existe, incrementa el count.
-      // Usamos una RPC o el patrón insert-on-conflict + select.
-      //
-      // Patrón sin RPC (más portable):
-      //   1. Intentar insert con count=1
-      //   2. Si conflict en PK → update count = count + 1
-      //   3. Leer el nuevo count
-      const { data, error } = await supabase
-        .from('rate_limit_attempts')
-        .upsert(
-          {
-            key,
-            count: 1,
-            window_start: windowStart(rule.window, now).toISOString(),
-          },
-          { onConflict: 'key', ignoreDuplicates: false }
-        )
-        .select('count')
-        .single();
-
-      // El upsert con ignoreDuplicates: false sobreescribe count = 1,
-      // lo cual NO es lo que queremos. Necesitamos atomic increment.
-      // Hacemos el patrón en 2 pasos: primero leer, después incrementar.
-      // (Mejor sería una RPC, pero esto es suficiente para nuestro volumen.)
-
-      // En realidad, el método correcto es usar un upsert que llame a
-      // una función RPC o hacer la suma manual. Vamos a hacerlo manual:
-      if (error) {
-        // Si hay error al hacer upsert, probablemente no existía y la creó OK
-        // o hubo un conflict. Hacemos un update incremental como fallback.
-        console.warn('[rate-limit] upsert warning:', error.message);
-      }
-
-      // Patrón correcto: hacer increment vía SQL nativo
-      const { data: updated, error: updateError } = await supabase.rpc('increment_rate_limit', {
-        p_key: key,
-        p_window_start: windowStart(rule.window, now).toISOString(),
-      });
-
-      if (updateError) {
-        // Si la RPC no existe, fail-open con log
-        console.error('[rate-limit] RPC error, failing open:', updateError.message);
-        continue; // Permite la request pero loggea
-      }
-
-      const currentCount: number = typeof updated === 'number' ? updated : (data?.count ?? 1);
-
-      if (currentCount > rule.limit) {
-        const retryAfter = secondsUntilWindowEnds(rule.window, now);
-        return {
-          allowed: false,
-          message: buildUserMessage(rule, retryAfter),
-          retryAfterSeconds: retryAfter,
-          exceededRule: rule,
-        };
-      }
-    } catch (e) {
-      // Fail-open: nunca bloqueamos por error del rate limiter.
-      console.error('[rate-limit] unexpected error, failing open:', e);
-      continue;
-    }
-  }
-
-  return { allowed: true, retryAfterSeconds: 0 };
 }
 
 /**
@@ -199,7 +112,7 @@ function buildUserMessage(rule: RateLimitRule, retryAfter: number): string {
 
   switch (rule.dimension) {
     case 'ip':
-      return `Has hecho demasiadas reservas en poco tiempo. Por favor espera ${timeStr} antes de intentarlo de nuevo.`;
+      return `Has hecho demasiados intentos en poco tiempo. Por favor espera ${timeStr} antes de intentarlo de nuevo.`;
     case 'slug':
       return `Este negocio está recibiendo muchas reservas en este momento. Por favor intenta en ${timeStr}.`;
     case 'phone':
@@ -209,13 +122,72 @@ function buildUserMessage(rule: RateLimitRule, retryAfter: number): string {
   }
 }
 
+// ── Función pública principal ───────────────────────────────────────
+
+/**
+ * Verifica todas las reglas de rate limit incrementando atomicamente
+ * los contadores. Si CUALQUIER regla se excede → bloquea.
+ *
+ * Si una regla tiene identifier vacío o "anon", se omite (útil para
+ * casos donde el phone no se conoce aún).
+ */
+export async function checkRateLimits(
+  supabase: SupabaseClient,
+  rules: RateLimitRule[],
+): Promise<RateLimitResult> {
+  const now = new Date();
+
+  // Filtrar reglas con identificador inválido
+  const validRules = rules.filter(r =>
+    r.identifier && r.identifier !== 'anon' && r.identifier !== 'unknown' && r.identifier.length > 0
+  );
+
+  for (const rule of validRules) {
+    const key = buildKey(rule, now);
+    const windowStartIso = windowStart(rule.window, now).toISOString();
+
+    try {
+      const { data, error } = await supabase.rpc('increment_rate_limit', {
+        p_key: key,
+        p_window_start: windowStartIso,
+      });
+
+      if (error) {
+        // Fail-open: nunca bloqueamos por error del rate limiter.
+        console.error('[rate-limit] RPC error, failing open:', error.message, 'rule:', rule);
+        continue;
+      }
+
+      const currentCount: number = typeof data === 'number' ? data : 1;
+
+      if (currentCount > rule.limit) {
+        const retryAfter = secondsUntilWindowEnds(rule.window, now);
+        console.warn(`[rate-limit] BLOCKED: ${key} count=${currentCount} limit=${rule.limit}`);
+        return {
+          allowed: false,
+          message: buildUserMessage(rule, retryAfter),
+          retryAfterSeconds: retryAfter,
+          exceededRule: rule,
+        };
+      }
+    } catch (e: any) {
+      // Fail-open en cualquier excepción inesperada.
+      console.error('[rate-limit] unexpected error, failing open:', e?.message);
+      continue;
+    }
+  }
+
+  return { allowed: true, retryAfterSeconds: 0 };
+}
+
 /**
  * Extrae la IP del cliente del request. Maneja varios casos:
  *   - Header x-forwarded-for (puede tener múltiples IPs separadas por coma)
  *   - Header x-real-ip
  *   - Fallback a "unknown" si no se puede determinar.
  *
- * Supabase Edge Functions pasan estos headers automáticamente.
+ * Supabase Edge Functions pasan estos headers automáticamente
+ * desde su proxy frontal.
  */
 export function getClientIp(req: Request): string {
   const xff = req.headers.get('x-forwarded-for');
