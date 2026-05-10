@@ -6,10 +6,20 @@ const RESEND_API_KEY = Deno.env.get('RESEND_API_KEY') ?? ''
 const SUPABASE_URL   = Deno.env.get('SUPABASE_URL') ?? ''
 const SUPABASE_KEY   = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
 
-// Dominio de envío: cambiar a tu dominio verificado en Resend cuando esté listo.
-// Mientras tanto, solo llega al email de tu cuenta de Resend (modo sandbox).
-// Para activar envío real: verifica vylta.lat en https://resend.com/domains
-const FROM_DOMAIN = Deno.env.get('RESEND_FROM_DOMAIN') ?? 'onboarding@resend.dev'
+// ════════════════════════════════════════════════════════════════════════
+// CRITICAL: dominio verificado en Resend
+// ════════════════════════════════════════════════════════════════════════
+// Si NO está configurado el secret RESEND_FROM_DOMAIN, el código FALLA
+// con error claro en lugar de caer al modo sandbox de Resend (que solo
+// envía al email del dueño de la cuenta y NO al resto de clientes).
+//
+// Para configurar:
+//   1. Verificar dominio en https://resend.com/domains (vylta.lat)
+//   2. Supabase Dashboard → Edge Functions → Secrets
+//   3. Add secret: RESEND_FROM_DOMAIN=vylta.lat
+//   4. Re-deploy: npx supabase functions deploy send-campaign
+// ════════════════════════════════════════════════════════════════════════
+const FROM_DOMAIN = Deno.env.get('RESEND_FROM_DOMAIN') ?? ''
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -30,7 +40,30 @@ serve(async (req) => {
     // Validar que RESEND_API_KEY existe
     if (!RESEND_API_KEY) {
       console.error('[send-campaign] RESEND_API_KEY no configurada en Secrets')
-      return json({ error: 'RESEND_API_KEY no configurada. Añádela en Edge Functions > Secrets.' }, 500)
+      return json({
+        error: 'Configuración pendiente: RESEND_API_KEY no está en Supabase Secrets. Contacta al soporte de VYLTA.',
+        code: 'CONFIG_MISSING_RESEND_API_KEY',
+      }, 500)
+    }
+
+    // ────────────────────────────────────────────────────────────────────
+    // CRITICAL FIX: rechazar ANTES de procesar nada si el dominio no está
+    // configurado. ESTE ES el bug que causó que solo llegaran correos al
+    // owner. Antes el código caía a sandbox sin avisar; ahora falla claro.
+    // ────────────────────────────────────────────────────────────────────
+    if (!FROM_DOMAIN || FROM_DOMAIN.includes('resend.dev')) {
+      console.error(
+        '[send-campaign] CRITICAL: RESEND_FROM_DOMAIN no configurado. ' +
+        'En modo sandbox Resend solo envía al owner de la cuenta. ' +
+        'Configura RESEND_FROM_DOMAIN=vylta.lat en Supabase Secrets.'
+      )
+      return json({
+        error:
+          'El servicio de email aún no está configurado para envío masivo. ' +
+          'El dominio de envío necesita verificación. Por favor contacta a soporte@vylta.lat ' +
+          'para activar email marketing en tu cuenta.',
+        code: 'CONFIG_MISSING_FROM_DOMAIN',
+      }, 503)
     }
 
     const payload = await req.json()
@@ -71,23 +104,12 @@ serve(async (req) => {
 
     // Obtener nombre del negocio
     const { data: business } = await supabase
-      .from('business_profiles').select('business_name').eq('user_id', userId).single()
+      .from('business_profiles').select('business_name').eq('user_id', userId).maybeSingle()
     const businessName = business?.business_name || 'VYLTA'
 
-    // Determinar remitente
-    // Si FROM_DOMAIN es el sandbox, advertir en logs
-    const fromAddress = FROM_DOMAIN.includes('onboarding@resend.dev')
-      ? 'onboarding@resend.dev'
-      : `noreply@${FROM_DOMAIN}`
+    // Construir remitente — ya validamos arriba que FROM_DOMAIN es válido
+    const fromAddress = `noreply@${FROM_DOMAIN}`
     const fromField = `${businessName} <${fromAddress}>`
-
-    if (FROM_DOMAIN.includes('onboarding@resend.dev')) {
-      console.warn(
-        '[send-campaign] ADVERTENCIA: Usando onboarding@resend.dev (modo sandbox). ' +
-        'Los correos solo llegarán al email de tu cuenta Resend. ' +
-        'Para envío real, agrega RESEND_FROM_DOMAIN en Secrets con tu dominio verificado (ej: vylta.lat)'
-      )
-    }
 
     // Obtener clientes con email según segmento
     let query = supabase.from('clients').select('id, name, email')
@@ -103,10 +125,16 @@ serve(async (req) => {
     const { data: clients, error: clientsError } = await query
     if (clientsError) throw new Error(`Error obteniendo clientes: ${clientsError.message}`)
     if (!clients || clients.length === 0) {
-      throw new Error(
-        'No hay clientes con email registrado para este segmento. ' +
-        'Asegúrate de que tus clientes tienen email guardado en su perfil.'
-      )
+      // Marcar campaña como error si no había destinatarios
+      await supabase.from('email_campaigns').update({
+        status: 'error', sent_at: new Date().toISOString(), recipient_count: 0,
+      }).eq('id', campaignId)
+      return json({
+        error:
+          'No hay clientes con email registrado para este segmento. ' +
+          'Asegúrate de que tus clientes tienen email guardado en su perfil.',
+        code: 'NO_RECIPIENTS',
+      }, 400)
     }
 
     console.log(`[send-campaign] Enviando a ${clients.length} clientes | segmento: ${segment} | from: ${fromField}`)
@@ -176,19 +204,18 @@ serve(async (req) => {
       recipient_count: sent,
     }).eq('id', campaignId)
 
-    // Si todo falló (modo sandbox bloqueando envíos), retornar error claro
+    // Si todo falló, retornar error claro
     if (sent === 0 && failed > 0) {
-      const isSandboxError = errors.some(e =>
+      const isDomainError = errors.some(e =>
         e.includes('403') || e.includes('domain') || e.includes('not verified') || e.includes('testing')
       )
       return json({
-        error: isSandboxError
-          ? 'Tu dominio de envío no está verificado en Resend. ' +
-            'En modo sandbox solo llegan correos a tu propio email. ' +
-            'Verifica un dominio en https://resend.com/domains y agrégalo como RESEND_FROM_DOMAIN en los Secrets de Supabase.'
+        error: isDomainError
+          ? `El dominio ${FROM_DOMAIN} no está verificado en Resend. Verifica los DNS records en https://resend.com/domains`
           : `Error enviando. Primeros errores: ${errors.slice(0, 2).join(' | ')}`,
         sent:   0,
         failed,
+        code: isDomainError ? 'DOMAIN_NOT_VERIFIED' : 'SEND_FAILED',
       }, 400)
     }
 
@@ -210,7 +237,7 @@ function buildEmailHtml(subject: string, body: string, businessName: string): st
   <table width="100%" cellpadding="0" cellspacing="0" style="background:#F8FAFC;padding:40px 16px;">
     <tr><td align="center">
       <table width="600" cellpadding="0" cellspacing="0" style="max-width:600px;width:100%;background:#fff;border-radius:16px;overflow:hidden;border:1px solid #E2E8F0;">
-        <tr><td style="background:#6366F1;padding:28px 36px;">
+        <tr><td style="background:#10B981;padding:28px 36px;">
           <p style="margin:0;color:#fff;font-size:22px;font-weight:700;">${businessName}</p>
         </td></tr>
         <tr><td style="padding:32px 36px 8px;">
@@ -219,7 +246,7 @@ function buildEmailHtml(subject: string, body: string, businessName: string): st
         <tr><td style="padding:16px 36px 32px;">${lines}</td></tr>
         <tr><td style="background:#F8FAFC;padding:20px 36px;border-top:1px solid #E2E8F0;">
           <p style="margin:0;font-size:12px;color:#94A3B8;text-align:center;">
-            Enviado por <strong style="color:#6366F1;">${businessName}</strong> a través de <strong>VYLTA</strong>
+            Enviado por <strong style="color:#10B981;">${businessName}</strong> a través de <strong>VYLTA</strong>
           </p>
         </td></tr>
       </table>
