@@ -30,14 +30,12 @@ interface Client {
 }
 
 const extraStyles = {
-  // Overlay con fondo semi-transparente
   datePickerOverlay: {
     position: 'absolute' as const,
     top: 0, left: 0, right: 0, bottom: 0,
     backgroundColor: 'rgba(0,0,0,0.4)',
     zIndex: 999,
   },
-  // Contenedor del picker iOS — fondo blanco con bordes redondeados arriba
   datePickerSheet: {
     position: 'absolute' as const,
     bottom: 0, left: 0, right: 0,
@@ -45,6 +43,7 @@ const extraStyles = {
     borderTopLeftRadius: 20,
     borderTopRightRadius: 20,
     paddingBottom: 40,
+    zIndex: 1000,
   },
   datePickerHeader: {
     flexDirection: 'row' as const,
@@ -100,6 +99,14 @@ const extraStyles = {
     fontSize: 16,
     fontWeight: '700' as const,
   },
+  // CRITICAL FIX: el contenedor del picker tiene fondo blanco explícito.
+  // El picker hereda colores del contenedor padre, por eso si está dentro
+  // de un View con tema oscuro o transparente, los números no se ven.
+  pickerWrap: {
+    backgroundColor: '#FFFFFF',
+    paddingVertical: 8,
+    marginTop: 4,
+  },
 };
 
 export default function EditClientScreen() {
@@ -109,7 +116,6 @@ export default function EditClientScreen() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
 
-  // Date picker state — separamos iOS/Android para mejor UX
   const [showDatePickerIOS, setShowDatePickerIOS] = useState(false);
   const [showDatePickerAndroid, setShowDatePickerAndroid] = useState(false);
   const [tempBirthday, setTempBirthday] = useState<Date>(new Date());
@@ -121,7 +127,6 @@ export default function EditClientScreen() {
 
   const [successModal, setSuccessModal] = useState(false);
 
-  // Form state
   const [fullName, setFullName] = useState('');
   const [phone, setPhone] = useState('');
   const [email, setEmail] = useState('');
@@ -136,7 +141,6 @@ export default function EditClientScreen() {
   }, [id]);
 
   const loadClient = async () => {
-    console.log('[EditClient] Loading client:', id);
     setLoading(true);
     try {
       const allClients = await apiGet<Client[]>('/api/clients');
@@ -150,12 +154,8 @@ export default function EditClientScreen() {
       setNotes(data.notes || '');
       setIsActive(data.isActive !== false);
       if (data.birthday) {
-        // FIX timezone: new Date('YYYY-MM-DD') se interpreta como UTC medianoche
-        // y en UTC-6 (México) sale 1 día antes. parseLocalDate construye la fecha
-        // en hora local (mediodía) preservando el día correcto.
         setBirthday(parseLocalDate(data.birthday));
       }
-      console.log('[EditClient] Client loaded');
     } catch (error) {
       console.error('[EditClient] Failed to load:', error);
       setErrorModal({ visible: true, message: 'Error al cargar el cliente' });
@@ -177,18 +177,14 @@ export default function EditClientScreen() {
 
     setSaving(true);
     try {
-      console.log('[EditClient] Updating client');
       await apiPut(`/api/clients/${id}`, {
         name: fullName.trim(),
         phone: phone.trim(),
         email: email.trim() || undefined,
-        // FIX timezone: el DatePicker devuelve Date local. toISOString() convertía a UTC
-        // y en UTC-6 (México) quedaba 1 día antes. toLocalDateString preserva la fecha local.
         birthday: birthday ? toLocalDateString(birthday) : undefined,
         notes: notes.trim() || undefined,
         isActive,
       });
-      console.log('[EditClient] Client updated');
       setSuccessModal(true);
     } catch (error: any) {
       console.error('[EditClient] Failed to update:', error);
@@ -206,20 +202,16 @@ export default function EditClientScreen() {
     return `${day}/${month}/${year}`;
   };
 
-  // Texto preview en español para iOS
   const formattedTempDate = tempBirthday.toLocaleDateString('es-MX', {
     weekday: 'long', day: 'numeric', month: 'long', year: 'numeric',
   });
 
-  // ── Handlers de date picker ──
   const openDatePicker = () => {
-    // Inicializar tempBirthday con valor actual o fecha por defecto razonable
     const initialDate = birthday || new Date(1990, 0, 1);
     setTempBirthday(initialDate);
     if (Platform.OS === 'ios') {
       setShowDatePickerIOS(true);
     } else {
-      // Android: pequeño delay para que el modal anterior se cierre antes de abrir el nativo
       setTimeout(() => setShowDatePickerAndroid(true), 100);
     }
   };
@@ -233,11 +225,8 @@ export default function EditClientScreen() {
     setShowDatePickerIOS(false);
   };
 
-  // En Android el picker nativo se cierra solo al confirmar/cancelar
   const onAndroidDateChange = (event: any, selectedDate?: Date) => {
     setShowDatePickerAndroid(false);
-    // event.type === 'set' significa que el usuario presionó OK
-    // event.type === 'dismissed' significa que canceló
     if (event.type === 'set' && selectedDate) {
       setBirthday(selectedDate);
     }
@@ -390,7 +379,13 @@ export default function EditClientScreen() {
         </TouchableOpacity>
       </ScrollView>
 
-      {/* ─── iOS Date Picker (modal personalizado con spinner blanco) ─── */}
+      {/* ─── iOS Date Picker ───
+           CRITICAL FIXES aplicados:
+           1. themeVariant="light" — fuerza tema claro independiente del sistema
+           2. accentColor="#10B981" — color del año/mes resaltado
+           3. textColor="#0F172A" — color de los números (azul oscuro casi negro)
+           4. Wrap con bg blanco explícito
+           5. Si esto sigue fallando, fallback a display="compact" o calendario nativo */}
       {Platform.OS === 'ios' && showDatePickerIOS && (
         <>
           <TouchableOpacity
@@ -413,18 +408,22 @@ export default function EditClientScreen() {
                 {formattedTempDate.charAt(0).toUpperCase() + formattedTempDate.slice(1)}
               </Text>
             </View>
-            <DateTimePicker
-              value={tempBirthday}
-              mode="date"
-              display="spinner"
-              maximumDate={new Date()}
-              locale="es-MX"
-              onChange={(_event, selected) => {
-                if (selected) setTempBirthday(selected);
-              }}
-              style={{ backgroundColor: '#FFFFFF', width: '100%' }}
-              textColor="#0F172A"
-            />
+            <View style={extraStyles.pickerWrap}>
+              <DateTimePicker
+                value={tempBirthday}
+                mode="date"
+                display="spinner"
+                maximumDate={new Date()}
+                locale="es-MX"
+                themeVariant="light"
+                accentColor="#10B981"
+                textColor="#0F172A"
+                onChange={(_event, selected) => {
+                  if (selected) setTempBirthday(selected);
+                }}
+                style={{ backgroundColor: '#FFFFFF', height: 200 }}
+              />
+            </View>
             <TouchableOpacity style={extraStyles.datePickerConfirm} onPress={confirmDateIOS}>
               <Text style={extraStyles.datePickerConfirmText}>Confirmar fecha</Text>
             </TouchableOpacity>
@@ -432,13 +431,6 @@ export default function EditClientScreen() {
         </>
       )}
 
-      {/* ─── Android Date Picker (calendario nativo - SIN modal envuelto) ───
-           CRITICAL FIX: en Android NO se envuelve en modal personalizado porque
-           el picker nativo de Android maneja su propia UI con colores del sistema.
-           Si lo envolvemos en un View con bg blanco, los números también salen
-           blancos y se ven como un "rollo en blanco". El display="default" abre
-           el calendar picker nativo de Material Design, que respeta el tema
-           del sistema y se ve perfecto. */}
       {Platform.OS === 'android' && showDatePickerAndroid && (
         <DateTimePicker
           value={tempBirthday}
