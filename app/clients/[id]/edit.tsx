@@ -10,6 +10,7 @@ import {
   TextInput,
   ActivityIndicator,
   Platform,
+  Modal,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useLocalSearchParams } from 'expo-router';
@@ -29,85 +30,18 @@ interface Client {
   isActive?: boolean;
 }
 
-const extraStyles = {
-  datePickerOverlay: {
-    position: 'absolute' as const,
-    top: 0, left: 0, right: 0, bottom: 0,
-    backgroundColor: 'rgba(0,0,0,0.4)',
-    zIndex: 999,
-  },
-  datePickerSheet: {
-    position: 'absolute' as const,
-    bottom: 0, left: 0, right: 0,
-    backgroundColor: '#FFFFFF',
-    borderTopLeftRadius: 20,
-    borderTopRightRadius: 20,
-    paddingBottom: 40,
-    zIndex: 1000,
-  },
-  datePickerHeader: {
-    flexDirection: 'row' as const,
-    alignItems: 'center' as const,
-    justifyContent: 'space-between' as const,
-    paddingHorizontal: 20,
-    paddingTop: 18,
-    paddingBottom: 14,
-    borderBottomWidth: 0.5,
-    borderBottomColor: '#E2E8F0',
-  },
-  datePickerTitle: {
-    fontSize: 16,
-    fontWeight: '700' as const,
-    color: '#0F172A',
-  },
-  datePickerCancel: {
-    fontSize: 15,
-    color: '#94A3B8',
-    fontWeight: '500' as const,
-  },
-  datePickerDoneText: {
-    fontSize: 15,
-    color: '#10B981',
-    fontWeight: '700' as const,
-  },
-  datePickerPreview: {
-    alignItems: 'center' as const,
-    paddingVertical: 12,
-    marginHorizontal: 20,
-    marginTop: 14,
-    backgroundColor: '#F0FDF4',
-    borderRadius: 12,
-    borderWidth: 0.5,
-    borderColor: '#BBF7D0',
-  },
-  datePickerPreviewText: {
-    fontSize: 15,
-    fontWeight: '600' as const,
-    color: '#10B981',
-    textTransform: 'capitalize' as const,
-  },
-  datePickerConfirm: {
-    backgroundColor: '#10B981',
-    marginHorizontal: 20,
-    marginTop: 12,
-    paddingVertical: 16,
-    borderRadius: 14,
-    alignItems: 'center' as const,
-  },
-  datePickerConfirmText: {
-    color: '#fff',
-    fontSize: 16,
-    fontWeight: '700' as const,
-  },
-  // CRITICAL FIX: el contenedor del picker tiene fondo blanco explícito.
-  // El picker hereda colores del contenedor padre, por eso si está dentro
-  // de un View con tema oscuro o transparente, los números no se ven.
-  pickerWrap: {
-    backgroundColor: '#FFFFFF',
-    paddingVertical: 8,
-    marginTop: 4,
-  },
-};
+// Constantes para el selector custom de fecha (sin DateTimePicker problemático)
+const MESES = [
+  'Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio',
+  'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre',
+];
+const CURRENT_YEAR = new Date().getFullYear();
+// Rango de años para fecha de nacimiento: desde 1920 hasta el año actual
+const YEARS = Array.from({ length: CURRENT_YEAR - 1919 }, (_, i) => CURRENT_YEAR - i);
+
+function getDaysInMonth(year: number, month: number): number {
+  return new Date(year, month + 1, 0).getDate();
+}
 
 export default function EditClientScreen() {
   const router = useRouter();
@@ -116,9 +50,15 @@ export default function EditClientScreen() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
 
-  const [showDatePickerIOS, setShowDatePickerIOS] = useState(false);
-  const [showDatePickerAndroid, setShowDatePickerAndroid] = useState(false);
-  const [tempBirthday, setTempBirthday] = useState<Date>(new Date());
+  // Date picker state
+  const [showDatePicker, setShowDatePicker] = useState(false);
+  const [showAndroidNative, setShowAndroidNative] = useState(false);
+  const [tempBirthday, setTempBirthday] = useState<Date>(new Date(1990, 0, 1));
+
+  // Estados separados para los 3 selectores en iOS (custom)
+  const [selectedDay, setSelectedDay] = useState(1);
+  const [selectedMonth, setSelectedMonth] = useState(0);
+  const [selectedYear, setSelectedYear] = useState(1990);
 
   const [errorModal, setErrorModal] = useState<{ visible: boolean; message: string }>({
     visible: false,
@@ -154,7 +94,11 @@ export default function EditClientScreen() {
       setNotes(data.notes || '');
       setIsActive(data.isActive !== false);
       if (data.birthday) {
-        setBirthday(parseLocalDate(data.birthday));
+        const parsedDate = parseLocalDate(data.birthday);
+        setBirthday(parsedDate);
+        setSelectedDay(parsedDate.getDate());
+        setSelectedMonth(parsedDate.getMonth());
+        setSelectedYear(parsedDate.getFullYear());
       }
     } catch (error) {
       console.error('[EditClient] Failed to load:', error);
@@ -202,35 +146,50 @@ export default function EditClientScreen() {
     return `${day}/${month}/${year}`;
   };
 
-  const formattedTempDate = tempBirthday.toLocaleDateString('es-MX', {
-    weekday: 'long', day: 'numeric', month: 'long', year: 'numeric',
-  });
-
   const openDatePicker = () => {
-    const initialDate = birthday || new Date(1990, 0, 1);
-    setTempBirthday(initialDate);
-    if (Platform.OS === 'ios') {
-      setShowDatePickerIOS(true);
+    if (birthday) {
+      setSelectedDay(birthday.getDate());
+      setSelectedMonth(birthday.getMonth());
+      setSelectedYear(birthday.getFullYear());
     } else {
-      setTimeout(() => setShowDatePickerAndroid(true), 100);
+      setSelectedDay(1);
+      setSelectedMonth(0);
+      setSelectedYear(1990);
+    }
+
+    if (Platform.OS === 'android') {
+      // Android: usar el calendario nativo (que sí funciona perfecto)
+      setTempBirthday(birthday || new Date(1990, 0, 1));
+      setTimeout(() => setShowAndroidNative(true), 100);
+    } else {
+      // iOS: usar nuestro selector custom (que SIEMPRE se ve bien)
+      setShowDatePicker(true);
     }
   };
 
-  const confirmDateIOS = () => {
-    setBirthday(tempBirthday);
-    setShowDatePickerIOS(false);
+  const confirmCustomDate = () => {
+    // Validar que el día sea válido para el mes/año (ej: 31 de febrero no existe)
+    const maxDays = getDaysInMonth(selectedYear, selectedMonth);
+    const validDay = Math.min(selectedDay, maxDays);
+    const newDate = new Date(selectedYear, selectedMonth, validDay);
+    setBirthday(newDate);
+    setShowDatePicker(false);
   };
 
-  const cancelDateIOS = () => {
-    setShowDatePickerIOS(false);
+  const cancelCustomDate = () => {
+    setShowDatePicker(false);
   };
 
   const onAndroidDateChange = (event: any, selectedDate?: Date) => {
-    setShowDatePickerAndroid(false);
+    setShowAndroidNative(false);
     if (event.type === 'set' && selectedDate) {
       setBirthday(selectedDate);
     }
   };
+
+  // Días disponibles según mes/año seleccionado
+  const daysInSelectedMonth = getDaysInMonth(selectedYear, selectedMonth);
+  const days = Array.from({ length: daysInSelectedMonth }, (_, i) => i + 1);
 
   if (loading) {
     return (
@@ -379,59 +338,142 @@ export default function EditClientScreen() {
         </TouchableOpacity>
       </ScrollView>
 
-      {/* ─── iOS Date Picker ───
-           CRITICAL FIXES aplicados:
-           1. themeVariant="light" — fuerza tema claro independiente del sistema
-           2. accentColor="#10B981" — color del año/mes resaltado
-           3. textColor="#0F172A" — color de los números (azul oscuro casi negro)
-           4. Wrap con bg blanco explícito
-           5. Si esto sigue fallando, fallback a display="compact" o calendario nativo */}
-      {Platform.OS === 'ios' && showDatePickerIOS && (
-        <>
-          <TouchableOpacity
-            style={extraStyles.datePickerOverlay}
-            activeOpacity={1}
-            onPress={cancelDateIOS}
-          />
-          <View style={extraStyles.datePickerSheet}>
-            <View style={extraStyles.datePickerHeader}>
-              <TouchableOpacity onPress={cancelDateIOS}>
-                <Text style={extraStyles.datePickerCancel}>Cancelar</Text>
+      {/* ─── iOS Custom Date Picker ───
+           Tres ScrollViews verticales: Día / Mes / Año.
+           SIN dependencia de DateTimePicker (que tiene bugs de visibilidad).
+           Render 100% controlado: SIEMPRE se ven los números. */}
+      <Modal
+        visible={showDatePicker}
+        animationType="slide"
+        transparent
+        onRequestClose={cancelCustomDate}
+      >
+        <TouchableOpacity
+          style={dpStyles.overlay}
+          activeOpacity={1}
+          onPress={cancelCustomDate}
+        >
+          <TouchableOpacity activeOpacity={1} style={dpStyles.sheet}>
+            <View style={dpStyles.header}>
+              <TouchableOpacity onPress={cancelCustomDate}>
+                <Text style={dpStyles.cancelText}>Cancelar</Text>
               </TouchableOpacity>
-              <Text style={extraStyles.datePickerTitle}>Fecha de nacimiento</Text>
-              <TouchableOpacity onPress={confirmDateIOS}>
-                <Text style={extraStyles.datePickerDoneText}>Listo</Text>
+              <Text style={dpStyles.title}>Fecha de nacimiento</Text>
+              <TouchableOpacity onPress={confirmCustomDate}>
+                <Text style={dpStyles.doneText}>Listo</Text>
               </TouchableOpacity>
             </View>
-            <View style={extraStyles.datePickerPreview}>
-              <Text style={extraStyles.datePickerPreviewText}>
-                {formattedTempDate.charAt(0).toUpperCase() + formattedTempDate.slice(1)}
+
+            {/* Preview de la fecha seleccionada */}
+            <View style={dpStyles.preview}>
+              <Text style={dpStyles.previewText}>
+                {selectedDay} de {MESES[selectedMonth]} de {selectedYear}
               </Text>
             </View>
-            <View style={extraStyles.pickerWrap}>
-              <DateTimePicker
-                value={tempBirthday}
-                mode="date"
-                display="spinner"
-                maximumDate={new Date()}
-                locale="es-MX"
-                themeVariant="light"
-                accentColor="#10B981"
-                textColor="#0F172A"
-                onChange={(_event, selected) => {
-                  if (selected) setTempBirthday(selected);
-                }}
-                style={{ backgroundColor: '#FFFFFF', height: 200 }}
-              />
-            </View>
-            <TouchableOpacity style={extraStyles.datePickerConfirm} onPress={confirmDateIOS}>
-              <Text style={extraStyles.datePickerConfirmText}>Confirmar fecha</Text>
-            </TouchableOpacity>
-          </View>
-        </>
-      )}
 
-      {Platform.OS === 'android' && showDatePickerAndroid && (
+            {/* 3 columnas: Día / Mes / Año */}
+            <View style={dpStyles.pickerRow}>
+              {/* DÍA */}
+              <View style={dpStyles.column}>
+                <Text style={dpStyles.columnLabel}>Día</Text>
+                <ScrollView
+                  showsVerticalScrollIndicator={false}
+                  style={dpStyles.scroll}
+                  nestedScrollEnabled
+                >
+                  {days.map((d) => (
+                    <TouchableOpacity
+                      key={d}
+                      onPress={() => setSelectedDay(d)}
+                      style={[
+                        dpStyles.item,
+                        selectedDay === d && dpStyles.itemSelected,
+                      ]}
+                    >
+                      <Text
+                        style={[
+                          dpStyles.itemText,
+                          selectedDay === d && dpStyles.itemTextSelected,
+                        ]}
+                      >
+                        {d}
+                      </Text>
+                    </TouchableOpacity>
+                  ))}
+                </ScrollView>
+              </View>
+
+              {/* MES */}
+              <View style={dpStyles.column}>
+                <Text style={dpStyles.columnLabel}>Mes</Text>
+                <ScrollView
+                  showsVerticalScrollIndicator={false}
+                  style={dpStyles.scroll}
+                  nestedScrollEnabled
+                >
+                  {MESES.map((m, idx) => (
+                    <TouchableOpacity
+                      key={m}
+                      onPress={() => setSelectedMonth(idx)}
+                      style={[
+                        dpStyles.item,
+                        selectedMonth === idx && dpStyles.itemSelected,
+                      ]}
+                    >
+                      <Text
+                        style={[
+                          dpStyles.itemText,
+                          selectedMonth === idx && dpStyles.itemTextSelected,
+                        ]}
+                      >
+                        {m}
+                      </Text>
+                    </TouchableOpacity>
+                  ))}
+                </ScrollView>
+              </View>
+
+              {/* AÑO */}
+              <View style={dpStyles.column}>
+                <Text style={dpStyles.columnLabel}>Año</Text>
+                <ScrollView
+                  showsVerticalScrollIndicator={false}
+                  style={dpStyles.scroll}
+                  nestedScrollEnabled
+                >
+                  {YEARS.map((y) => (
+                    <TouchableOpacity
+                      key={y}
+                      onPress={() => setSelectedYear(y)}
+                      style={[
+                        dpStyles.item,
+                        selectedYear === y && dpStyles.itemSelected,
+                      ]}
+                    >
+                      <Text
+                        style={[
+                          dpStyles.itemText,
+                          selectedYear === y && dpStyles.itemTextSelected,
+                        ]}
+                      >
+                        {y}
+                      </Text>
+                    </TouchableOpacity>
+                  ))}
+                </ScrollView>
+              </View>
+            </View>
+
+            <TouchableOpacity style={dpStyles.confirmBtn} onPress={confirmCustomDate}>
+              <Text style={dpStyles.confirmBtnText}>Confirmar fecha</Text>
+            </TouchableOpacity>
+          </TouchableOpacity>
+        </TouchableOpacity>
+      </Modal>
+
+      {/* ─── Android Native Calendar Picker ───
+           El calendario nativo de Android funciona perfecto sin manipulación. */}
+      {Platform.OS === 'android' && showAndroidNative && (
         <DateTimePicker
           value={tempBirthday}
           mode="date"
@@ -565,5 +607,121 @@ const styles = StyleSheet.create({
     color: '#FFFFFF',
     fontSize: 18,
     fontWeight: '600',
+  },
+});
+
+// Estilos del Date Picker custom (3 columnas Día/Mes/Año)
+const dpStyles = StyleSheet.create({
+  overlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    justifyContent: 'flex-end',
+  },
+  sheet: {
+    backgroundColor: '#FFFFFF',
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
+    paddingBottom: 30,
+  },
+  header: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 20,
+    paddingTop: 18,
+    paddingBottom: 14,
+    borderBottomWidth: 0.5,
+    borderBottomColor: '#E2E8F0',
+  },
+  title: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: '#0F172A',
+  },
+  cancelText: {
+    fontSize: 15,
+    color: '#94A3B8',
+    fontWeight: '500',
+  },
+  doneText: {
+    fontSize: 15,
+    color: '#10B981',
+    fontWeight: '700',
+  },
+  preview: {
+    alignItems: 'center',
+    paddingVertical: 12,
+    marginHorizontal: 20,
+    marginTop: 14,
+    backgroundColor: '#F0FDF4',
+    borderRadius: 12,
+    borderWidth: 0.5,
+    borderColor: '#BBF7D0',
+  },
+  previewText: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: '#10B981',
+  },
+  pickerRow: {
+    flexDirection: 'row',
+    paddingHorizontal: 16,
+    marginTop: 16,
+    height: 240,
+    gap: 8,
+  },
+  column: {
+    flex: 1,
+    backgroundColor: '#F8FAFC',
+    borderRadius: 12,
+    overflow: 'hidden',
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+  },
+  columnLabel: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#64748B',
+    textAlign: 'center',
+    paddingVertical: 8,
+    backgroundColor: '#F1F5F9',
+    borderBottomWidth: 1,
+    borderBottomColor: '#E2E8F0',
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+  },
+  scroll: {
+    flex: 1,
+  },
+  item: {
+    paddingVertical: 12,
+    paddingHorizontal: 8,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  itemSelected: {
+    backgroundColor: '#10B981',
+  },
+  itemText: {
+    fontSize: 16,
+    color: '#0F172A',
+    fontWeight: '500',
+  },
+  itemTextSelected: {
+    color: '#FFFFFF',
+    fontWeight: '700',
+  },
+  confirmBtn: {
+    backgroundColor: '#10B981',
+    marginHorizontal: 20,
+    marginTop: 16,
+    paddingVertical: 16,
+    borderRadius: 14,
+    alignItems: 'center',
+  },
+  confirmBtnText: {
+    color: '#FFFFFF',
+    fontSize: 16,
+    fontWeight: '700',
   },
 });
