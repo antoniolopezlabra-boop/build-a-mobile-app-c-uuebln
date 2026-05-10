@@ -10,11 +10,10 @@
 --   - `count`: número de intentos en esa ventana
 --   - `window_start`: timestamp del inicio de la ventana (para cleanup)
 --
--- Patrón de uso:
---   INSERT INTO rate_limit_attempts (key, count, window_start)
---   VALUES ('ip:1.2.3.4:minute:2026-05-10T20:30', 1, '2026-05-10T20:30:00Z')
---   ON CONFLICT (key) DO UPDATE SET count = rate_limit_attempts.count + 1
---   RETURNING count;
+-- Patrón de uso desde Edge Function:
+--   SELECT increment_rate_limit('ip:1.2.3.4:minute:2026-05-10T20:30',
+--                               '2026-05-10T20:30:00Z');
+--   -> devuelve el count actualizado (1, 2, 3, ...)
 --
 -- Si count > límite → rechazar request con HTTP 429.
 -- ════════════════════════════════════════════════════════════════════════
@@ -42,6 +41,41 @@ ALTER TABLE public.rate_limit_attempts ENABLE ROW LEVEL SECURITY;
 -- automáticamente, así que las Edge Functions sí pueden operar.
 
 -- ════════════════════════════════════════════════════════════════════════
+-- RPC: increment_rate_limit
+--
+-- Hace UPSERT atómico: si la key no existe la crea con count=1;
+-- si existe, incrementa count en 1. Devuelve el count resultante.
+--
+-- Es atómico porque PostgreSQL bloquea la row durante el INSERT ON CONFLICT.
+-- Esto evita race conditions cuando llegan múltiples requests al mismo tiempo.
+-- ════════════════════════════════════════════════════════════════════════
+
+CREATE OR REPLACE FUNCTION public.increment_rate_limit(
+  p_key TEXT,
+  p_window_start TIMESTAMPTZ
+)
+RETURNS INTEGER
+LANGUAGE plpgsql
+SECURITY DEFINER
+AS $$
+DECLARE
+  new_count INTEGER;
+BEGIN
+  INSERT INTO public.rate_limit_attempts (key, count, window_start)
+  VALUES (p_key, 1, p_window_start)
+  ON CONFLICT (key) DO UPDATE
+    SET count = public.rate_limit_attempts.count + 1
+  RETURNING count INTO new_count;
+
+  RETURN new_count;
+END;
+$$;
+
+-- Permitir solo a service_role ejecutarla (Edge Functions)
+REVOKE ALL ON FUNCTION public.increment_rate_limit(TEXT, TIMESTAMPTZ) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION public.increment_rate_limit(TEXT, TIMESTAMPTZ) TO service_role;
+
+-- ════════════════════════════════════════════════════════════════════════
 -- Función de cleanup: elimina rows con ventanas > 24h
 -- Se debe llamar periódicamente (manualmente o vía pg_cron).
 -- ════════════════════════════════════════════════════════════════════════
@@ -67,7 +101,7 @@ REVOKE ALL ON FUNCTION public.cleanup_rate_limit_attempts() FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION public.cleanup_rate_limit_attempts() TO service_role;
 
 -- ════════════════════════════════════════════════════════════════════════
--- NOTAS:
+-- NOTAS OPERATIVAS:
 --
 -- 1. Si tienes pg_cron habilitado, puedes agendar el cleanup automático:
 --    SELECT cron.schedule(
@@ -82,4 +116,9 @@ GRANT EXECUTE ON FUNCTION public.cleanup_rate_limit_attempts() TO service_role;
 -- 3. El tamaño de la tabla con tráfico normal de VYLTA debería ser pequeño
 --    (<10K rows en cualquier momento), así que el cleanup es defensa contra
 --    crecimiento descontrolado en caso de ataque.
+--
+-- 4. Para test manual desde SQL:
+--    SELECT increment_rate_limit('test:foo', NOW());  -- devuelve 1
+--    SELECT increment_rate_limit('test:foo', NOW());  -- devuelve 2
+--    SELECT increment_rate_limit('test:foo', NOW());  -- devuelve 3
 -- ════════════════════════════════════════════════════════════════════════
