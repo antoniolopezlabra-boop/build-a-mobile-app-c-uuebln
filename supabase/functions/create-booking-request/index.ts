@@ -1,6 +1,7 @@
 import { serve } from 'https://deno.land/std@0.168.0/http/server.ts'
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
 import { corsForWeb, handleCorsPreflightRequest } from '../_shared/cors.ts'
+import { checkRateLimits, getClientIp } from '../_shared/rate-limit.ts'
 
 const SUPABASE_URL         = Deno.env.get('SUPABASE_URL') ?? ''
 const SUPABASE_SERVICE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
@@ -22,10 +23,10 @@ serve(async (req) => {
   const preflight = handleCorsPreflightRequest(req, corsHeaders)
   if (preflight) return preflight
 
-  function json(body: unknown, status = 200) {
+  function json(body: unknown, status = 200, extraHeaders: Record<string, string> = {}) {
     return new Response(JSON.stringify(body), {
       status,
-      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      headers: { ...corsHeaders, 'Content-Type': 'application/json', ...extraHeaders },
     })
   }
 
@@ -49,6 +50,37 @@ serve(async (req) => {
     }
 
     const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY)
+
+    // ── RATE LIMITING ──────────────────────────────────────────────────
+    // Aplicado ANTES de cualquier query de DB pesada para que un atacante
+    // no pueda saturar la DB enviando requests masivos.
+    //
+    // Reglas (defensa en capas):
+    //   - IP:    5/min  +  20/hora  → para tráfico distribuido por IP
+    //   - Slug:  30/hora             → limita daño por negocio target
+    //   - Phone: 3/día               → evita spam con un solo número
+    //
+    // Si alguna se excede → HTTP 429 con Retry-After.
+    const clientIp = getClientIp(req)
+    const rateCheck = await checkRateLimits(supabase, [
+      { dimension: 'ip',    identifier: clientIp,    window: 'minute', limit: 5  },
+      { dimension: 'ip',    identifier: clientIp,    window: 'hour',   limit: 20 },
+      { dimension: 'slug',  identifier: slug,        window: 'hour',   limit: 30 },
+      { dimension: 'phone', identifier: phoneDigits, window: 'day',    limit: 3  },
+    ])
+
+    if (!rateCheck.allowed) {
+      return json(
+        {
+          error: rateCheck.message,
+          code: 'RATE_LIMITED',
+          retryAfter: rateCheck.retryAfterSeconds,
+        },
+        429,
+        { 'Retry-After': String(rateCheck.retryAfterSeconds) }
+      )
+    }
+    // ────────────────────────────────────────────────────────────────────
 
     // Verificar que el link existe y está activo
     const { data: link, error: linkError } = await supabase
