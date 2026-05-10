@@ -5,21 +5,7 @@ import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
 const RESEND_API_KEY = Deno.env.get('RESEND_API_KEY') ?? ''
 const SUPABASE_URL   = Deno.env.get('SUPABASE_URL') ?? ''
 const SUPABASE_KEY   = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
-
-// ════════════════════════════════════════════════════════════════════════
-// CRITICAL: dominio verificado en Resend
-// ════════════════════════════════════════════════════════════════════════
-// Si NO está configurado el secret RESEND_FROM_DOMAIN, el código FALLA
-// con error claro en lugar de caer al modo sandbox de Resend (que solo
-// envía al email del dueño de la cuenta y NO al resto de clientes).
-//
-// Para configurar:
-//   1. Verificar dominio en https://resend.com/domains (vylta.lat)
-//   2. Supabase Dashboard → Edge Functions → Secrets
-//   3. Add secret: RESEND_FROM_DOMAIN=vylta.lat
-//   4. Re-deploy: npx supabase functions deploy send-campaign
-// ════════════════════════════════════════════════════════════════════════
-const FROM_DOMAIN = Deno.env.get('RESEND_FROM_DOMAIN') ?? ''
+const FROM_DOMAIN    = Deno.env.get('RESEND_FROM_DOMAIN') ?? ''
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -33,35 +19,68 @@ function json(body: unknown, status = 200) {
   })
 }
 
+// ════════════════════════════════════════════════════════════════════════
+// ANTI-SPAM: Validar contenido del email para evitar filtros
+// ════════════════════════════════════════════════════════════════════════
+function checkSpamScore(subject: string, body: string): { ok: boolean; warnings: string[] } {
+  const warnings: string[] = []
+
+  // Mayúsculas excesivas en asunto
+  const upperRatio = (subject.match(/[A-ZÁÉÍÓÚÑ]/g) || []).length / Math.max(1, subject.length)
+  if (upperRatio > 0.5 && subject.length > 10) {
+    warnings.push('Asunto con demasiadas mayúsculas')
+  }
+
+  // Múltiples signos de exclamación
+  if ((subject.match(/!/g) || []).length > 1) {
+    warnings.push('Asunto con múltiples signos de exclamación')
+  }
+
+  // Palabras spam comunes
+  const spamWords = ['GRATIS', 'OFERTA', '100% gratis', 'GANA', 'OFERTA LIMITADA', 'CLICK AQUÍ', 'URGENTE']
+  const upperSubject = subject.toUpperCase()
+  const upperBody = body.toUpperCase()
+  for (const w of spamWords) {
+    if (upperSubject.includes(w) || upperBody.includes(w)) {
+      warnings.push(`Palabra "${w}" puede activar filtros spam`)
+      break // un solo warning suficiente
+    }
+  }
+
+  return { ok: warnings.length === 0, warnings }
+}
+
+// ════════════════════════════════════════════════════════════════════════
+// ANTI-SPAM: Headers profesionales para mejorar deliverability
+// ════════════════════════════════════════════════════════════════════════
+function buildHeaders(unsubscribeUrl: string): Record<string, string> {
+  return {
+    // Gmail/Outlook ahora REQUIEREN List-Unsubscribe en envíos masivos (>= 5000/día)
+    // Aunque tu volumen sea menor, ponerlo mejora la reputación.
+    'List-Unsubscribe': `<${unsubscribeUrl}>`,
+    'List-Unsubscribe-Post': 'List-Unsubscribe=One-Click',
+    // Identifica el email como transaccional/marketing legítimo
+    'X-Entity-Ref-ID': crypto.randomUUID(),
+  }
+}
+
 serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders })
 
   try {
-    // Validar que RESEND_API_KEY existe
     if (!RESEND_API_KEY) {
-      console.error('[send-campaign] RESEND_API_KEY no configurada en Secrets')
       return json({
-        error: 'Configuración pendiente: RESEND_API_KEY no está en Supabase Secrets. Contacta al soporte de VYLTA.',
+        error: 'Configuración pendiente: RESEND_API_KEY no está en Supabase Secrets.',
         code: 'CONFIG_MISSING_RESEND_API_KEY',
       }, 500)
     }
 
-    // ────────────────────────────────────────────────────────────────────
-    // CRITICAL FIX: rechazar ANTES de procesar nada si el dominio no está
-    // configurado. ESTE ES el bug que causó que solo llegaran correos al
-    // owner. Antes el código caía a sandbox sin avisar; ahora falla claro.
-    // ────────────────────────────────────────────────────────────────────
     if (!FROM_DOMAIN || FROM_DOMAIN.includes('resend.dev')) {
-      console.error(
-        '[send-campaign] CRITICAL: RESEND_FROM_DOMAIN no configurado. ' +
-        'En modo sandbox Resend solo envía al owner de la cuenta. ' +
-        'Configura RESEND_FROM_DOMAIN=vylta.lat en Supabase Secrets.'
-      )
+      console.error('[send-campaign] CRITICAL: RESEND_FROM_DOMAIN no configurado')
       return json({
         error:
           'El servicio de email aún no está configurado para envío masivo. ' +
-          'El dominio de envío necesita verificación. Por favor contacta a soporte@vylta.lat ' +
-          'para activar email marketing en tu cuenta.',
+          'El dominio de envío necesita verificación.',
         code: 'CONFIG_MISSING_FROM_DOMAIN',
       }, 503)
     }
@@ -75,8 +94,6 @@ serve(async (req) => {
     let body: string
     let segment: string
 
-    // Modo 1: enviar borrador ya guardado (por campaignId)
-    // Modo 2: datos directos desde la app (crea registro aquí)
     if (payload.campaignId) {
       campaignId = payload.campaignId
       const { data: campaign, error: campError } = await supabase
@@ -102,14 +119,36 @@ serve(async (req) => {
       throw new Error('Parámetros requeridos: campaignId O (userId + subject + body)')
     }
 
-    // Obtener nombre del negocio
-    const { data: business } = await supabase
-      .from('business_profiles').select('business_name').eq('user_id', userId).maybeSingle()
-    const businessName = business?.business_name || 'VYLTA'
+    // ── Validar contenido para detectar posibles spam triggers ──
+    const spamCheck = checkSpamScore(subject, body)
+    if (spamCheck.warnings.length > 0) {
+      console.warn(`[send-campaign] Spam warnings: ${spamCheck.warnings.join(' | ')}`)
+    }
 
-    // Construir remitente — ya validamos arriba que FROM_DOMAIN es válido
-    const fromAddress = `noreply@${FROM_DOMAIN}`
-    const fromField = `${businessName} <${fromAddress}>`
+    // Obtener perfil del negocio (incluye email para reply-to y nombre del owner)
+    const { data: business } = await supabase
+      .from('business_profiles')
+      .select('business_name, business_email, business_phone, business_address')
+      .eq('user_id', userId)
+      .maybeSingle()
+    const businessName    = business?.business_name || 'VYLTA'
+    const businessEmail   = business?.business_email || ''
+    const businessPhone   = business?.business_phone || ''
+    const businessAddress = business?.business_address || ''
+
+    // ────────────────────────────────────────────────────────────────────
+    // ANTI-SPAM: Construir from address profesional
+    // ────────────────────────────────────────────────────────────────────
+    // Sanitizar el nombre del negocio para evitar caracteres que rompan SMTP
+    const safeName = businessName.replace(/[<>"]/g, '').trim().slice(0, 50)
+    // Usar 'hola@' en lugar de 'noreply@' — los proveedores penalizan 'noreply'
+    // porque señala "no esperamos respuesta" (peor deliverability)
+    const fromAddress = `hola@${FROM_DOMAIN}`
+    const fromField = `${safeName} <${fromAddress}>`
+
+    // Reply-to: usa el email del negocio si está, sino el del owner
+    const { data: ownerData } = await supabase.auth.admin.getUserById(userId)
+    const ownerEmail = businessEmail || ownerData?.user?.email || `soporte@${FROM_DOMAIN}`
 
     // Obtener clientes con email según segmento
     let query = supabase.from('clients').select('id, name, email')
@@ -125,21 +164,17 @@ serve(async (req) => {
     const { data: clients, error: clientsError } = await query
     if (clientsError) throw new Error(`Error obteniendo clientes: ${clientsError.message}`)
     if (!clients || clients.length === 0) {
-      // Marcar campaña como error si no había destinatarios
       await supabase.from('email_campaigns').update({
         status: 'error', sent_at: new Date().toISOString(), recipient_count: 0,
       }).eq('id', campaignId)
       return json({
-        error:
-          'No hay clientes con email registrado para este segmento. ' +
-          'Asegúrate de que tus clientes tienen email guardado en su perfil.',
+        error: 'No hay clientes con email registrado para este segmento.',
         code: 'NO_RECIPIENTS',
       }, 400)
     }
 
-    console.log(`[send-campaign] Enviando a ${clients.length} clientes | segmento: ${segment} | from: ${fromField}`)
+    console.log(`[send-campaign] Enviando a ${clients.length} clientes | from: ${fromField} | reply-to: ${ownerEmail}`)
 
-    // Enviar en lotes de 50 — loguear cada error de Resend
     let sent    = 0
     let failed  = 0
     const errors: string[] = []
@@ -155,6 +190,9 @@ serve(async (req) => {
           .replace(/\{\{nombre\}\}/g, client.name || '')
           .replace(/\{\{negocio\}\}/g, businessName)
 
+        // URL de unsubscribe (placeholder — implementar endpoint real más adelante)
+        const unsubscribeUrl = `https://vylta.lat/unsubscribe?u=${userId}&c=${client.id}`
+
         const res = await fetch('https://api.resend.com/emails', {
           method: 'POST',
           headers: {
@@ -162,15 +200,20 @@ serve(async (req) => {
             'Content-Type': 'application/json',
           },
           body: JSON.stringify({
-            from:    fromField,
-            to:      [client.email],
-            subject: personalizedSubject,
-            text:    personalizedBody,
-            html:    buildEmailHtml(personalizedSubject, personalizedBody, businessName),
+            from:     fromField,
+            to:       [client.email],
+            reply_to: ownerEmail, // ← clave para deliverability: respuestas van al negocio
+            subject:  personalizedSubject,
+            text:     buildPlainText(personalizedSubject, personalizedBody, businessName, businessEmail, businessPhone, businessAddress, unsubscribeUrl),
+            html:     buildEmailHtml(personalizedSubject, personalizedBody, businessName, businessEmail, businessPhone, businessAddress, unsubscribeUrl, client.name || ''),
+            headers:  buildHeaders(unsubscribeUrl),
+            tags: [
+              { name: 'campaign', value: campaignId.slice(0, 36) },
+              { name: 'segment',  value: segment },
+            ],
           }),
         })
 
-        // Capturar respuesta de Resend para loguear errores
         const resBody = await res.json().catch(() => ({}))
 
         if (!res.ok) {
@@ -179,7 +222,6 @@ serve(async (req) => {
           throw new Error(errMsg)
         }
 
-        console.log(`[send-campaign] Enviado OK a ${client.email}`)
         return resBody
       }))
 
@@ -193,33 +235,33 @@ serve(async (req) => {
     }
 
     console.log(`[send-campaign] Resultado: ${sent} enviados, ${failed} fallidos`)
-    if (errors.length > 0) {
-      console.error(`[send-campaign] Errores: ${errors.slice(0, 5).join(' | ')}`)
-    }
 
-    // Actualizar registro de campaña
     await supabase.from('email_campaigns').update({
       status:          sent > 0 ? 'enviada' : 'error',
       sent_at:         new Date().toISOString(),
       recipient_count: sent,
     }).eq('id', campaignId)
 
-    // Si todo falló, retornar error claro
     if (sent === 0 && failed > 0) {
       const isDomainError = errors.some(e =>
-        e.includes('403') || e.includes('domain') || e.includes('not verified') || e.includes('testing')
+        e.includes('403') || e.includes('domain') || e.includes('not verified')
       )
       return json({
         error: isDomainError
-          ? `El dominio ${FROM_DOMAIN} no está verificado en Resend. Verifica los DNS records en https://resend.com/domains`
+          ? `El dominio ${FROM_DOMAIN} no está verificado en Resend.`
           : `Error enviando. Primeros errores: ${errors.slice(0, 2).join(' | ')}`,
-        sent:   0,
+        sent: 0,
         failed,
         code: isDomainError ? 'DOMAIN_NOT_VERIFIED' : 'SEND_FAILED',
       }, 400)
     }
 
-    return json({ success: true, sent, failed })
+    return json({
+      success: true,
+      sent,
+      failed,
+      spamWarnings: spamCheck.warnings, // ← devolver al frontend para mostrar
+    })
 
   } catch (error: any) {
     console.error('[send-campaign] Error general:', error.message)
@@ -227,30 +269,144 @@ serve(async (req) => {
   }
 })
 
-function buildEmailHtml(subject: string, body: string, businessName: string): string {
+// ════════════════════════════════════════════════════════════════════════
+// PLAIN TEXT version — Gmail/Outlook puntúan mejor cuando el email tiene
+// versión texto + HTML (multipart/alternative). Sin esto, los filtros
+// asumen que es marketing puro.
+// ════════════════════════════════════════════════════════════════════════
+function buildPlainText(
+  subject: string,
+  body: string,
+  businessName: string,
+  businessEmail: string,
+  businessPhone: string,
+  businessAddress: string,
+  unsubscribeUrl: string,
+): string {
+  const lines = [
+    subject,
+    '─────────────────────────────',
+    '',
+    body,
+    '',
+    '─────────────────────────────',
+    `Enviado por ${businessName}`,
+  ]
+  if (businessEmail)   lines.push(`Email: ${businessEmail}`)
+  if (businessPhone)   lines.push(`Teléfono: ${businessPhone}`)
+  if (businessAddress) lines.push(`Dirección: ${businessAddress}`)
+  lines.push('')
+  lines.push(`Si ya no deseas recibir estos correos: ${unsubscribeUrl}`)
+  lines.push('')
+  lines.push('Powered by VYLTA · vylta.lat')
+  return lines.join('\n')
+}
+
+// ════════════════════════════════════════════════════════════════════════
+// HTML version — diseño limpio, profesional, anti-spam
+// ════════════════════════════════════════════════════════════════════════
+function buildEmailHtml(
+  subject: string,
+  body: string,
+  businessName: string,
+  businessEmail: string,
+  businessPhone: string,
+  businessAddress: string,
+  unsubscribeUrl: string,
+  clientName: string,
+): string {
+  const safeName = clientName.split(' ')[0] || 'cliente'
+
+  // Renderizar body con saltos de línea
   const lines = body
     .split('\n')
-    .map(l => `<p style="margin:0 0 12px;font-size:15px;line-height:1.7;color:#374151;">${l || '&nbsp;'}</p>`)
+    .map(l => l.trim() ? `<p style="margin:0 0 14px;font-size:15px;line-height:1.7;color:#374151;">${escapeHtml(l)}</p>` : '<br>')
     .join('')
-  return `<!DOCTYPE html><html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head>
-<body style="margin:0;padding:0;background:#F8FAFC;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;">
-  <table width="100%" cellpadding="0" cellspacing="0" style="background:#F8FAFC;padding:40px 16px;">
-    <tr><td align="center">
-      <table width="600" cellpadding="0" cellspacing="0" style="max-width:600px;width:100%;background:#fff;border-radius:16px;overflow:hidden;border:1px solid #E2E8F0;">
-        <tr><td style="background:#10B981;padding:28px 36px;">
-          <p style="margin:0;color:#fff;font-size:22px;font-weight:700;">${businessName}</p>
-        </td></tr>
-        <tr><td style="padding:32px 36px 8px;">
-          <h1 style="margin:0;font-size:22px;font-weight:700;color:#0F172A;line-height:1.3;">${subject}</h1>
-        </td></tr>
-        <tr><td style="padding:16px 36px 32px;">${lines}</td></tr>
-        <tr><td style="background:#F8FAFC;padding:20px 36px;border-top:1px solid #E2E8F0;">
-          <p style="margin:0;font-size:12px;color:#94A3B8;text-align:center;">
-            Enviado por <strong style="color:#10B981;">${businessName}</strong> a través de <strong>VYLTA</strong>
-          </p>
-        </td></tr>
-      </table>
-    </td></tr>
+
+  // Footer con info de contacto del negocio (CAN-SPAM/CAS compliance)
+  const contactLines: string[] = []
+  if (businessEmail)   contactLines.push(`<a href="mailto:${escapeHtml(businessEmail)}" style="color:#10B981;text-decoration:none;">${escapeHtml(businessEmail)}</a>`)
+  if (businessPhone)   contactLines.push(escapeHtml(businessPhone))
+  if (businessAddress) contactLines.push(escapeHtml(businessAddress))
+
+  return `<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="x-apple-disable-message-reformatting">
+<title>${escapeHtml(subject)}</title>
+</head>
+<body style="margin:0;padding:0;background:#F8FAFC;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;">
+  <!-- Preheader: texto que aparece como preview en la bandeja -->
+  <div style="display:none;max-height:0;overflow:hidden;color:#F8FAFC;">
+    Mensaje de ${escapeHtml(businessName)} para ${escapeHtml(safeName)}
+  </div>
+  <table width="100%" cellpadding="0" cellspacing="0" border="0" style="background:#F8FAFC;padding:40px 16px;">
+    <tr>
+      <td align="center">
+        <table width="600" cellpadding="0" cellspacing="0" border="0" style="max-width:600px;width:100%;background:#FFFFFF;border-radius:12px;overflow:hidden;border:1px solid #E2E8F0;">
+          <!-- Header con nombre del negocio -->
+          <tr>
+            <td style="background:#10B981;padding:24px 32px;">
+              <p style="margin:0;color:#FFFFFF;font-size:20px;font-weight:700;letter-spacing:-0.01em;">${escapeHtml(businessName)}</p>
+            </td>
+          </tr>
+          <!-- Asunto como h1 -->
+          <tr>
+            <td style="padding:32px 32px 0;">
+              <h1 style="margin:0 0 8px;font-size:22px;font-weight:700;color:#0F172A;line-height:1.3;">${escapeHtml(subject)}</h1>
+            </td>
+          </tr>
+          <!-- Cuerpo del mensaje -->
+          <tr>
+            <td style="padding:16px 32px 32px;">
+              ${lines}
+            </td>
+          </tr>
+          <!-- Info de contacto del negocio (importante para deliverability) -->
+          ${contactLines.length > 0 ? `
+          <tr>
+            <td style="padding:0 32px 24px;">
+              <table width="100%" cellpadding="0" cellspacing="0" border="0" style="background:#F8FAFC;border-radius:8px;padding:16px;">
+                <tr>
+                  <td>
+                    <p style="margin:0 0 6px;font-size:11px;font-weight:700;color:#94A3B8;text-transform:uppercase;letter-spacing:0.5px;">Contacto</p>
+                    <p style="margin:0;font-size:13px;color:#475569;line-height:1.6;">
+                      ${contactLines.join('<br>')}
+                    </p>
+                  </td>
+                </tr>
+              </table>
+            </td>
+          </tr>` : ''}
+          <!-- Footer con unsubscribe (CAN-SPAM compliance) -->
+          <tr>
+            <td style="background:#F8FAFC;padding:20px 32px;border-top:1px solid #E2E8F0;">
+              <p style="margin:0 0 8px;font-size:12px;color:#94A3B8;text-align:center;line-height:1.6;">
+                Recibiste este correo porque eres cliente de <strong style="color:#10B981;">${escapeHtml(businessName)}</strong>.
+              </p>
+              <p style="margin:0;font-size:11px;color:#CBD5E1;text-align:center;line-height:1.5;">
+                Si ya no deseas recibir estos correos, <a href="${unsubscribeUrl}" style="color:#94A3B8;text-decoration:underline;">cancela tu suscripción aquí</a>.
+              </p>
+              <p style="margin:12px 0 0;font-size:10px;color:#CBD5E1;text-align:center;">
+                Enviado a través de <a href="https://vylta.lat" style="color:#10B981;text-decoration:none;">VYLTA</a>
+              </p>
+            </td>
+          </tr>
+        </table>
+      </td>
+    </tr>
   </table>
-</body></html>`
+</body>
+</html>`
+}
+
+function escapeHtml(s: string): string {
+  return s
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;')
 }
