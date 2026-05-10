@@ -1,16 +1,11 @@
 import { createClient } from 'jsr:@supabase/supabase-js@2';
-
-const corsHeaders = {
-  'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
-  'Access-Control-Allow-Methods': 'POST, OPTIONS',
-};
+import { corsForApp, handleCorsPreflightRequest } from '../_shared/cors.ts';
 
 Deno.serve(async (req: Request) => {
-  // Handle CORS preflight
-  if (req.method === 'OPTIONS') {
-    return new Response('ok', { headers: corsHeaders });
-  }
+  // CORS: esta función es llamada desde la app móvil (Settings → Plan).
+  const corsHeaders = corsForApp(req);
+  const preflight = handleCorsPreflightRequest(req, corsHeaders);
+  if (preflight) return preflight;
 
   try {
     if (req.method !== 'POST') {
