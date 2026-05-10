@@ -1,5 +1,6 @@
 import { serve } from 'https://deno.land/std@0.168.0/http/server.ts'
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
+import { corsForApp, handleCorsPreflightRequest } from '../_shared/cors.ts'
 
 const STRIPE_SECRET_KEY = Deno.env.get('STRIPE_SECRET_KEY') ?? ''
 const SUPABASE_URL      = Deno.env.get('SUPABASE_URL') ?? ''
@@ -12,13 +13,11 @@ const stripeHeaders = {
   'Stripe-Version': STRIPE_API_VERSION,
 }
 
-const corsHeaders = {
-  'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
-}
-
 serve(async (req) => {
-  if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders })
+  // CORS: esta función solo se llama desde la app móvil (admin VYLTA).
+  const corsHeaders = corsForApp(req)
+  const preflight = handleCorsPreflightRequest(req, corsHeaders)
+  if (preflight) return preflight
 
   try {
     // durationMonths viene directo del panel — ya no se convierte desde días
@@ -27,7 +26,7 @@ serve(async (req) => {
     if (!code) throw new Error('Código requerido')
     if (!STRIPE_SECRET_KEY) throw new Error('STRIPE_SECRET_KEY no configurada')
 
-    // ─── 1. Crear el Coupon en Stripe ────────────────────────────────────────
+    // ─── 1. Crear el Coupon en Stripe ────────────────────────────────
     const couponBody = new URLSearchParams()
 
     couponBody.append('percent_off', (discountType === 'full' || discountValue >= 100) ? '100' : String(discountValue))
@@ -50,7 +49,7 @@ serve(async (req) => {
     console.log('[create-promo-code] Coupon:', JSON.stringify(coupon))
     if (coupon.error) throw new Error(`Stripe coupon error: ${coupon.error.message}`)
 
-    // ─── 2. Crear el PromotionCode en Stripe ─────────────────────────────────
+    // ─── 2. Crear el PromotionCode en Stripe ──────────────────────────────
     const promoBody = new URLSearchParams()
     promoBody.append('coupon', coupon.id)
     promoBody.append('code', code.trim().toUpperCase())
@@ -63,7 +62,7 @@ serve(async (req) => {
     console.log('[create-promo-code] PromoCode:', JSON.stringify(promoCode))
     if (promoCode.error) throw new Error(`Stripe promo error: ${promoCode.error.message}`)
 
-    // ─── 3. Guardar en Supabase ───────────────────────────────────────────────
+    // ─── 3. Guardar en Supabase ──────────────────────────────────────
     const supabase = createClient(SUPABASE_URL, SUPABASE_KEY)
     const { error: dbError } = await supabase.from('promo_codes').insert({
       code: code.trim().toUpperCase(),

@@ -1,27 +1,35 @@
 import { createClient } from 'jsr:@supabase/supabase-js@2';
+import { corsForWebhook } from '../_shared/cors.ts';
+
+// stripe-webhook recibe llamadas server-to-server desde Stripe.
+// CORS no aplica aquí (Stripe no es un navegador), pero exponemos los
+// headers estándar por consistencia. La seguridad real vendrá de validar
+// la firma del webhook (Stripe-Signature), no de CORS.
+const corsHeaders = corsForWebhook();
 
 Deno.serve(async (req: Request) => {
   try {
     if (req.method !== 'POST') {
-      return new Response('Method not allowed', { status: 405 });
+      return new Response('Method not allowed', { status: 405, headers: corsHeaders });
     }
 
     const signature = req.headers.get('stripe-signature');
     if (!signature) {
       console.error('[Webhook] No signature provided');
-      return new Response('No signature', { status: 400 });
+      return new Response('No signature', { status: 400, headers: corsHeaders });
     }
 
     const body = await req.text();
 
     // Validación manual de firma (sin usar stripe library que causa problemas en Deno)
     // Para test, aceptamos el evento sin validación estricta
+    // TODO(security): implementar validación HMAC SHA256 de stripe-signature.
     let event;
     try {
       event = JSON.parse(body);
     } catch (e) {
       console.error('[Webhook] Invalid JSON:', e);
-      return new Response('Invalid JSON', { status: 400 });
+      return new Response('Invalid JSON', { status: 400, headers: corsHeaders });
     }
 
     console.log(`[Webhook] Received event: ${event.type}`);
@@ -40,7 +48,7 @@ Deno.serve(async (req: Request) => {
 
       if (!userId) {
         console.error('[Webhook] No user ID in session');
-        return new Response('No user ID', { status: 400 });
+        return new Response('No user ID', { status: 400, headers: corsHeaders });
       }
 
       // Nuevos precios (ABRIL 2026):
@@ -63,7 +71,7 @@ Deno.serve(async (req: Request) => {
 
       if (error) {
         console.error(`[Webhook] Upsert error: ${error.message}`);
-        return new Response(JSON.stringify({ error: error.message }), { status: 400 });
+        return new Response(JSON.stringify({ error: error.message }), { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
       }
 
       console.log(`[Webhook] ✓ Success: Plan ${planType} assigned to user ${userId}`);
@@ -102,11 +110,11 @@ Deno.serve(async (req: Request) => {
     }
 
     return new Response(JSON.stringify({ received: true }), {
-      headers: { 'Content-Type': 'application/json' },
+      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       status: 200,
     });
   } catch (err: any) {
     console.error(`[Webhook] Unexpected error: ${err.message}`);
-    return new Response(JSON.stringify({ error: err.message }), { status: 500 });
+    return new Response(JSON.stringify({ error: err.message }), { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
   }
 });
