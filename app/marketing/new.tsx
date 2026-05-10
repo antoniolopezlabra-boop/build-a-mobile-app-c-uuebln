@@ -5,7 +5,7 @@ import {
   TextInput, ActivityIndicator, Modal,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useRouter } from 'expo-router';
+import { useRouter, useLocalSearchParams } from 'expo-router';
 import MaterialIcons from '@expo/vector-icons/MaterialIcons';
 import { useAuth } from '@/contexts/AuthContext';
 import { usePlan } from '@/contexts/PlanContext';
@@ -24,14 +24,31 @@ const VARIABLES = [
   { key: '{{negocio}}', label: 'Tu negocio' },
 ];
 
+// Helper: convertir param que puede venir como string o string[]
+function paramAsString(p: any): string {
+  if (Array.isArray(p)) return p[0] || '';
+  return typeof p === 'string' ? p : '';
+}
+
 export default function NewCampaignScreen() {
   const router = useRouter();
+  const params = useLocalSearchParams();
   const { user, businessProfile } = useAuth();
   const { isPremium } = usePlan();
 
-  const [subject, setSubject] = useState('');
-  const [body, setBody] = useState('');
-  const [segment, setSegment] = useState<Segment>('todos');
+  // ── Precargar desde params si vienen ──
+  // Vienen cuando el usuario hace click en "Continuar editando" (con draftId)
+  // o "Duplicar campaña" (sin draftId) desde la pantalla de detalle.
+  const initialSubject = paramAsString(params.subject);
+  const initialBody    = paramAsString(params.body);
+  const initialSegRaw  = paramAsString(params.segment);
+  const initialSegment: Segment =
+    (['todos', 'activos', 'inactivos'].includes(initialSegRaw) ? initialSegRaw : 'todos') as Segment;
+  const draftId = paramAsString(params.draftId);
+
+  const [subject, setSubject] = useState(initialSubject);
+  const [body, setBody] = useState(initialBody);
+  const [segment, setSegment] = useState<Segment>(initialSegment);
   const [recipientCount, setRecipientCount] = useState<number | null>(null);
   const [loadingCount, setLoadingCount] = useState(false);
   const [sending, setSending] = useState(false);
@@ -40,6 +57,8 @@ export default function NewCampaignScreen() {
   const [confirmSend, setConfirmSend] = useState(false);
   const [errorModal, setErrorModal] = useState({ visible: false, message: '' });
   const [successModal, setSuccessModal] = useState({ visible: false, count: 0 });
+
+  const isEditingDraft = !!draftId;
 
   useEffect(() => {
     if (!isPremium) {
@@ -60,7 +79,6 @@ export default function NewCampaignScreen() {
         .neq('email', '');
       if (segment === 'activos') query = query.eq('is_active', true);
       else if (segment === 'inactivos') {
-        // Hace 90 días en timezone local
         const d90Str = getDateStringDaysFromNow(-90);
         query = query.lt('last_visit', d90Str);
       }
@@ -87,14 +105,32 @@ export default function NewCampaignScreen() {
     setSavingDraft(true);
     try {
       const { supabase } = await import('@/lib/supabase');
-      await supabase.from('email_campaigns').insert({
-        user_id: user?.id,
-        subject: subject.trim() || '(Sin asunto)',
-        body: body.trim(),
-        segment,
-        status: 'borrador',
-        recipient_count: recipientCount || 0,
-      });
+
+      if (isEditingDraft) {
+        // ── UPDATE existente para no duplicar borradores ──
+        const { error } = await supabase
+          .from('email_campaigns')
+          .update({
+            subject: subject.trim() || '(Sin asunto)',
+            body: body.trim(),
+            segment,
+            recipient_count: recipientCount || 0,
+          })
+          .eq('id', draftId)
+          .eq('user_id', user?.id);
+        if (error) throw error;
+      } else {
+        // ── INSERT nuevo borrador ──
+        const { error } = await supabase.from('email_campaigns').insert({
+          user_id: user?.id,
+          subject: subject.trim() || '(Sin asunto)',
+          body: body.trim(),
+          segment,
+          status: 'borrador',
+          recipient_count: recipientCount || 0,
+        });
+        if (error) throw error;
+      }
       router.back();
     } catch (e: any) {
       setErrorModal({ visible: true, message: e?.message || 'Error al guardar borrador' });
@@ -109,26 +145,37 @@ export default function NewCampaignScreen() {
     try {
       const { supabase } = await import('@/lib/supabase');
 
-      // supabase.functions.invoke retorna { data, error }
-      // Cuando la función retorna 4xx/5xx, 'error' tiene mensaje genérico del SDK
-      // y 'data' contiene el body real con el mensaje de error de la función.
-      // Por eso siempre revisamos data?.error primero.
-      const { data, error } = await supabase.functions.invoke('send-campaign', {
-        body: {
+      // Si estamos editando un borrador existente, primero actualizarlo
+      // para que el send-campaign use el último contenido y no duplique.
+      let payload: any;
+      if (isEditingDraft) {
+        await supabase
+          .from('email_campaigns')
+          .update({
+            subject: subject.trim(),
+            body: body.trim(),
+            segment,
+            recipient_count: recipientCount || 0,
+          })
+          .eq('id', draftId)
+          .eq('user_id', user?.id);
+        payload = { campaignId: draftId };
+      } else {
+        payload = {
           userId: user?.id,
           subject: subject.trim(),
           body: body.trim(),
           segment,
           recipientCount: recipientCount || 0,
-        },
-      });
+        };
+      }
 
-      // El mensaje real de error de la función está en data?.error
+      const { data, error } = await supabase.functions.invoke('send-campaign', { body: payload });
+
       if (data?.error) {
         throw new Error(data.error);
       }
 
-      // Si no hay data (la función falló antes de responder JSON)
       if (error && !data) {
         throw new Error(
           'No se pudo conectar con el servidor. Verifica tu conexión e inténtalo de nuevo.'
@@ -171,13 +218,22 @@ export default function NewCampaignScreen() {
         <TouchableOpacity onPress={() => router.back()} style={s.back}>
           <MaterialIcons name="arrow-back" size={24} color="#0F172A" />
         </TouchableOpacity>
-        <View style={s.headerMid}><Text style={s.title}>Nueva campaña</Text></View>
+        <View style={s.headerMid}>
+          <Text style={s.title}>{isEditingDraft ? 'Editar borrador' : 'Nueva campaña'}</Text>
+        </View>
         <TouchableOpacity onPress={saveDraft} disabled={savingDraft} style={s.draftBtn}>
           {savingDraft ? <ActivityIndicator size="small" color="#6366F1" /> : <Text style={s.draftText}>Guardar borrador</Text>}
         </TouchableOpacity>
       </View>
 
       <ScrollView contentContainerStyle={s.scroll} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
+        {isEditingDraft && (
+          <View style={s.draftBanner}>
+            <MaterialIcons name="edit" size={14} color="#F59E0B" />
+            <Text style={s.draftBannerText}>Editando borrador existente</Text>
+          </View>
+        )}
+
         <Text style={s.sectionLabel}>DESTINATARIOS</Text>
         <View style={s.segmentRow}>
           {SEGMENTS.map(seg => (
@@ -265,6 +321,12 @@ const s = StyleSheet.create({
   draftBtn: { paddingHorizontal: 12, paddingVertical: 8 },
   draftText: { fontSize: 13, color: '#6366F1', fontWeight: '600' },
   scroll: { padding: 16 },
+  draftBanner: {
+    flexDirection: 'row', alignItems: 'center', gap: 6,
+    backgroundColor: '#FFFBEB', borderRadius: 8, paddingHorizontal: 12, paddingVertical: 8,
+    borderWidth: 0.5, borderColor: '#FDE68A',
+  },
+  draftBannerText: { fontSize: 12, fontWeight: '600', color: '#92400E' },
   sectionLabel: { fontSize: 11, fontWeight: '800', color: '#94A3B8', letterSpacing: 1.2, marginBottom: 8, marginTop: 16 },
   segmentRow: { flexDirection: 'row', gap: 8 },
   segBtn: { flex: 1, backgroundColor: '#fff', borderRadius: 12, padding: 10, alignItems: 'center', gap: 4, borderWidth: 0.5, borderColor: '#E2E8F0' },
