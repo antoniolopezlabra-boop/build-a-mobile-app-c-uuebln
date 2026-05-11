@@ -79,10 +79,9 @@ export default function ReportsScreen() {
   const router = useRouter();
   const { colors: tc, isDark } = useTheme();
 
-  // Mes seleccionado para el reporte — por defecto el mes actual
   const now = new Date();
   const [selectedYear,  setSelectedYear]  = useState(now.getFullYear());
-  const [selectedMonth, setSelectedMonth] = useState(now.getMonth()); // 0-indexed
+  const [selectedMonth, setSelectedMonth] = useState(now.getMonth());
 
   const [loading, setLoading]       = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -92,17 +91,19 @@ export default function ReportsScreen() {
   const [reportTab, setReportTab]   = useState<'general' | 'equipo'>('general');
   const [staffRange, setStaffRange] = useState<'semana' | 'mes' | 'todo'>('mes');
 
+  // ── NUEVO: indica si el usuario tiene COLABORADORES activos ──
+  // Independiente de si staffStats tiene datos. Esto permite mostrar el tab
+  // "Mi equipo" aún si no hay citas asignadas todavía a ningún colaborador
+  // en el período seleccionado.
+  const [hasStaff, setHasStaff] = useState(false);
+
   const [aptsModal, setAptsModal]       = useState(false);
   const [aptsLoading, setAptsLoading]   = useState(false);
   const [aptsList, setAptsList]         = useState<AppointmentItem[]>([]);
   const [clientsModal, setClientsModal] = useState(false);
 
-  // Límite navegable — mes más antiguo que el usuario puede ver.
   const [earliestMonth, setEarliestMonth] = useState<{ year: number; month: number } | null>(null);
 
-  // Flag para evitar la doble carga: el useFocusEffect ya hace la carga inicial,
-  // pero el useEffect de filtros también dispararía al montar. Con esta ref
-  // ignoramos el primer disparo del useEffect de filtros.
   const isInitialMount = useRef(true);
 
   const isCurrentMonth = selectedYear === now.getFullYear() && selectedMonth === now.getMonth();
@@ -112,23 +113,37 @@ export default function ReportsScreen() {
     (selectedYear === earliestMonth.year && selectedMonth <= earliestMonth.month)
   );
 
-  // Carga el límite inferior una sola vez cuando se monta el componente.
+  // ── Carga inicial: límite de meses + detección de equipo ──
+  // Ambos se cargan una sola vez al montar. La detección de equipo es una
+  // consulta súper barata (select id .limit(1)) que NO trae todo el staff.
   useEffect(() => {
     let cancelled = false;
     (async () => {
       try {
         const userId = await getCurrentUserId();
 
-        const { data: oldestApt } = await supabase
-          .from('appointments')
-          .select('date')
-          .eq('user_id', userId)
-          .order('date', { ascending: true })
-          .limit(1)
-          .maybeSingle();
+        // Paralelo: cita más antigua + detección de staff
+        const [oldestResult, staffResult] = await Promise.all([
+          supabase
+            .from('appointments')
+            .select('date')
+            .eq('user_id', userId)
+            .order('date', { ascending: true })
+            .limit(1)
+            .maybeSingle(),
+          supabase
+            .from('staff_members')
+            .select('id')
+            .eq('user_id', userId)
+            .eq('is_active', true)
+            .limit(1)
+            .maybeSingle(),
+        ]);
 
-        let refDateStr: string | null = oldestApt?.date ?? null;
+        if (cancelled) return;
 
+        // Procesar earliest month
+        let refDateStr: string | null = oldestResult.data?.date ?? null;
         if (!refDateStr) {
           const { data: profile } = await supabase
             .from('business_profiles')
@@ -146,19 +161,23 @@ export default function ReportsScreen() {
         } else {
           setEarliestMonth({ year: now.getFullYear(), month: now.getMonth() });
         }
+
+        // Procesar hasStaff: true si encontró al menos 1 colaborador activo
+        setHasStaff(!!staffResult.data);
       } catch (e) {
         if (cancelled) return;
         const d = new Date();
         d.setMonth(d.getMonth() - 12);
         setEarliestMonth({ year: d.getFullYear(), month: d.getMonth() });
+        // En error, NO ocultamos el tab — mejor mostrarlo y que el usuario
+        // vea el empty state si no tiene equipo, que ocultar algo que SÍ tiene.
+        setHasStaff(false);
       }
     })();
     return () => { cancelled = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user?.id]);
 
-  // ── CARGA INICIAL al enfocar la pantalla ──
-  // Solo carga si no hay stats ya (evita doble fetch al volver de un modal).
   useFocusEffect(
     useCallback(() => {
       const cacheKey = getReportsCacheKey(selectedYear, selectedMonth);
@@ -166,7 +185,6 @@ export default function ReportsScreen() {
       if (cached) {
         setStats(cached);
         setLoading(false);
-        // Refresh silencioso en background para mantener datos frescos
         loadData(true, false, true);
       } else {
         loadData();
@@ -195,17 +213,6 @@ export default function ReportsScreen() {
     }
   };
 
-  // ════════════════════════════════════════════════════════════════════
-  // RECARGA AUTOMÁTICA al cambiar mes seleccionado (FIX MAY 2026)
-  //
-  // Antes había un patrón con prevMonthRef que NO disparaba la primera vez
-  // y dejaba la pantalla con datos del mes anterior. Los usuarios reportaron
-  // tener que hacer pull-to-refresh manualmente para ver datos actualizados.
-  //
-  // Ahora: cada cambio de selectedYear o selectedMonth dispara loadData()
-  // inmediatamente. La ref isInitialMount evita la doble carga inicial
-  // (useFocusEffect ya cargó al montar).
-  // ════════════════════════════════════════════════════════════════════
   useEffect(() => {
     if (isInitialMount.current) {
       isInitialMount.current = false;
@@ -215,20 +222,10 @@ export default function ReportsScreen() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedYear, selectedMonth]);
 
-  // ════════════════════════════════════════════════════════════════════
-  // RECARGA STAFF STATS al cambiar mes O staffRange O cambiar a tab "equipo" (FIX MAY 2026)
-  //
-  // Antes: solo se cargaba dentro de loadData() (al cambiar mes) o al hacer
-  // click manual en los botones de rango. Si el usuario cambiaba de tab
-  // "General" a "Mi equipo" después de navegar meses, los datos no se
-  // refrescaban.
-  //
-  // Ahora: cada cambio relevante (mes, rango, tab equipo) dispara recarga
-  // de staffStats explícitamente.
-  // ════════════════════════════════════════════════════════════════════
+  // Recarga staff stats al cambiar filtros DE EQUIPO o al entrar al tab equipo
   useEffect(() => {
     if (!isPremium) return;
-    if (reportTab !== 'equipo') return; // solo recargar si está viendo el tab equipo
+    if (reportTab !== 'equipo') return;
     (async () => {
       try {
         const userId = await getCurrentUserId();
@@ -404,8 +401,6 @@ export default function ReportsScreen() {
     } catch (e) { console.error('[Reports staff]', e); }
   };
 
-  // Ahora el cambio de range solo actualiza el state — el useEffect de arriba
-  // detecta el cambio y dispara loadStaffStats automáticamente.
   const handleStaffRangeChange = (range: 'semana' | 'mes' | 'todo') => {
     setStaffRange(range);
   };
@@ -496,7 +491,12 @@ export default function ReportsScreen() {
           </View>
         </View>
 
-        {isPremium && staffStats.length > 0 && (
+        {/* ── TABS General / Mi equipo ──
+            FIX MAY 2026: Antes la condición era `staffStats.length > 0` lo cual
+            causaba que el tab desapareciera porque staffStats solo se carga al
+            entrar al tab equipo (círculo vicioso).
+            Ahora usa `hasStaff` que se detecta al inicio con una consulta barata. */}
+        {isPremium && hasStaff && (
           <View style={[s.reportTabRow, { backgroundColor: tc.surface, borderBottomColor: tc.border }]}>
             <TouchableOpacity style={[s.reportTab, reportTab === 'general' && s.reportTabActive]} onPress={() => setReportTab('general')}>
               <MaterialIcons name="bar-chart" size={16} color={reportTab === 'general' ? '#fff' : tc.textMuted} />
