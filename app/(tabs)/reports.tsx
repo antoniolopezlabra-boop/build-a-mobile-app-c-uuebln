@@ -98,29 +98,27 @@ export default function ReportsScreen() {
   const [clientsModal, setClientsModal] = useState(false);
 
   // Límite navegable — mes más antiguo que el usuario puede ver.
-  // Se calcula a partir de la cita más antigua o la fecha de registro del negocio.
-  // null = aún no calculado. { year, month } = calculado.
   const [earliestMonth, setEarliestMonth] = useState<{ year: number; month: number } | null>(null);
+
+  // Flag para evitar la doble carga: el useFocusEffect ya hace la carga inicial,
+  // pero el useEffect de filtros también dispararía al montar. Con esta ref
+  // ignoramos el primer disparo del useEffect de filtros.
+  const isInitialMount = useRef(true);
 
   const isCurrentMonth = selectedYear === now.getFullYear() && selectedMonth === now.getMonth();
 
-  // Calcula si el mes seleccionado ya es el más antiguo permitido
-  // (o anterior, que no debería pasar pero cubrimos el caso).
   const isEarliestMonth = earliestMonth !== null && (
     selectedYear < earliestMonth.year ||
     (selectedYear === earliestMonth.year && selectedMonth <= earliestMonth.month)
   );
 
   // Carga el límite inferior una sola vez cuando se monta el componente.
-  // Estrategia: usa la fecha de la cita más antigua del usuario. Si no tiene citas,
-  // usa la fecha de creación del business_profile (fecha de registro). Fallback: mes actual.
   useEffect(() => {
     let cancelled = false;
     (async () => {
       try {
         const userId = await getCurrentUserId();
 
-        // Query 1: fecha de la cita más antigua (1 fila, query barata con el índice user_date)
         const { data: oldestApt } = await supabase
           .from('appointments')
           .select('date')
@@ -131,7 +129,6 @@ export default function ReportsScreen() {
 
         let refDateStr: string | null = oldestApt?.date ?? null;
 
-        // Si no hay citas, usar la fecha de creación del perfil del negocio
         if (!refDateStr) {
           const { data: profile } = await supabase
             .from('business_profiles')
@@ -144,15 +141,12 @@ export default function ReportsScreen() {
         if (cancelled) return;
 
         if (refDateStr) {
-          // refDateStr puede ser 'YYYY-MM-DD' (date) o ISO timestamp. Parsear seguro.
           const d = new Date(refDateStr.length === 10 ? refDateStr + 'T12:00:00' : refDateStr);
           setEarliestMonth({ year: d.getFullYear(), month: d.getMonth() });
         } else {
-          // Fallback: mes actual — no permite retroceder
           setEarliestMonth({ year: now.getFullYear(), month: now.getMonth() });
         }
       } catch (e) {
-        // En error: permite al menos 12 meses atrás para no bloquear al usuario
         if (cancelled) return;
         const d = new Date();
         d.setMonth(d.getMonth() - 12);
@@ -160,20 +154,27 @@ export default function ReportsScreen() {
       }
     })();
     return () => { cancelled = true; };
-    // Solo depende de user.id — si cambia el usuario recalcula
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user?.id]);
 
+  // ── CARGA INICIAL al enfocar la pantalla ──
+  // Solo carga si no hay stats ya (evita doble fetch al volver de un modal).
   useFocusEffect(
     useCallback(() => {
       const cacheKey = getReportsCacheKey(selectedYear, selectedMonth);
       const cached = getCached<any>(cacheKey);
-      if (cached) { setStats(cached); setLoading(false); loadData(true, false, true); }
-      else loadData();
+      if (cached) {
+        setStats(cached);
+        setLoading(false);
+        // Refresh silencioso en background para mantener datos frescos
+        loadData(true, false, true);
+      } else {
+        loadData();
+      }
+      // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [])
   );
 
-  // Navegar al mes anterior (respetando límite del registro del usuario)
   const goToPrevMonth = () => {
     if (isEarliestMonth) return;
     if (selectedMonth === 0) {
@@ -184,7 +185,6 @@ export default function ReportsScreen() {
     }
   };
 
-  // Navegar al mes siguiente (no pasar del mes actual)
   const goToNextMonth = () => {
     if (isCurrentMonth) return;
     if (selectedMonth === 11) {
@@ -195,15 +195,50 @@ export default function ReportsScreen() {
     }
   };
 
-  // Recargar datos cuando cambia el mes seleccionado
-  const prevMonthRef = useRef({ year: selectedYear, month: selectedMonth });
-  React.useEffect(() => {
-    const prev = prevMonthRef.current;
-    if (prev.year !== selectedYear || prev.month !== selectedMonth) {
-      prevMonthRef.current = { year: selectedYear, month: selectedMonth };
-      loadData();
+  // ════════════════════════════════════════════════════════════════════
+  // RECARGA AUTOMÁTICA al cambiar mes seleccionado (FIX MAY 2026)
+  //
+  // Antes había un patrón con prevMonthRef que NO disparaba la primera vez
+  // y dejaba la pantalla con datos del mes anterior. Los usuarios reportaron
+  // tener que hacer pull-to-refresh manualmente para ver datos actualizados.
+  //
+  // Ahora: cada cambio de selectedYear o selectedMonth dispara loadData()
+  // inmediatamente. La ref isInitialMount evita la doble carga inicial
+  // (useFocusEffect ya cargó al montar).
+  // ════════════════════════════════════════════════════════════════════
+  useEffect(() => {
+    if (isInitialMount.current) {
+      isInitialMount.current = false;
+      return;
     }
+    loadData();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedYear, selectedMonth]);
+
+  // ════════════════════════════════════════════════════════════════════
+  // RECARGA STAFF STATS al cambiar mes O staffRange O cambiar a tab "equipo" (FIX MAY 2026)
+  //
+  // Antes: solo se cargaba dentro de loadData() (al cambiar mes) o al hacer
+  // click manual en los botones de rango. Si el usuario cambiaba de tab
+  // "General" a "Mi equipo" después de navegar meses, los datos no se
+  // refrescaban.
+  //
+  // Ahora: cada cambio relevante (mes, rango, tab equipo) dispara recarga
+  // de staffStats explícitamente.
+  // ════════════════════════════════════════════════════════════════════
+  useEffect(() => {
+    if (!isPremium) return;
+    if (reportTab !== 'equipo') return; // solo recargar si está viendo el tab equipo
+    (async () => {
+      try {
+        const userId = await getCurrentUserId();
+        await loadStaffStats(userId, staffRange);
+      } catch (e) {
+        console.warn('[Reports] staff reload error:', e);
+      }
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedYear, selectedMonth, staffRange, reportTab, isPremium]);
 
   const loadData = async (forceRefresh = false, isPullRefresh = false, silent = false) => {
     const cacheKey = getReportsCacheKey(selectedYear, selectedMonth);
@@ -219,17 +254,14 @@ export default function ReportsScreen() {
       const userId = await getCurrentUserId();
       const today  = getTodayString();
 
-      // Semana actual (siempre desde hoy, no cambia con el mes) — timezone local del dispositivo
       const weekStart = new Date();
       const dow = weekStart.getDay();
       weekStart.setDate(weekStart.getDate() - (dow === 0 ? 6 : dow - 1));
       const weekStartStr = toLocalDateString(weekStart);
 
-      // Mes seleccionado
       const monthStartStr = getMonthStartString(selectedYear, selectedMonth);
       const monthEndStr   = getMonthEndString(selectedYear, selectedMonth);
 
-      // Mes anterior al seleccionado (para comparativa)
       const lastMonthStartStr = getMonthStartString(selectedYear, selectedMonth - 1);
       const lastMonthEndStr   = getMonthEndString(selectedYear, selectedMonth - 1);
 
@@ -286,8 +318,6 @@ export default function ReportsScreen() {
       };
       setStats(fs);
       setCached(cacheKey, fs, CACHE_TTL.REPORTS);
-
-      if (isPremium) await loadStaffStats(userId, staffRange);
     } catch (e) {
       console.error('[Reports]', e);
     } finally {
@@ -374,10 +404,10 @@ export default function ReportsScreen() {
     } catch (e) { console.error('[Reports staff]', e); }
   };
 
-  const handleStaffRangeChange = async (range: 'semana' | 'mes' | 'todo') => {
+  // Ahora el cambio de range solo actualiza el state — el useEffect de arriba
+  // detecta el cambio y dispara loadStaffStats automáticamente.
+  const handleStaffRangeChange = (range: 'semana' | 'mes' | 'todo') => {
     setStaffRange(range);
-    const userId = await getCurrentUserId();
-    await loadStaffStats(userId, range);
   };
 
   const formatDate = (d: string) =>
@@ -400,7 +430,6 @@ export default function ReportsScreen() {
           <View style={[s.paywallIconWrap, { backgroundColor: isDark ? '#1E293B' : '#F1F5F9' }]}>
             <Text style={{ fontSize: 36 }}>📊</Text>
           </View>
-          {/* REBRANDING Abr 2026: plan interno 'Basico' ahora se muestra como 'Premium'. */}
           <Text style={[s.paywallTitle, { color: tc.text }]}>Reportes en Plan Premium</Text>
           <Text style={[s.paywallDesc, { color: tc.textMuted }]}>
             Accede a reportes de ingresos, citas completadas y clientes con el Plan Premium o Luxury.
@@ -435,10 +464,8 @@ export default function ReportsScreen() {
             tintColor="#10B981" colors={['#10B981']} />
         }
       >
-        {/* Header con navegador de meses */}
         <View style={[s.header, { backgroundColor: tc.surface, borderBottomColor: tc.border }]}>
           <Text style={[s.headerTitle, { color: tc.text }]}>Reportes</Text>
-          {/* Navegador mes */}
           <View style={s.monthNav}>
             <TouchableOpacity
               onPress={goToPrevMonth}
@@ -469,7 +496,6 @@ export default function ReportsScreen() {
           </View>
         </View>
 
-        {/* Tab General / Mi equipo */}
         {isPremium && staffStats.length > 0 && (
           <View style={[s.reportTabRow, { backgroundColor: tc.surface, borderBottomColor: tc.border }]}>
             <TouchableOpacity style={[s.reportTab, reportTab === 'general' && s.reportTabActive]} onPress={() => setReportTab('general')}>
@@ -486,7 +512,6 @@ export default function ReportsScreen() {
           </View>
         )}
 
-        {/* REPORTE: MI EQUIPO */}
         {reportTab === 'equipo' && isPremium && (
           <View>
             <View style={[s.rangePicker, { backgroundColor: tc.surface, borderBottomColor: tc.border }]}>
@@ -579,7 +604,6 @@ export default function ReportsScreen() {
           </View>
         )}
 
-        {/* REPORTE: GENERAL */}
         {reportTab === 'general' && (
           <View>
             <View style={[s.tabs, { backgroundColor: tc.surface, borderBottomColor: tc.border }]}>
@@ -678,7 +702,6 @@ export default function ReportsScreen() {
         )}
       </ScrollView>
 
-      {/* MODAL: Historial de citas */}
       <Modal visible={aptsModal} animationType="slide" transparent onRequestClose={() => setAptsModal(false)}>
         <View style={s.modalOverlay}>
           <TouchableOpacity style={s.modalBackdrop} activeOpacity={1} onPress={() => setAptsModal(false)} />
@@ -733,7 +756,6 @@ export default function ReportsScreen() {
         </View>
       </Modal>
 
-      {/* MODAL: Gráfica de clientes */}
       <Modal visible={clientsModal} animationType="slide" transparent onRequestClose={() => setClientsModal(false)}>
         <View style={s.modalOverlay}>
           <TouchableOpacity style={s.modalBackdrop} activeOpacity={1} onPress={() => setClientsModal(false)} />
@@ -807,7 +829,6 @@ const s = StyleSheet.create({
   paywallBtnText:    { color: '#fff', fontWeight: '700', fontSize: 15 },
   header:            { paddingHorizontal: 20, paddingTop: 20, paddingBottom: 16, borderBottomWidth: 1 },
   headerTitle:       { fontSize: 28, fontWeight: '800', letterSpacing: -0.5, marginBottom: 14 },
-  // Navegador de mes
   monthNav:          { flexDirection: 'row', alignItems: 'center', gap: 8 },
   monthNavBtn:       { width: 34, height: 34, borderRadius: 10, justifyContent: 'center', alignItems: 'center' },
   monthNavLabel:     { flex: 1, alignItems: 'center', gap: 4 },
