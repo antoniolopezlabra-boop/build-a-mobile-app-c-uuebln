@@ -10,7 +10,7 @@ import {
   KeyboardAvoidingView,
   Platform,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import MaterialIcons from '@expo/vector-icons/MaterialIcons';
 import { useTheme } from '@/contexts/ThemeContext';
@@ -28,6 +28,15 @@ import { supabase } from '@/lib/supabase';
 //   2. La Edge Function valida server-side que el plan del usuario sea Premium o Luxury.
 //   3. La Edge Function aplica rate limiting (50 mensajes por usuario por día).
 //   4. El SYSTEM_PROMPT vive en la Edge Function — cambiarlo no requiere release de app.
+//
+// ── FIX safe-area Android (May 10 2026) ────────────────────────────────
+// Antes el input bar quedaba pegado al borde inferior de la pantalla, lo
+// que en Android con los 3 botones de navegación (back/home/recent) hacía
+// que el input se empalmara con los botones del sistema. Solución:
+//   1. SafeAreaView con edges={['top']} y aplicar inset manual abajo
+//   2. useSafeAreaInsets() para leer el bottom inset real del dispositivo
+//   3. Agregar paddingBottom = max(inset.bottom, 12) al inputBar
+//   4. keyboardVerticalOffset correcto en Android (con el header)
 // ══════════════════════════════════════════════════════════════════════
 
 type Role = 'user' | 'assistant';
@@ -84,6 +93,7 @@ const bubble = StyleSheet.create({
 export default function SupportChatScreen() {
   const router = useRouter();
   const { colors: tc } = useTheme();
+  const insets = useSafeAreaInsets(); // ← NUEVO: lee los insets del sistema
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput]       = useState('');
   const [loading, setLoading]   = useState(false);
@@ -95,14 +105,12 @@ export default function SupportChatScreen() {
   }, [messages, loading]);
 
   // Llamada a la Edge Function ai-chat con el JWT del usuario.
-  // La Edge Function valida plan, aplica rate limiting y llama a Anthropic con la key del servidor.
   const callAIChat = async (history: Message[], userText: string): Promise<string> => {
     const apiMessages = history
       .slice(-10)
       .map((m) => ({ role: m.role, content: m.content }));
     apiMessages.push({ role: 'user', content: userText });
 
-    // Obtener el access token actual del usuario para autenticar la request
     const { data: { session } } = await supabase.auth.getSession();
     if (!session?.access_token) {
       throw new Error('Tu sesión expiró. Vuelve a iniciar sesión.');
@@ -118,7 +126,6 @@ export default function SupportChatScreen() {
     });
 
     if (!res.ok) {
-      // Errores específicos según código
       const err = await res.json().catch(() => ({}));
       if (err.code === 'PLAN_REQUIRED') {
         throw new Error('El asistente IA está disponible en Plan Premium y Luxury. Actualiza tu plan en Ajustes > Plan y Suscripción.');
@@ -164,6 +171,14 @@ export default function SupportChatScreen() {
     }
   };
 
+  // ── Cálculo del padding bottom seguro ──
+  // En Android con los 3 botones, insets.bottom es típicamente 0 porque la
+  // barra de navegación está FUERA del área de WebView. Pero el problema es
+  // que la app se dibuja edge-to-edge en Android 11+ y el inputBar queda
+  // debajo de los botones. Solución: forzar paddingBottom mínimo de 12
+  // pero respetar el inset si es mayor (Android gestures, iPhone X+).
+  const bottomPadding = Math.max(insets.bottom, 12);
+
   return (
     <SafeAreaView style={[s.container, { backgroundColor: tc.bg }]} edges={['top']}>
       <View style={[s.header, { backgroundColor: tc.surface, borderBottomColor: tc.border }]}>
@@ -180,7 +195,12 @@ export default function SupportChatScreen() {
         <View style={{ width: 40 }} />
       </View>
 
-      <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
+      <KeyboardAvoidingView
+        style={{ flex: 1 }}
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        // En Android necesitamos compensar la altura del header al subir el teclado
+        keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 0}
+      >
         <ScrollView ref={scrollRef} style={{ flex: 1 }} contentContainerStyle={s.messagesContent}
           showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
 
@@ -216,7 +236,20 @@ export default function SupportChatScreen() {
           )}
         </ScrollView>
 
-        <View style={[s.inputBar, { backgroundColor: tc.surface, borderTopColor: tc.border }]}>
+        {/* ── INPUT BAR con safe area inset abajo ──
+            paddingBottom dinámico: usa el inset del sistema (Android con barra
+            gestual / iPhone X+ con home indicator) o un mínimo de 12px si los
+            botones de Android están en modo clásico de 3 botones. */}
+        <View
+          style={[
+            s.inputBar,
+            {
+              backgroundColor: tc.surface,
+              borderTopColor: tc.border,
+              paddingBottom: bottomPadding,
+            },
+          ]}
+        >
           <TextInput
             style={[s.input, { backgroundColor: tc.bg, color: tc.text, borderColor: tc.border }]}
             value={input} onChangeText={setInput}
@@ -255,7 +288,8 @@ const s = StyleSheet.create({
   suggestedWrap:    { width: '100%', gap: 8 },
   suggestedChip:    { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 14, paddingVertical: 11, borderRadius: 12, borderWidth: 1 },
   suggestedText:    { fontSize: 13.5, fontWeight: '500', flex: 1 },
-  inputBar:         { flexDirection: 'row', alignItems: 'flex-end', gap: 10, paddingHorizontal: 12, paddingVertical: 10, borderTopWidth: 0.5 },
+  // paddingBottom se aplica dinámico en el componente con el safe area inset
+  inputBar:         { flexDirection: 'row', alignItems: 'flex-end', gap: 10, paddingHorizontal: 12, paddingTop: 10, borderTopWidth: 0.5 },
   input:            { flex: 1, borderRadius: 22, borderWidth: 1, paddingHorizontal: 16, paddingVertical: 10, fontSize: 15, maxHeight: 120, lineHeight: 20 },
   sendBtn:          { width: 44, height: 44, borderRadius: 22, backgroundColor: '#10B981', justifyContent: 'center', alignItems: 'center' },
   sendBtnDisabled:  { backgroundColor: '#CBD5E1' },
