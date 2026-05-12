@@ -11,6 +11,21 @@ import { supabase } from '@/lib/supabase';
 import { getCurrentUserId } from '@/utils/api';
 import { getCached, setCached, CACHE_TTL } from '@/utils/cache';
 import MaterialIcons from '@expo/vector-icons/MaterialIcons';
+import KPICard from '@/components/reports/KPICard';
+
+// ══════════════════════════════════════════════════════════════════════
+// VYLTA — Reportes Ejecutivos (rediseño Mayo 2026)
+//
+// Dashboard con look ejecutivo:
+//   • Header con saludo personalizado + selector de mes ejecutivo
+//   • 4 KPI cards en grid 2x2 con % de variación vs mes anterior
+//   • Tab "General" / "Mi equipo" (mantiene funcionalidad Luxury)
+//   • Modal de citas y crecimiento de clientes (sin cambios)
+//
+// Próximos commits agregarán:
+//   • Commit 2: Gráfica de línea de ingresos + donut de servicios
+//   • Commit 3: Sección de Insights (rule-based, sin LLM)
+// ══════════════════════════════════════════════════════════════════════
 
 interface Stats {
   todayAppointments: number;
@@ -33,6 +48,11 @@ interface Stats {
   clientsThisMonth: number;
   clientsLastMonth: number;
   clientsPerWeek: number[];
+  // ── NUEVOS campos para dashboard ejecutivo ──
+  lastMonthRevenue: number;       // ingresos del mes anterior (para calcular variación)
+  lastMonthAppointments: number;  // citas del mes anterior
+  avgTicket: number;              // ticket promedio = monthRevenue / completedThisMonth
+  avgTicketLastMonth: number;     // ticket promedio del mes anterior
 }
 
 interface AppointmentItem {
@@ -64,7 +84,7 @@ const STATUS_CONFIG: Record<string, { color: string; label: string }> = {
   'Pendiente':  { color: '#F59E0B', label: 'Pendiente' },
   'Completada': { color: '#6366F1', label: 'Completada' },
   'Cancelada':  { color: '#EF4444', label: 'Cancelada' },
-  'No asistió':{ color: '#9CA3AF', label: 'No asistió' },
+  'No asistió': { color: '#9CA3AF', label: 'No asistió' },
   'Reagendada': { color: '#3B82F6', label: 'Reagendada' },
   'Pagado':     { color: '#10B981', label: 'Pagado' },
 };
@@ -73,9 +93,24 @@ function getReportsCacheKey(year: number, month: number): string {
   return `reports_stats_${year}_${month}`;
 }
 
+// ── Helper: calcular % variación entre dos números ──
+// Retorna null si el valor anterior es 0 (división por cero = no comparable)
+function calcChange(current: number, previous: number): number | null {
+  if (previous === 0) return current > 0 ? 100 : null;
+  return Math.round(((current - previous) / previous) * 100);
+}
+
+// ── Helper: formatear moneda en estilo ejecutivo ──
+// $45,250 / $1.2K / $1.5M según magnitud
+function formatCurrency(amount: number): string {
+  if (amount >= 1000000) return `$${(amount / 1000000).toFixed(1)}M`;
+  if (amount >= 10000)   return `$${(amount / 1000).toFixed(0)}K`;
+  return `$${amount.toLocaleString('es-MX')}`;
+}
+
 export default function ReportsScreen() {
   const { canViewReports, isPremium, loading: planLoading } = usePlan();
-  const { user } = useAuth();
+  const { user, businessProfile } = useAuth();
   const router = useRouter();
   const { colors: tc, isDark } = useTheme();
 
@@ -87,14 +122,9 @@ export default function ReportsScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const [stats, setStats]           = useState<Stats | null>(null);
   const [staffStats, setStaffStats] = useState<StaffStat[]>([]);
-  const [activeTab, setActiveTab]   = useState<'hoy' | 'semana' | 'mes'>('hoy');
   const [reportTab, setReportTab]   = useState<'general' | 'equipo'>('general');
   const [staffRange, setStaffRange] = useState<'semana' | 'mes' | 'todo'>('mes');
 
-  // ── NUEVO: indica si el usuario tiene COLABORADORES activos ──
-  // Independiente de si staffStats tiene datos. Esto permite mostrar el tab
-  // "Mi equipo" aún si no hay citas asignadas todavía a ningún colaborador
-  // en el período seleccionado.
   const [hasStaff, setHasStaff] = useState(false);
 
   const [aptsModal, setAptsModal]       = useState(false);
@@ -114,15 +144,12 @@ export default function ReportsScreen() {
   );
 
   // ── Carga inicial: límite de meses + detección de equipo ──
-  // Ambos se cargan una sola vez al montar. La detección de equipo es una
-  // consulta súper barata (select id .limit(1)) que NO trae todo el staff.
   useEffect(() => {
     let cancelled = false;
     (async () => {
       try {
         const userId = await getCurrentUserId();
 
-        // Paralelo: cita más antigua + detección de staff
         const [oldestResult, staffResult] = await Promise.all([
           supabase
             .from('appointments')
@@ -142,7 +169,6 @@ export default function ReportsScreen() {
 
         if (cancelled) return;
 
-        // Procesar earliest month
         let refDateStr: string | null = oldestResult.data?.date ?? null;
         if (!refDateStr) {
           const { data: profile } = await supabase
@@ -162,15 +188,12 @@ export default function ReportsScreen() {
           setEarliestMonth({ year: now.getFullYear(), month: now.getMonth() });
         }
 
-        // Procesar hasStaff: true si encontró al menos 1 colaborador activo
         setHasStaff(!!staffResult.data);
       } catch (e) {
         if (cancelled) return;
         const d = new Date();
         d.setMonth(d.getMonth() - 12);
         setEarliestMonth({ year: d.getFullYear(), month: d.getMonth() });
-        // En error, NO ocultamos el tab — mejor mostrarlo y que el usuario
-        // vea el empty state si no tiene equipo, que ocultar algo que SÍ tiene.
         setHasStaff(false);
       }
     })();
@@ -222,7 +245,6 @@ export default function ReportsScreen() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedYear, selectedMonth]);
 
-  // Recarga staff stats al cambiar filtros DE EQUIPO o al entrar al tab equipo
   useEffect(() => {
     if (!isPremium) return;
     if (reportTab !== 'equipo') return;
@@ -272,6 +294,7 @@ export default function ReportsScreen() {
           supabase.from('appointments').select('*', { count: 'exact', head: true }).eq('user_id', userId).in('status', ['Completada', 'Pagado']),
         ]);
 
+      // ── Revenue mes actual ──
       const [{ data: revLegacy }, { data: revNew }] = await Promise.all([
         supabase.from('appointments').select('service_cost').eq('user_id', userId).eq('status', 'Pagado').gte('date', monthStartStr).lte('date', monthEndStr),
         supabase.from('appointments').select('service_cost').eq('user_id', userId).eq('status', 'Completada').eq('paid', true).gte('date', monthStartStr).lte('date', monthEndStr),
@@ -281,9 +304,40 @@ export default function ReportsScreen() {
         .select('service_cost').eq('user_id', userId).eq('status', 'Completada')
         .or('paid.is.null,paid.eq.false').gte('date', monthStartStr).lte('date', monthEndStr);
 
-      const monthRevenue  = [...(revLegacy || []), ...(revNew || [])].reduce((s: number, a: any) => s + (a.service_cost || 0), 0);
+      const monthRevenue   = [...(revLegacy || []), ...(revNew || [])].reduce((s: number, a: any) => s + (a.service_cost || 0), 0);
       const pendingRevenue = (penD || []).reduce((s: number, a: any) => s + (a.service_cost || 0), 0);
 
+      // ── Revenue mes anterior (para calcular variación %) ──
+      const [{ data: revLegacyPrev }, { data: revNewPrev }] = await Promise.all([
+        supabase.from('appointments').select('service_cost').eq('user_id', userId).eq('status', 'Pagado').gte('date', lastMonthStartStr).lte('date', lastMonthEndStr),
+        supabase.from('appointments').select('service_cost').eq('user_id', userId).eq('status', 'Completada').eq('paid', true).gte('date', lastMonthStartStr).lte('date', lastMonthEndStr),
+      ]);
+      const lastMonthRevenue = [...(revLegacyPrev || []), ...(revNewPrev || [])].reduce((s: number, a: any) => s + (a.service_cost || 0), 0);
+
+      // ── Citas mes anterior (count) ──
+      const { count: lastMonthAppointmentsCount } = await supabase
+        .from('appointments')
+        .select('*', { count: 'exact', head: true })
+        .eq('user_id', userId)
+        .gte('date', lastMonthStartStr)
+        .lte('date', lastMonthEndStr);
+
+      // ── Ticket promedio: revenue / citas completadas en cada mes ──
+      const completedThisMonth = (mA || []).filter((a: any) => ['Completada', 'Pagado'].includes(a.status)).length;
+      const avgTicket = completedThisMonth > 0 ? Math.round(monthRevenue / completedThisMonth) : 0;
+
+      // Para ticket promedio del mes anterior, necesitamos las citas completadas del mes anterior
+      const { data: lastMonthCompletedData } = await supabase
+        .from('appointments')
+        .select('id')
+        .eq('user_id', userId)
+        .in('status', ['Completada', 'Pagado'])
+        .gte('date', lastMonthStartStr)
+        .lte('date', lastMonthEndStr);
+      const lastMonthCompleted = lastMonthCompletedData?.length || 0;
+      const avgTicketLastMonth = lastMonthCompleted > 0 ? Math.round(lastMonthRevenue / lastMonthCompleted) : 0;
+
+      // ── Clientes mes actual / anterior ──
       const { count: clientsThisMonth } = await supabase.from('clients').select('*', { count: 'exact', head: true }).eq('user_id', userId).gte('created_at', monthStartStr).lte('created_at', monthEndStr + 'T23:59:59');
       const { count: clientsLastMonth } = await supabase.from('clients').select('*', { count: 'exact', head: true }).eq('user_id', userId).gte('created_at', lastMonthStartStr).lte('created_at', lastMonthEndStr + 'T23:59:59');
 
@@ -312,6 +366,10 @@ export default function ReportsScreen() {
         clientsThisMonth: clientsThisMonth || 0,
         clientsLastMonth: clientsLastMonth || 0,
         clientsPerWeek,
+        lastMonthRevenue,
+        lastMonthAppointments: lastMonthAppointmentsCount || 0,
+        avgTicket,
+        avgTicketLastMonth,
       };
       setStats(fs);
       setCached(cacheKey, fs, CACHE_TTL.REPORTS);
@@ -328,29 +386,19 @@ export default function ReportsScreen() {
     setAptsLoading(true);
     try {
       const userId = await getCurrentUserId();
-      const today  = getTodayString();
       const mStart = getMonthStartString(selectedYear, selectedMonth);
       const mEnd   = getMonthEndString(selectedYear, selectedMonth);
 
-      let query = supabase
+      const { data } = await supabase
         .from('appointments')
         .select('id, service_name, date, start_time, status, client:clients(name), client_name_temp')
         .eq('user_id', userId)
+        .gte('date', mStart)
+        .lte('date', mEnd)
         .order('date', { ascending: false })
-        .order('start_time', { ascending: false });
+        .order('start_time', { ascending: false })
+        .limit(50);
 
-      if (activeTab === 'hoy') {
-        query = query.eq('date', today);
-      } else if (activeTab === 'semana') {
-        const weekStart = new Date();
-        const dow = weekStart.getDay();
-        weekStart.setDate(weekStart.getDate() - (dow === 0 ? 6 : dow - 1));
-        query = query.gte('date', toLocalDateString(weekStart));
-      } else {
-        query = query.gte('date', mStart).lte('date', mEnd);
-      }
-
-      const { data } = await query.limit(50);
       setAptsList((data || []).map((a: any) => ({
         id: a.id,
         service_name: a.service_name,
@@ -408,7 +456,14 @@ export default function ReportsScreen() {
   const formatDate = (d: string) =>
     new Date(d + 'T12:00:00').toLocaleDateString('es-MX', { weekday: 'short', day: 'numeric', month: 'short' });
 
-  const tabLabel = activeTab === 'hoy' ? 'hoy' : activeTab === 'semana' ? 'esta semana' : `${MONTHS_ES[selectedMonth].toLowerCase()} ${selectedYear}`;
+  // ── Saludo personalizado: usa primer nombre del owner ──
+  const firstName = businessProfile?.businessName?.split(' ')[0] || user?.user_metadata?.full_name?.split(' ')[0] || user?.email?.split('@')[0] || 'Antonio';
+
+  // ── Cálculos de variación % para los KPIs ──
+  const revenueChange     = stats ? calcChange(stats.monthRevenue, stats.lastMonthRevenue) : null;
+  const aptsChange        = stats ? calcChange(stats.monthAppointments, stats.lastMonthAppointments) : null;
+  const ticketChange      = stats ? calcChange(stats.avgTicket, stats.avgTicketLastMonth) : null;
+  const newClientsChange  = stats ? calcChange(stats.clientsThisMonth, stats.clientsLastMonth) : null;
 
   if (planLoading || loading) {
     return (
@@ -437,12 +492,7 @@ export default function ReportsScreen() {
     );
   }
 
-  const tabApts = activeTab === 'hoy' ? stats?.todayAppointments : activeTab === 'semana' ? stats?.weekAppointments : stats?.monthAppointments;
-  const tabConf = activeTab === 'hoy' ? stats?.confirmedToday  : activeTab === 'semana' ? stats?.confirmedWeek  : stats?.confirmedMonth;
-  const tabPend = activeTab === 'hoy' ? stats?.pendingToday    : activeTab === 'semana' ? stats?.pendingWeek    : stats?.pendingMonth;
-  const tabCanc = activeTab === 'hoy' ? stats?.cancelledToday  : activeTab === 'semana' ? stats?.cancelledWeek  : stats?.cancelledMonth;
   const maxStaffTotal = staffStats.length > 0 ? Math.max(...staffStats.map(st => st.total), 1) : 1;
-
   const cpw = stats?.clientsPerWeek || [0, 0, 0, 0];
   const maxCpw = Math.max(...cpw, 1);
   const clientGrowth = stats && stats.clientsLastMonth > 0
@@ -459,59 +509,216 @@ export default function ReportsScreen() {
             tintColor="#10B981" colors={['#10B981']} />
         }
       >
+        {/* ═══════════════════════════════════════════════════════════════
+            HEADER EJECUTIVO con saludo + selector de mes
+            Inspirado en mockups de dashboards Bloomberg/Stripe
+            ═══════════════════════════════════════════════════════════════ */}
         <View style={[s.header, { backgroundColor: tc.surface, borderBottomColor: tc.border }]}>
-          <Text style={[s.headerTitle, { color: tc.text }]}>Reportes</Text>
-          <View style={s.monthNav}>
-            <TouchableOpacity
-              onPress={goToPrevMonth}
-              style={[s.monthNavBtn, { backgroundColor: tc.inputBg, opacity: isEarliestMonth ? 0.3 : 1 }]}
-              disabled={isEarliestMonth}
-              activeOpacity={0.7}
-            >
-              <MaterialIcons name="chevron-left" size={20} color={tc.text} />
-            </TouchableOpacity>
-            <View style={s.monthNavLabel}>
-              <Text style={[s.monthNavText, { color: tc.text }]}>
-                {MONTHS_ES[selectedMonth]} {selectedYear}
+          <View style={s.headerTopRow}>
+            <View style={{ flex: 1 }}>
+              <Text style={[s.headerTitle, { color: tc.text }]}>
+                Reportes <Text style={{ color: '#10B981' }}>Ejecutivos</Text>
               </Text>
-              {!isCurrentMonth && (
-                <TouchableOpacity onPress={() => { setSelectedYear(now.getFullYear()); setSelectedMonth(now.getMonth()); }} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
-                  <Text style={s.monthNavToday}>Hoy</Text>
-                </TouchableOpacity>
-              )}
             </View>
-            <TouchableOpacity
-              onPress={goToNextMonth}
-              style={[s.monthNavBtn, { backgroundColor: tc.inputBg, opacity: isCurrentMonth ? 0.3 : 1 }]}
-              disabled={isCurrentMonth}
-              activeOpacity={0.7}
-            >
-              <MaterialIcons name="chevron-right" size={20} color={tc.text} />
-            </TouchableOpacity>
+          </View>
+
+          <View style={s.headerGreetingRow}>
+            <View style={{ flex: 1 }}>
+              <Text style={[s.greeting, { color: tc.text }]}>
+                Hola, {firstName} <Text style={{ fontSize: 16 }}>👋</Text>
+              </Text>
+              <Text style={[s.greetingSub, { color: tc.textMuted }]}>
+                Aquí tienes el panorama general{'\n'}de tu negocio.
+              </Text>
+            </View>
+
+            {/* Selector de mes ejecutivo */}
+            <View style={[s.monthSelector, { backgroundColor: tc.inputBg, borderColor: tc.border }]}>
+              <TouchableOpacity
+                onPress={goToPrevMonth}
+                disabled={isEarliestMonth}
+                style={[s.monthSelectorBtn, { opacity: isEarliestMonth ? 0.3 : 1 }]}
+                activeOpacity={0.7}
+                hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
+              >
+                <MaterialIcons name="chevron-left" size={16} color={tc.text} />
+              </TouchableOpacity>
+              <View style={s.monthSelectorMid}>
+                <MaterialIcons name="event" size={12} color="#10B981" />
+                <Text style={[s.monthSelectorText, { color: tc.text }]}>
+                  {MONTHS_ES[selectedMonth].slice(0, 3)} {selectedYear}
+                </Text>
+              </View>
+              <TouchableOpacity
+                onPress={goToNextMonth}
+                disabled={isCurrentMonth}
+                style={[s.monthSelectorBtn, { opacity: isCurrentMonth ? 0.3 : 1 }]}
+                activeOpacity={0.7}
+                hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
+              >
+                <MaterialIcons name="chevron-right" size={16} color={tc.text} />
+              </TouchableOpacity>
+            </View>
           </View>
         </View>
 
-        {/* ── TABS General / Mi equipo ──
-            FIX MAY 2026: Antes la condición era `staffStats.length > 0` lo cual
-            causaba que el tab desapareciera porque staffStats solo se carga al
-            entrar al tab equipo (círculo vicioso).
-            Ahora usa `hasStaff` que se detecta al inicio con una consulta barata. */}
+        {/* ═══════════════════════════════════════════════════════════════
+            TABS General / Mi equipo (solo si tiene staff)
+            ═══════════════════════════════════════════════════════════════ */}
         {isPremium && hasStaff && (
           <View style={[s.reportTabRow, { backgroundColor: tc.surface, borderBottomColor: tc.border }]}>
-            <TouchableOpacity style={[s.reportTab, reportTab === 'general' && s.reportTabActive]} onPress={() => setReportTab('general')}>
-              <MaterialIcons name="bar-chart" size={16} color={reportTab === 'general' ? '#fff' : tc.textMuted} />
+            <TouchableOpacity
+              style={[s.reportTab, { backgroundColor: tc.inputBg }, reportTab === 'general' && { backgroundColor: '#0F172A' }]}
+              onPress={() => setReportTab('general')}
+            >
+              <MaterialIcons name="dashboard" size={15} color={reportTab === 'general' ? '#fff' : tc.textMuted} />
               <Text style={[s.reportTabText, { color: reportTab === 'general' ? '#fff' : tc.textMuted }]}>General</Text>
             </TouchableOpacity>
             <TouchableOpacity
-              style={[s.reportTab, reportTab === 'equipo' && { backgroundColor: '#6366F1', borderColor: '#6366F1' }]}
+              style={[s.reportTab, { backgroundColor: tc.inputBg }, reportTab === 'equipo' && { backgroundColor: '#6366F1' }]}
               onPress={() => setReportTab('equipo')}
             >
-              <MaterialIcons name="group" size={16} color={reportTab === 'equipo' ? '#fff' : tc.textMuted} />
+              <MaterialIcons name="group" size={15} color={reportTab === 'equipo' ? '#fff' : tc.textMuted} />
               <Text style={[s.reportTabText, { color: reportTab === 'equipo' ? '#fff' : tc.textMuted }]}>Mi equipo</Text>
             </TouchableOpacity>
           </View>
         )}
 
+        {/* ═══════════════════════════════════════════════════════════════
+            CONTENIDO TAB GENERAL: 4 KPI cards + (próximamente gráficas e insights)
+            ═══════════════════════════════════════════════════════════════ */}
+        {reportTab === 'general' && (
+          <View style={s.content}>
+
+            {/* Grid 2x2 de KPI cards ejecutivos */}
+            <View style={s.kpiGrid}>
+              <View style={s.kpiRow}>
+                <KPICard
+                  label="Ingresos"
+                  value={`$${(stats?.monthRevenue || 0).toLocaleString('es-MX')}`}
+                  icon="attach-money"
+                  iconColor="#10B981"
+                  change={revenueChange}
+                  comparisonLabel="vs mes ant."
+                  surfaceColor={tc.surface}
+                  textColor={tc.text}
+                  textMutedColor={tc.textMuted}
+                  borderColor={tc.border}
+                />
+                <View style={{ width: 10 }} />
+                <KPICard
+                  label="Citas"
+                  value={`${stats?.monthAppointments || 0}`}
+                  icon="event-available"
+                  iconColor="#6366F1"
+                  change={aptsChange}
+                  comparisonLabel="vs mes ant."
+                  onPress={openAppointmentsHistory}
+                  surfaceColor={tc.surface}
+                  textColor={tc.text}
+                  textMutedColor={tc.textMuted}
+                  borderColor={tc.border}
+                />
+              </View>
+
+              <View style={{ height: 10 }} />
+
+              <View style={s.kpiRow}>
+                <KPICard
+                  label="Ticket prom."
+                  value={`$${(stats?.avgTicket || 0).toLocaleString('es-MX')}`}
+                  icon="track-changes"
+                  iconColor="#F59E0B"
+                  change={ticketChange}
+                  comparisonLabel="vs mes ant."
+                  surfaceColor={tc.surface}
+                  textColor={tc.text}
+                  textMutedColor={tc.textMuted}
+                  borderColor={tc.border}
+                />
+                <View style={{ width: 10 }} />
+                <KPICard
+                  label="Clientes nuevos"
+                  value={`${stats?.clientsThisMonth || 0}`}
+                  icon="person-add"
+                  iconColor="#F472B6"
+                  change={newClientsChange}
+                  comparisonLabel="vs mes ant."
+                  onPress={() => setClientsModal(true)}
+                  surfaceColor={tc.surface}
+                  textColor={tc.text}
+                  textMutedColor={tc.textMuted}
+                  borderColor={tc.border}
+                />
+              </View>
+            </View>
+
+            {/* Hero secundario: ingresos pendientes — destacado */}
+            {stats && stats.pendingRevenue > 0 && (
+              <TouchableOpacity
+                style={[s.pendingCard, {
+                  backgroundColor: isDark ? '#431407' : '#FFFBEB',
+                  borderColor: '#F59E0B',
+                }]}
+                onPress={() => router.push('/reports/pending-payments')}
+                activeOpacity={0.85}
+              >
+                <View style={s.pendingIconWrap}>
+                  <MaterialIcons name="schedule" size={20} color="#F59E0B" />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={[s.pendingLabel, { color: isDark ? '#FED7AA' : '#92400E' }]}>POR COBRAR</Text>
+                  <Text style={[s.pendingValue, { color: '#F59E0B' }]}>
+                    ${stats.pendingRevenue.toLocaleString('es-MX')}
+                  </Text>
+                </View>
+                <MaterialIcons name="chevron-right" size={20} color="#F59E0B" />
+              </TouchableOpacity>
+            )}
+
+            {/* Indicadores secundarios: completadas histórico */}
+            <View style={s.secondaryRow}>
+              <View style={[s.secondaryCard, { backgroundColor: tc.surface, borderColor: tc.border }]}>
+                <View style={s.secondaryIconWrap}>
+                  <MaterialIcons name="check-circle" size={18} color="#10B981" />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={[s.secondaryValue, { color: tc.text }]}>{stats?.completedAppointments || 0}</Text>
+                  <Text style={[s.secondaryLabel, { color: tc.textMuted }]}>Citas completadas histórico</Text>
+                </View>
+              </View>
+            </View>
+
+            <View style={s.secondaryRow}>
+              <View style={[s.secondaryCard, { backgroundColor: tc.surface, borderColor: tc.border }]}>
+                <View style={s.secondaryIconWrap}>
+                  <MaterialIcons name="people" size={18} color="#6366F1" />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={[s.secondaryValue, { color: tc.text }]}>{stats?.totalClients || 0}</Text>
+                  <Text style={[s.secondaryLabel, { color: tc.textMuted }]}>Total de clientes</Text>
+                </View>
+                <TouchableOpacity onPress={() => setClientsModal(true)} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+                  <MaterialIcons name="bar-chart" size={18} color="#6366F1" />
+                </TouchableOpacity>
+              </View>
+            </View>
+
+            {/* Placeholder para gráficas e insights (próximos commits) */}
+            <View style={[s.placeholder, { backgroundColor: tc.surface, borderColor: tc.border }]}>
+              <MaterialIcons name="show-chart" size={28} color={tc.textMuted} />
+              <Text style={[s.placeholderTitle, { color: tc.text }]}>Gráficas en camino</Text>
+              <Text style={[s.placeholderDesc, { color: tc.textMuted }]}>
+                Próximamente verás aquí tu gráfica de ingresos por semana e ingresos por servicio.
+              </Text>
+            </View>
+
+          </View>
+        )}
+
+        {/* ═══════════════════════════════════════════════════════════════
+            CONTENIDO TAB MI EQUIPO (sin cambios respecto al fix anterior)
+            ═══════════════════════════════════════════════════════════════ */}
         {reportTab === 'equipo' && isPremium && (
           <View>
             <View style={[s.rangePicker, { backgroundColor: tc.surface, borderBottomColor: tc.border }]}>
@@ -603,105 +810,11 @@ export default function ReportsScreen() {
             )}
           </View>
         )}
-
-        {reportTab === 'general' && (
-          <View>
-            <View style={[s.tabs, { backgroundColor: tc.surface, borderBottomColor: tc.border }]}>
-              {(['hoy', 'semana', 'mes'] as const).map(tab => (
-                <TouchableOpacity
-                  key={tab}
-                  style={[s.tab, { backgroundColor: tc.inputBg }, activeTab === tab && { backgroundColor: isDark ? '#F8FAFC' : '#0F172A' }]}
-                  onPress={() => setActiveTab(tab)}
-                >
-                  <Text style={[s.tabText, { color: tc.textMuted }, activeTab === tab && { color: isDark ? '#0F172A' : '#fff' }]}>
-                    {tab === 'hoy' ? 'Hoy' : tab === 'semana' ? 'Semana' : MONTHS_ES[selectedMonth]}
-                  </Text>
-                </TouchableOpacity>
-              ))}
-            </View>
-
-            <View style={[s.heroCard, { backgroundColor: isDark ? '#1E293B' : '#0F172A' }]}>
-              <View style={s.heroLeft}>
-                <Text style={s.heroLabel}>Citas {tabLabel}</Text>
-                <Text style={s.heroValue}>{tabApts}</Text>
-              </View>
-              <View style={s.heroRight}>
-                <View style={s.heroMini}><View style={[s.heroDot, { backgroundColor: '#10B981' }]} /><Text style={s.heroMiniText}>{tabConf} confirmadas</Text></View>
-                <View style={s.heroMini}><View style={[s.heroDot, { backgroundColor: '#F59E0B' }]} /><Text style={s.heroMiniText}>{tabPend} pendientes</Text></View>
-                <View style={s.heroMini}><View style={[s.heroDot, { backgroundColor: '#EF4444' }]} /><Text style={s.heroMiniText}>{tabCanc} canceladas</Text></View>
-              </View>
-            </View>
-
-            <Text style={[s.sectionLabel, { color: tc.textMuted }]}>INDICADORES</Text>
-            <View style={s.statsRow}>
-              <TouchableOpacity
-                style={[s.statCard, s.statCardTouchable, { backgroundColor: tc.surface, borderColor: tc.border, borderLeftColor: '#10B981' }]}
-                onPress={() => setClientsModal(true)}
-                activeOpacity={0.75}
-              >
-                <Text style={s.statEmoji}>👥</Text>
-                <Text style={[s.statValue, { color: tc.text }]}>{stats?.totalClients}</Text>
-                <Text style={[s.statLabel, { color: tc.textMuted }]}>Clientes</Text>
-                <View style={s.tapHint}>
-                  <MaterialIcons name="bar-chart" size={11} color="#10B981" />
-                  <Text style={[s.tapHintText, { color: '#10B981' }]}>Ver gráfica</Text>
-                </View>
-              </TouchableOpacity>
-
-              <TouchableOpacity
-                style={[s.statCard, s.statCardTouchable, { backgroundColor: tc.surface, borderColor: tc.border, borderLeftColor: '#6366F1' }]}
-                onPress={openAppointmentsHistory}
-                activeOpacity={0.75}
-              >
-                <Text style={s.statEmoji}>📅</Text>
-                <Text style={[s.statValue, { color: tc.text }]}>{tabApts}</Text>
-                <Text style={[s.statLabel, { color: tc.textMuted }]}>Citas {activeTab === 'hoy' ? 'hoy' : activeTab === 'semana' ? 'semana' : MONTHS_ES[selectedMonth]}</Text>
-                <View style={s.tapHint}>
-                  <MaterialIcons name="list" size={11} color="#6366F1" />
-                  <Text style={[s.tapHintText, { color: '#6366F1' }]}>Ver historial</Text>
-                </View>
-              </TouchableOpacity>
-            </View>
-
-            <View style={s.statsRow}>
-              <View style={[s.statCard, { backgroundColor: tc.surface, borderColor: tc.border, borderLeftColor: '#F59E0B' }]}>
-                <Text style={s.statEmoji}>✅</Text>
-                <Text style={[s.statValue, { color: tc.text }]}>{stats?.completedAppointments}</Text>
-                <Text style={[s.statLabel, { color: tc.textMuted }]}>Completadas</Text>
-                <Text style={[s.statSub, { color: tc.textMuted }]}>total histórico</Text>
-              </View>
-              <View style={[s.statCard, { backgroundColor: tc.surface, borderColor: tc.border, borderLeftColor: '#94A3B8' }]}>
-                <Text style={s.statEmoji}>✂️</Text>
-                <Text style={[s.statValue, { color: tc.text }]}>{stats?.completedAppointments}</Text>
-                <Text style={[s.statLabel, { color: tc.textMuted }]}>Servicios dados</Text>
-                <Text style={[s.statSub, { color: tc.textMuted }]}>total histórico</Text>
-              </View>
-            </View>
-
-            <Text style={[s.sectionLabel, { color: tc.textMuted }]}>FINANZAS — {MONTHS_ES[selectedMonth].toUpperCase()} {selectedYear}</Text>
-            <View style={s.statsRow}>
-              <View style={[s.statCard, { backgroundColor: isDark ? '#052E16' : '#ECFDF5', borderLeftColor: '#10B981', borderColor: '#10B981' }]}>
-                <Text style={s.statEmoji}>💰</Text>
-                <Text style={[s.statValue, { color: '#10B981' }]}>${(stats?.monthRevenue || 0).toLocaleString('es-MX')}</Text>
-                <Text style={[s.statLabel, { color: isDark ? '#6EE7B7' : '#065F46' }]}>Cobrado</Text>
-              </View>
-              <TouchableOpacity
-                style={[s.statCard, { backgroundColor: isDark ? '#431407' : '#FFFBEB', borderLeftColor: '#F59E0B', borderColor: '#F59E0B' }]}
-                onPress={() => router.push('/reports/pending-payments')}
-              >
-                <Text style={s.statEmoji}>⏳</Text>
-                <Text style={[s.statValue, { color: '#F59E0B' }]}>${(stats?.pendingRevenue || 0).toLocaleString('es-MX')}</Text>
-                <Text style={[s.statLabel, { color: isDark ? '#FED7AA' : '#92400E' }]}>Por cobrar</Text>
-                <View style={s.tapHint}>
-                  <MaterialIcons name="chevron-right" size={11} color="#F59E0B" />
-                  <Text style={[s.tapHintText, { color: '#F59E0B' }]}>Ver detalle</Text>
-                </View>
-              </TouchableOpacity>
-            </View>
-          </View>
-        )}
       </ScrollView>
 
+      {/* ═══════════════════════════════════════════════════════════════
+          MODAL: Historial de citas del mes
+          ═══════════════════════════════════════════════════════════════ */}
       <Modal visible={aptsModal} animationType="slide" transparent onRequestClose={() => setAptsModal(false)}>
         <View style={s.modalOverlay}>
           <TouchableOpacity style={s.modalBackdrop} activeOpacity={1} onPress={() => setAptsModal(false)} />
@@ -709,8 +822,8 @@ export default function ReportsScreen() {
             <View style={s.modalHandle} />
             <View style={s.modalHeader}>
               <View>
-                <Text style={[s.modalTitle, { color: tc.text }]}>Citas {tabLabel}</Text>
-                <Text style={[s.modalSub, { color: tc.textMuted }]}>{tabApts} citas en total</Text>
+                <Text style={[s.modalTitle, { color: tc.text }]}>Citas de {MONTHS_ES[selectedMonth]}</Text>
+                <Text style={[s.modalSub, { color: tc.textMuted }]}>{stats?.monthAppointments || 0} citas en total</Text>
               </View>
               <TouchableOpacity onPress={() => setAptsModal(false)}>
                 <MaterialIcons name="close" size={22} color={tc.textMuted} />
@@ -723,7 +836,7 @@ export default function ReportsScreen() {
             ) : aptsList.length === 0 ? (
               <View style={{ padding: 40, alignItems: 'center', gap: 8 }}>
                 <Text style={{ fontSize: 36 }}>📅</Text>
-                <Text style={[{ fontSize: 15, fontWeight: '600' }, { color: tc.text }]}>Sin citas {tabLabel}</Text>
+                <Text style={[{ fontSize: 15, fontWeight: '600' }, { color: tc.text }]}>Sin citas este mes</Text>
               </View>
             ) : (
               <ScrollView showsVerticalScrollIndicator={false} style={{ maxHeight: '85%' }}>
@@ -756,6 +869,9 @@ export default function ReportsScreen() {
         </View>
       </Modal>
 
+      {/* ═══════════════════════════════════════════════════════════════
+          MODAL: Crecimiento de clientes
+          ═══════════════════════════════════════════════════════════════ */}
       <Modal visible={clientsModal} animationType="slide" transparent onRequestClose={() => setClientsModal(false)}>
         <View style={s.modalOverlay}>
           <TouchableOpacity style={s.modalBackdrop} activeOpacity={1} onPress={() => setClientsModal(false)} />
@@ -821,47 +937,59 @@ const s = StyleSheet.create({
   container:         { flex: 1 },
   loadingWrap:       { flex: 1, justifyContent: 'center', alignItems: 'center' },
   scroll:            { paddingBottom: 100 },
+
   paywall:           { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 36, gap: 16 },
   paywallIconWrap:   { width: 80, height: 80, borderRadius: 24, justifyContent: 'center', alignItems: 'center' },
   paywallTitle:      { fontSize: 20, fontWeight: '700', textAlign: 'center' },
   paywallDesc:       { fontSize: 14, textAlign: 'center', lineHeight: 22 },
   paywallBtn:        { backgroundColor: '#10B981', paddingHorizontal: 28, paddingVertical: 14, borderRadius: 12 },
   paywallBtnText:    { color: '#fff', fontWeight: '700', fontSize: 15 },
-  header:            { paddingHorizontal: 20, paddingTop: 20, paddingBottom: 16, borderBottomWidth: 1 },
-  headerTitle:       { fontSize: 28, fontWeight: '800', letterSpacing: -0.5, marginBottom: 14 },
-  monthNav:          { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  monthNavBtn:       { width: 34, height: 34, borderRadius: 10, justifyContent: 'center', alignItems: 'center' },
-  monthNavLabel:     { flex: 1, alignItems: 'center', gap: 4 },
-  monthNavText:      { fontSize: 16, fontWeight: '700' },
-  monthNavToday:     { fontSize: 11, fontWeight: '700', color: '#10B981' },
-  reportTabRow:      { flexDirection: 'row', padding: 12, gap: 8, borderBottomWidth: 0.5 },
-  reportTab:         { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, paddingVertical: 9, borderRadius: 12, backgroundColor: '#F1F5F9', borderWidth: 1, borderColor: 'transparent' },
-  reportTabActive:   { backgroundColor: '#0F172A', borderColor: '#0F172A' },
-  reportTabText:     { fontSize: 14, fontWeight: '600' },
+
+  // ── Header ejecutivo ──
+  header:            { paddingHorizontal: 16, paddingTop: 12, paddingBottom: 14, borderBottomWidth: 0.5 },
+  headerTopRow:      { flexDirection: 'row', alignItems: 'center', marginBottom: 10 },
+  headerTitle:       { fontSize: 22, fontWeight: '800', letterSpacing: -0.5 },
+  headerGreetingRow: { flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'space-between', gap: 10 },
+  greeting:          { fontSize: 15, fontWeight: '700' },
+  greetingSub:       { fontSize: 11, marginTop: 2, lineHeight: 14 },
+  monthSelector:     { flexDirection: 'row', alignItems: 'center', borderRadius: 9, borderWidth: 0.5, padding: 2, gap: 2 },
+  monthSelectorBtn:  { padding: 4, borderRadius: 6 },
+  monthSelectorMid:  { flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 6 },
+  monthSelectorText: { fontSize: 11, fontWeight: '700' },
+
+  // ── Tabs ──
+  reportTabRow:      { flexDirection: 'row', paddingHorizontal: 16, paddingVertical: 10, gap: 8, borderBottomWidth: 0.5 },
+  reportTab:         { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, paddingVertical: 9, borderRadius: 10 },
+  reportTabText:     { fontSize: 13, fontWeight: '600' },
+
+  // ── Contenido ──
+  content:           { padding: 16, gap: 12 },
+  kpiGrid:           { gap: 0 },
+  kpiRow:            { flexDirection: 'row' },
+
+  // ── Pending card (destacado) ──
+  pendingCard:       { flexDirection: 'row', alignItems: 'center', gap: 12, borderRadius: 14, padding: 14, borderWidth: 1 },
+  pendingIconWrap:   { width: 40, height: 40, borderRadius: 10, backgroundColor: 'rgba(245,158,11,0.18)', justifyContent: 'center', alignItems: 'center' },
+  pendingLabel:      { fontSize: 10, fontWeight: '800', letterSpacing: 0.8 },
+  pendingValue:      { fontSize: 22, fontWeight: '800', letterSpacing: -0.5, marginTop: 2 },
+
+  // ── Secondary indicators ──
+  secondaryRow:      { flexDirection: 'row' },
+  secondaryCard:     { flex: 1, flexDirection: 'row', alignItems: 'center', gap: 12, borderRadius: 12, padding: 12, borderWidth: 0.5 },
+  secondaryIconWrap: { width: 34, height: 34, borderRadius: 9, backgroundColor: 'rgba(99,102,241,0.10)', justifyContent: 'center', alignItems: 'center' },
+  secondaryValue:    { fontSize: 18, fontWeight: '700' },
+  secondaryLabel:    { fontSize: 11, marginTop: 1 },
+
+  // ── Placeholder ──
+  placeholder:       { borderRadius: 14, padding: 24, borderWidth: 0.5, alignItems: 'center', gap: 8, marginTop: 4 },
+  placeholderTitle:  { fontSize: 14, fontWeight: '700' },
+  placeholderDesc:   { fontSize: 12, textAlign: 'center', lineHeight: 18 },
+
+  // ── Rango y staff (sin cambios) ──
   rangePicker:       { flexDirection: 'row', padding: 12, gap: 8, borderBottomWidth: 0.5 },
   rangeBtn:          { flex: 1, paddingVertical: 8, borderRadius: 10, alignItems: 'center' },
   rangeBtnText:      { fontSize: 12, fontWeight: '600' },
-  tabs:              { flexDirection: 'row', paddingHorizontal: 20, paddingBottom: 16, paddingTop: 12, gap: 8, borderBottomWidth: 1 },
-  tab:               { flex: 1, paddingVertical: 8, borderRadius: 10, alignItems: 'center' },
-  tabText:           { fontSize: 14, fontWeight: '600' },
-  heroCard:          { margin: 20, marginBottom: 12, borderRadius: 20, padding: 24, flexDirection: 'row', alignItems: 'center' },
-  heroLeft:          { flex: 1 },
-  heroLabel:         { fontSize: 13, color: '#94A3B8', marginBottom: 4 },
-  heroValue:         { fontSize: 56, fontWeight: '800', color: '#10B981', lineHeight: 60 },
-  heroRight:         { gap: 10 },
-  heroMini:          { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  heroDot:           { width: 8, height: 8, borderRadius: 4 },
-  heroMiniText:      { fontSize: 13, color: '#CBD5E1' },
-  sectionLabel:      { fontSize: 11, fontWeight: '800', letterSpacing: 1.2, paddingHorizontal: 20, marginBottom: 10, marginTop: 16 },
-  statsRow:          { flexDirection: 'row', paddingHorizontal: 20, gap: 10, marginBottom: 12 },
-  statCard:          { flex: 1, borderRadius: 14, padding: 16, borderLeftWidth: 4, borderWidth: 1, alignItems: 'center' },
-  statCardTouchable: { shadowOpacity: 0.06, shadowRadius: 6, elevation: 2 },
-  statEmoji:         { fontSize: 20, marginBottom: 6 },
-  statValue:         { fontSize: 28, fontWeight: '800', marginTop: 4 },
-  statLabel:         { fontSize: 12, marginTop: 4, fontWeight: '500' },
-  statSub:           { fontSize: 10, marginTop: 3 },
-  tapHint:           { flexDirection: 'row', alignItems: 'center', gap: 3, marginTop: 6 },
-  tapHintText:       { fontSize: 10, fontWeight: '600' },
+
   modalOverlay:      { flex: 1, justifyContent: 'flex-end' },
   modalBackdrop:     { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(0,0,0,0.5)' },
   modalBox:          { borderTopLeftRadius: 24, borderTopRightRadius: 24, padding: 24, paddingBottom: 8 },
@@ -869,6 +997,7 @@ const s = StyleSheet.create({
   modalHeader:       { flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: 16 },
   modalTitle:        { fontSize: 18, fontWeight: '800' },
   modalSub:          { fontSize: 13, marginTop: 2 },
+
   aptRow:            { flexDirection: 'row', alignItems: 'center', paddingVertical: 12, borderBottomWidth: 0.5 },
   aptAccent:         { width: 3, height: '100%', borderRadius: 2, minHeight: 48 },
   aptClient:         { fontSize: 14, fontWeight: '700' },
@@ -876,6 +1005,7 @@ const s = StyleSheet.create({
   aptDate:           { fontSize: 11, marginTop: 3 },
   aptStatusBadge:    { paddingHorizontal: 8, paddingVertical: 4, borderRadius: 8 },
   aptStatusText:     { fontSize: 11, fontWeight: '600' },
+
   clientKpiRow:      { flexDirection: 'row', gap: 8, marginBottom: 20 },
   clientKpi:         { flex: 1, borderRadius: 12, padding: 12, alignItems: 'center' },
   clientKpiNum:      { fontSize: 22, fontWeight: '800' },
@@ -889,6 +1019,8 @@ const s = StyleSheet.create({
   barLabel:          { fontSize: 11, fontWeight: '600', marginTop: 2 },
   goClientsBtn:      { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, backgroundColor: '#10B981', borderRadius: 14, padding: 14, marginTop: 4 },
   goClientsBtnText:  { color: '#fff', fontWeight: '700', fontSize: 14 },
+
+  // ── Staff (sin cambios) ──
   staffSectionLabel: { fontSize: 11, fontWeight: '800', letterSpacing: 1.2, marginBottom: 12, marginTop: 4 },
   staffEmptyWrap:    { alignItems: 'center', justifyContent: 'center', padding: 48, gap: 12 },
   staffEmptyTitle:   { fontSize: 18, fontWeight: '700' },
