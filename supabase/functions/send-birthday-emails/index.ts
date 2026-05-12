@@ -21,20 +21,17 @@ import { corsForWebhook } from '../_shared/cors.ts'
 // IDEMPOTENCIA:
 //   - Cada envío exitoso registra en `birthday_email_log` con (user_id,
 //     client_id, sent_for_date). Si ya hay un log para el mismo día, se
-//     omite el reenvío. Esto permite que el cron pueda re-correrse sin
-//     duplicar.
+//     omite el reenvío.
 //
-// CONTROL DE COSTOS:
-//   - Solo se envía a clientes con `email` Y `birthday` registrados.
-//   - Filtro previo por MES+DÍA en SQL para no traer toda la base.
+// SCHEMA-AGNÓSTICO:
+//   - select('*') trae todas las columnas que existan en business_profiles.
+//   - Los helpers getEmail/getPhone/getAddress prueban varios nombres
+//     candidatos para adaptarse al schema real sin tronar.
 //
 // META COMPLIANCE:
 //   - Es un EMAIL, no WhatsApp → no afecta el WABA.
-//   - Pero el contenido sigue siendo Marketing soft, así que cumplimos:
-//       * List-Unsubscribe header
-//       * Unsubscribe link visible
-//       * Footer con info del negocio (CAN-SPAM compliance)
-//       * Reply-to al email del owner (no a noreply@)
+//   - Cumplimos CAN-SPAM/CASL: List-Unsubscribe, unsubscribe link,
+//     footer con info, reply-to al owner.
 // ══════════════════════════════════════════════════════════════════════
 
 const RESEND_API_KEY = Deno.env.get('RESEND_API_KEY') ?? ''
@@ -49,6 +46,19 @@ const DEFAULT_MESSAGE =
   'Todo el equipo de {{negocio}} te desea un feliz cumpleaños. ' +
   '¡Que sea un día especial!\n\n' +
   'Nos alegra mucho tenerte como cliente y esperamos verte pronto.'
+
+// Helpers schema-agnósticos: prueban varios nombres candidatos por si el
+// schema real usa 'phone' en vez de 'business_phone', 'address' en vez
+// de 'business_address', etc.
+function getEmail(profile: any): string {
+  return profile?.business_email || profile?.email || ''
+}
+function getPhone(profile: any): string {
+  return profile?.business_phone || profile?.phone || profile?.alternative_phone || ''
+}
+function getAddress(profile: any): string {
+  return profile?.business_address || profile?.address || ''
+}
 
 serve(async (req) => {
   const corsHeaders = corsForWebhook()
@@ -77,8 +87,6 @@ serve(async (req) => {
     }
 
     // ── 2. Determinar fecha objetivo ──
-    // Por defecto: HOY en hora MX (UTC-6, sin DST en MX desde 2023).
-    // Permite override con body { targetDate: 'YYYY-MM-DD' } para testing.
     const body = await req.json().catch(() => ({}))
     const targetDate = body.targetDate || todayInMexicoCity()
     const [, mm, dd] = targetDate.split('-').map(Number)
@@ -88,9 +96,11 @@ serve(async (req) => {
     const supabase = createClient(SUPABASE_URL, SUPABASE_KEY)
 
     // ── 3. Encontrar negocios con cumpleaños activados ──
+    // Usamos select('*') para ser schema-agnóstico: el schema real puede tener
+    // las columnas como `phone`/`address` o `business_phone`/`business_address`.
     const { data: profiles, error: profilesError } = await supabase
       .from('business_profiles')
-      .select('user_id, business_name, business_email, business_phone, business_address, birthday_message, birthday_email_subject, birthday_discount_text')
+      .select('*')
       .eq('birthday_reminders_enabled', true)
 
     if (profilesError) {
@@ -160,8 +170,6 @@ async function processBirthdaysForBusiness(
   const businessName = profile.business_name || 'VYLTA'
 
   // ── 1. Encontrar clientes que cumplen hoy ──
-  // Birthday se guarda como DATE 'YYYY-MM-DD'. Filtramos por mes+día sin importar año.
-  // Postgres: usamos extract() — más eficiente que traer todo y filtrar en código.
   const monthStr = String(targetMonth).padStart(2, '0')
   const dayStr = String(targetDay).padStart(2, '0')
   const monthDay = `${monthStr}-${dayStr}` // '03-15'
@@ -173,7 +181,7 @@ async function processBirthdaysForBusiness(
     .not('email', 'is', null)
     .neq('email', '')
     .not('birthday', 'is', null)
-    .like('birthday', `%-${monthDay}`) // matches 'YYYY-MM-DD' donde MM-DD = monthDay
+    .like('birthday', `%-${monthDay}`)
 
   if (clientsError) {
     console.error(`[send-birthday-emails] Error clientes user ${userId}:`, clientsError)
@@ -186,7 +194,7 @@ async function processBirthdaysForBusiness(
 
   console.log(`[send-birthday-emails] ${businessName} (${userId}): ${clients.length} clientes cumplen hoy`)
 
-  // ── 2. Obtener log de envíos previos para evitar duplicados ──
+  // ── 2. Log de envíos previos (idempotencia) ──
   const clientIds = clients.map(c => c.id)
   const { data: existingLogs } = await supabase
     .from('birthday_email_log')
@@ -197,16 +205,21 @@ async function processBirthdaysForBusiness(
 
   const alreadySentSet = new Set((existingLogs || []).map((l: any) => l.client_id))
 
-  // ── 3. Obtener email del owner para reply-to ──
+  // ── 3. Email del owner para reply-to ──
+  const businessEmail = getEmail(profile)
   const { data: ownerData } = await supabase.auth.admin.getUserById(userId)
-  const ownerEmail = profile.business_email || ownerData?.user?.email || `soporte@${FROM_DOMAIN}`
+  const ownerEmail = businessEmail || ownerData?.user?.email || `soporte@${FROM_DOMAIN}`
 
-  // ── 4. Preparar contenido ──
+  // ── 4. Contacto del negocio para footer ──
+  const businessPhone = getPhone(profile)
+  const businessAddress = getAddress(profile)
+
+  // ── 5. Templates ──
   const subjectTemplate = profile.birthday_email_subject || DEFAULT_SUBJECT
   const bodyTemplate = profile.birthday_message || DEFAULT_MESSAGE
   const discountText = profile.birthday_discount_text || ''
 
-  // From: usar 'hola@' (mejor deliverability que 'noreply@')
+  // From: 'hola@' (mejor deliverability que 'noreply@')
   const safeName = businessName.replace(/[<>"]/g, '').trim().slice(0, 50)
   const fromField = `${safeName} <hola@${FROM_DOMAIN}>`
 
@@ -214,7 +227,6 @@ async function processBirthdaysForBusiness(
   let skipped = 0
   let failed = 0
 
-  // ── 5. Enviar a cada cliente ──
   for (const client of clients) {
     if (alreadySentSet.has(client.id)) {
       console.log(`[send-birthday-emails] Skip ${client.email} — ya recibió email hoy`)
@@ -247,8 +259,8 @@ async function processBirthdaysForBusiness(
           to: [client.email],
           reply_to: ownerEmail,
           subject: personalizedSubject,
-          text: buildPlainText(personalizedSubject, personalizedBody, businessName, profile.business_email || '', profile.business_phone || '', profile.business_address || '', unsubscribeUrl),
-          html: buildEmailHtml(personalizedSubject, personalizedBody, businessName, profile.business_email || '', profile.business_phone || '', profile.business_address || '', unsubscribeUrl, firstName),
+          text: buildPlainText(personalizedSubject, personalizedBody, businessName, businessEmail, businessPhone, businessAddress, unsubscribeUrl),
+          html: buildEmailHtml(personalizedSubject, personalizedBody, businessName, businessEmail, businessPhone, businessAddress, unsubscribeUrl, firstName),
           headers: {
             'List-Unsubscribe': `<${unsubscribeUrl}>`,
             'List-Unsubscribe-Post': 'List-Unsubscribe=One-Click',
@@ -269,7 +281,6 @@ async function processBirthdaysForBusiness(
         continue
       }
 
-      // Registrar envío exitoso
       await supabase.from('birthday_email_log').insert({
         user_id: userId,
         client_id: client.id,
@@ -293,22 +304,13 @@ async function processBirthdaysForBusiness(
 
 // ──────────────────────────────────────────────────────────────────────
 
-/**
- * Hora local en Ciudad de México (UTC-6 sin DST).
- * Devuelve YYYY-MM-DD del "hoy" en MX.
- */
 function todayInMexicoCity(): string {
   const now = new Date()
-  // MX: UTC-6 todo el año desde 2023
   const mxOffsetMs = -6 * 60 * 60 * 1000
   const mxNow = new Date(now.getTime() + mxOffsetMs)
-  // Truncar a YYYY-MM-DD usando el "día UTC" del mxNow (que ya está corrido)
   return mxNow.toISOString().split('T')[0]
 }
 
-// ════════════════════════════════════════════════════════════════════════
-// Plain text (multipart/alternative) — mejora deliverability
-// ════════════════════════════════════════════════════════════════════════
 function buildPlainText(
   subject: string, body: string, businessName: string,
   businessEmail: string, businessPhone: string, businessAddress: string,
@@ -333,9 +335,6 @@ function buildPlainText(
   return lines.join('\n')
 }
 
-// ════════════════════════════════════════════════════════════════════════
-// HTML profesional — colores pastel rosa por cumpleaños
-// ════════════════════════════════════════════════════════════════════════
 function buildEmailHtml(
   subject: string, body: string, businessName: string,
   businessEmail: string, businessPhone: string, businessAddress: string,
@@ -367,20 +366,17 @@ function buildEmailHtml(
     <tr>
       <td align="center">
         <table width="600" cellpadding="0" cellspacing="0" border="0" style="max-width:600px;width:100%;background:#FFFFFF;border-radius:16px;overflow:hidden;border:1px solid #FBCFE8;">
-          <!-- Header rosa con confeti -->
           <tr>
             <td style="background:linear-gradient(135deg,#EC4899 0%,#F472B6 100%);padding:32px;text-align:center;">
               <div style="font-size:48px;line-height:1;margin-bottom:8px;">🎂</div>
               <p style="margin:0;color:#FFFFFF;font-size:22px;font-weight:700;letter-spacing:-0.01em;">${escapeHtml(businessName)}</p>
             </td>
           </tr>
-          <!-- Asunto -->
           <tr>
             <td style="padding:32px 32px 0;">
               <h1 style="margin:0 0 8px;font-size:24px;font-weight:700;color:#831843;line-height:1.3;text-align:center;">${escapeHtml(subject)}</h1>
             </td>
           </tr>
-          <!-- Cuerpo -->
           <tr>
             <td style="padding:16px 32px 32px;">
               ${lines}
@@ -401,7 +397,6 @@ function buildEmailHtml(
               </table>
             </td>
           </tr>` : ''}
-          <!-- Footer -->
           <tr>
             <td style="background:#FDF2F8;padding:20px 32px;border-top:1px solid #FBCFE8;">
               <p style="margin:0 0 8px;font-size:12px;color:#9D174D;text-align:center;line-height:1.6;">
