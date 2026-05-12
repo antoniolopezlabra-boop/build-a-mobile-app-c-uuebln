@@ -14,14 +14,18 @@ import MaterialIcons from '@expo/vector-icons/MaterialIcons';
 import KPICard from '@/components/reports/KPICard';
 import LineChartCard from '@/components/reports/LineChartCard';
 import DonutChartCard, { ServiceSlice } from '@/components/reports/DonutChartCard';
+import InsightsCard, { Insight } from '@/components/reports/InsightsCard';
 
 // ══════════════════════════════════════════════════════════════════════
 // VYLTA — Reportes Ejecutivos (rediseño Mayo 2026)
 //
 // Commit 1: header + 4 KPI cards + cálculo de variaciones
-// Commit 2 (este): + Gráfica de línea de ingresos diarios
-//                  + Donut chart de ingresos por servicio
-// Commit 3: Insights rule-based (sin LLM)
+// Commit 2: + Gráfica de línea de ingresos diarios + Donut de servicios
+// Commit 3 (este): + Insights rule-based (sin LLM)
+//   • "Tu mejor día es [día]" — día con más % de ingresos
+//   • "Servicio estrella: [nombre]" — servicio con más ingresos
+//   • "Horario muerto: [hora]" — hora con menos citas
+//   • "N clientes inactivos 60+ días" — clientes a reactivar
 // ══════════════════════════════════════════════════════════════════════
 
 interface Stats {
@@ -49,9 +53,13 @@ interface Stats {
   lastMonthAppointments: number;
   avgTicket: number;
   avgTicketLastMonth: number;
-  // ── NUEVOS campos para gráficas (Commit 2) ──
-  dailyRevenue: { label: string; value: number }[]; // 7 puntos Lun-Dom con ingresos del mes agrupados por día de la semana
-  revenueByService: ServiceSlice[];                 // ordenado desc por amount
+  dailyRevenue: { label: string; value: number }[];
+  revenueByService: ServiceSlice[];
+  // ── NUEVOS campos para Insights (Commit 3) ──
+  bestWeekday: { name: string; percent: number } | null;  // día con mayor % de ingresos
+  topService: ServiceSlice | null;                          // servicio estrella
+  deadHourRange: string | null;                             // ej: "14h-16h" o null si no hay patrón claro
+  inactiveClientsCount: number;                             // clientes con last_visit > 60 días
 }
 
 interface AppointmentItem {
@@ -78,6 +86,9 @@ interface StaffStat {
 
 const MONTHS_ES = ['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'];
 
+// ── Nombres completos de los días para los insights (no abreviados) ──
+const DAY_FULL_NAMES = ['lunes', 'martes', 'miércoles', 'jueves', 'viernes', 'sábado', 'domingo'];
+
 const STATUS_CONFIG: Record<string, { color: string; label: string }> = {
   'Confirmada': { color: '#10B981', label: 'Confirmada' },
   'Pendiente':  { color: '#F59E0B', label: 'Pendiente' },
@@ -88,7 +99,6 @@ const STATUS_CONFIG: Record<string, { color: string; label: string }> = {
   'Pagado':     { color: '#10B981', label: 'Pagado' },
 };
 
-// Colores rotativos para el donut de servicios
 const SERVICE_COLORS = ['#10B981', '#6366F1', '#F59E0B', '#F472B6', '#3B82F6', '#A855F7', '#14B8A6'];
 
 const DAYS_ES = ['Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb', 'Dom'];
@@ -100,6 +110,69 @@ function getReportsCacheKey(year: number, month: number): string {
 function calcChange(current: number, previous: number): number | null {
   if (previous === 0) return current > 0 ? 100 : null;
   return Math.round(((current - previous) / previous) * 100);
+}
+
+// ══════════════════════════════════════════════════════════════════════
+// MOTOR DE INSIGHTS — Reglas determinísticas sin LLM
+//
+// Cada función analiza los datos del Stats y decide si genera un insight.
+// Si los datos no son suficientes para una recomendación útil, retorna null.
+//
+// Lógica clave:
+//   • No mostrar insights con poca data (ej: si solo hay 1 cita no hay
+//     "mejor día" — sería ruido)
+//   • Cada insight tiene un threshold mínimo para tener relevancia
+//   • Los textos están escritos en tono ejecutivo, no condescendiente
+// ══════════════════════════════════════════════════════════════════════
+
+function buildBestDayInsight(stats: Stats | null): Insight | null {
+  if (!stats?.bestWeekday) return null;
+  // Requiere al menos 20% para ser significativo (si fuera 14% sería ~igual reparto)
+  if (stats.bestWeekday.percent < 20) return null;
+  return {
+    id: 'best-day',
+    accent: 'green',
+    title: `Tu mejor día es ${stats.bestWeekday.name}`,
+    subtitle: `${stats.bestWeekday.percent}% de tus ingresos del mes`,
+    // No es tappable por ahora — es informativo
+  };
+}
+
+function buildTopServiceInsight(stats: Stats | null): Insight | null {
+  if (!stats?.topService) return null;
+  if (stats.monthRevenue === 0) return null;
+  const percent = Math.round((stats.topService.amount / stats.monthRevenue) * 100);
+  if (percent < 15) return null; // sin un servicio claramente dominante no aporta valor
+  return {
+    id: 'top-service',
+    accent: 'purple',
+    title: `Servicio estrella: ${stats.topService.name}`,
+    subtitle: `${percent}% de tus ingresos · $${stats.topService.amount.toLocaleString('es-MX')}`,
+  };
+}
+
+function buildDeadHourInsight(stats: Stats | null): Insight | null {
+  if (!stats?.deadHourRange) return null;
+  return {
+    id: 'dead-hour',
+    accent: 'amber',
+    title: `Horario muerto: ${stats.deadHourRange}`,
+    subtitle: 'Considera promociones en ese rango',
+  };
+}
+
+function buildInactiveClientsInsight(
+  stats: Stats | null,
+  onPress: () => void,
+): Insight | null {
+  if (!stats?.inactiveClientsCount || stats.inactiveClientsCount < 3) return null;
+  return {
+    id: 'inactive-clients',
+    accent: 'blue',
+    title: `${stats.inactiveClientsCount} clientes sin venir 60+ días`,
+    subtitle: 'Reactivar con campaña de email',
+    onPress,
+  };
 }
 
 export default function ReportsScreen() {
@@ -281,13 +354,12 @@ export default function ReportsScreen() {
         await Promise.all([
           supabase.from('appointments').select('status').eq('user_id', userId).eq('date', today),
           supabase.from('appointments').select('id, status').eq('user_id', userId).gte('date', weekStartStr),
-          supabase.from('appointments').select('id, status').eq('user_id', userId).gte('date', monthStartStr).lte('date', monthEndStr),
+          supabase.from('appointments').select('id, status, start_time').eq('user_id', userId).gte('date', monthStartStr).lte('date', monthEndStr),
           supabase.from('clients').select('*', { count: 'exact', head: true }).eq('user_id', userId),
           supabase.from('appointments').select('*', { count: 'exact', head: true }).eq('user_id', userId),
           supabase.from('appointments').select('*', { count: 'exact', head: true }).eq('user_id', userId).in('status', ['Completada', 'Pagado']),
         ]);
 
-      // ── Revenue mes actual ──
       const [{ data: revLegacy }, { data: revNew }] = await Promise.all([
         supabase.from('appointments').select('date, service_cost, service_name').eq('user_id', userId).eq('status', 'Pagado').gte('date', monthStartStr).lte('date', monthEndStr),
         supabase.from('appointments').select('date, service_cost, service_name').eq('user_id', userId).eq('status', 'Completada').eq('paid', true).gte('date', monthStartStr).lte('date', monthEndStr),
@@ -297,26 +369,14 @@ export default function ReportsScreen() {
         .select('service_cost').eq('user_id', userId).eq('status', 'Completada')
         .or('paid.is.null,paid.eq.false').gte('date', monthStartStr).lte('date', monthEndStr);
 
-      // Unimos ambos arrays para reusar en revenue, daily y donut
       const paidAppointments = [...(revLegacy || []), ...(revNew || [])];
       const monthRevenue   = paidAppointments.reduce((s: number, a: any) => s + (a.service_cost || 0), 0);
       const pendingRevenue = (penD || []).reduce((s: number, a: any) => s + (a.service_cost || 0), 0);
 
-      // ══════════════════════════════════════════════════════════════════
-      // CÁLCULO 1: dailyRevenue — ingresos agrupados por día de la semana
-      //
-      // Inicializamos array [0,0,0,0,0,0,0] donde idx 0=Lun, 6=Dom.
-      // JavaScript getDay() devuelve: 0=Dom, 1=Lun ... 6=Sáb
-      // Convertimos a nuestra convención Lun-Dom con:
-      //   getDay() === 0 ? 6 : getDay() - 1
-      //
-      // Sumamos service_cost en el día correspondiente.
-      // Esto da una vista clara de qué días son más fuertes.
-      // ══════════════════════════════════════════════════════════════════
+      // ── dailyRevenue (Commit 2) ──
       const dailyByWeekday = [0, 0, 0, 0, 0, 0, 0];
       paidAppointments.forEach((a: any) => {
         if (!a.date || !a.service_cost) return;
-        // Parseamos como local time agregando T12:00 para evitar desfases UTC
         const d = new Date(a.date + 'T12:00:00');
         const jsDay = d.getDay();
         const idx = jsDay === 0 ? 6 : jsDay - 1;
@@ -327,13 +387,7 @@ export default function ReportsScreen() {
         value: Math.round(value),
       }));
 
-      // ══════════════════════════════════════════════════════════════════
-      // CÁLCULO 2: revenueByService — ingresos por servicio
-      //
-      // Agrupamos por service_name con un Map. Citas sin service_name caen
-      // en bucket "Sin nombre". Convertimos a array y ordenamos desc.
-      // Asignamos colores rotativos del catálogo SERVICE_COLORS.
-      // ══════════════════════════════════════════════════════════════════
+      // ── revenueByService (Commit 2) ──
       const serviceMap = new Map<string, number>();
       paidAppointments.forEach((a: any) => {
         const name = (a.service_name || 'Sin nombre').trim();
@@ -347,8 +401,91 @@ export default function ReportsScreen() {
           color: SERVICE_COLORS[idx % SERVICE_COLORS.length],
         }))
         .sort((a, b) => b.amount - a.amount)
-        // Reasignar colores después de ordenar para que el más grande siempre sea verde
         .map((slice, idx) => ({ ...slice, color: SERVICE_COLORS[idx % SERVICE_COLORS.length] }));
+
+      // ══════════════════════════════════════════════════════════════════
+      // CÁLCULOS PARA INSIGHTS (Commit 3)
+      //
+      // Todos se calculan de datos YA cargados arriba (paidAppointments,
+      // revenueByService, mA con start_time). Solo se hace UNA query nueva
+      // para contar clientes inactivos.
+      // ══════════════════════════════════════════════════════════════════
+
+      // ── 1. Mejor día de la semana: índice del valor máximo en dailyByWeekday
+      //    Si todos son 0 o no hay datos, bestWeekday = null
+      let bestWeekday: { name: string; percent: number } | null = null;
+      const totalDaily = dailyByWeekday.reduce((s, v) => s + v, 0);
+      if (totalDaily > 0) {
+        let maxIdx = 0;
+        for (let i = 1; i < 7; i++) {
+          if (dailyByWeekday[i] > dailyByWeekday[maxIdx]) maxIdx = i;
+        }
+        const percent = Math.round((dailyByWeekday[maxIdx] / totalDaily) * 100);
+        bestWeekday = {
+          name: DAY_FULL_NAMES[maxIdx],
+          percent,
+        };
+      }
+
+      // ── 2. Servicio estrella: el primero del array ya ordenado desc
+      const topService: ServiceSlice | null = revenueByService.length > 0 ? revenueByService[0] : null;
+
+      // ── 3. Horario muerto: hora con menos citas del mes
+      //    Tomamos start_time de TODAS las citas del mes (no solo pagadas),
+      //    extraemos la hora (entero) y contamos. Devolvemos el rango con
+      //    menos citas dentro del rango horario de operación detectado.
+      //
+      //    Lógica:
+      //      - Solo si hay >= 10 citas en el mes (sino no es significativo)
+      //      - Detectamos rango horario real (min y max horas con citas)
+      //      - Dentro de ese rango, buscamos el bucket de 1h con menos citas
+      //      - Si la diferencia entre max y min hora es < 3, no hay rango — null
+      let deadHourRange: string | null = null;
+      if ((mA?.length || 0) >= 10) {
+        const hourCounts = new Map<number, number>();
+        let minHour = 23, maxHour = 0;
+        (mA || []).forEach((a: any) => {
+          if (!a.start_time) return;
+          const hourStr = a.start_time.split(':')[0];
+          const h = parseInt(hourStr, 10);
+          if (isNaN(h)) return;
+          hourCounts.set(h, (hourCounts.get(h) || 0) + 1);
+          if (h < minHour) minHour = h;
+          if (h > maxHour) maxHour = h;
+        });
+
+        // Solo sugerir si el rango operativo es razonable (al menos 3 horas)
+        if (maxHour - minHour >= 3) {
+          // Buscamos la hora con menos citas DENTRO del rango operativo
+          let minCount = Infinity;
+          let deadHour = -1;
+          for (let h = minHour; h < maxHour; h++) {
+            const count = hourCounts.get(h) || 0;
+            if (count < minCount) {
+              minCount = count;
+              deadHour = h;
+            }
+          }
+          // Solo mostrar si el horario muerto tiene MENOS de la mitad del promedio
+          const avgCount = (mA?.length || 0) / (maxHour - minHour + 1);
+          if (deadHour >= 0 && minCount < avgCount * 0.5) {
+            deadHourRange = `${deadHour}h-${deadHour + 1}h`;
+          }
+        }
+      }
+
+      // ── 4. Clientes inactivos: count de clientes con last_visit > 60 días
+      //    Es una query nueva pero ligera (solo count, no trae filas)
+      const sixtyDaysAgo = new Date();
+      sixtyDaysAgo.setDate(sixtyDaysAgo.getDate() - 60);
+      const sixtyDaysAgoStr = toLocalDateString(sixtyDaysAgo);
+
+      const { count: inactiveCount } = await supabase
+        .from('clients')
+        .select('*', { count: 'exact', head: true })
+        .eq('user_id', userId)
+        .lt('last_visit', sixtyDaysAgoStr);
+      const inactiveClientsCount = inactiveCount || 0;
 
       // ── Revenue mes anterior ──
       const [{ data: revLegacyPrev }, { data: revNewPrev }] = await Promise.all([
@@ -411,6 +548,10 @@ export default function ReportsScreen() {
         avgTicketLastMonth,
         dailyRevenue,
         revenueByService,
+        bestWeekday,
+        topService,
+        deadHourRange,
+        inactiveClientsCount,
       };
       setStats(fs);
       setCached(cacheKey, fs, CACHE_TTL.REPORTS);
@@ -503,6 +644,24 @@ export default function ReportsScreen() {
   const aptsChange        = stats ? calcChange(stats.monthAppointments, stats.lastMonthAppointments) : null;
   const ticketChange      = stats ? calcChange(stats.avgTicket, stats.avgTicketLastMonth) : null;
   const newClientsChange  = stats ? calcChange(stats.clientsThisMonth, stats.clientsLastMonth) : null;
+
+  // ══════════════════════════════════════════════════════════════════════
+  // CONSTRUIR ARRAY DE INSIGHTS (Commit 3)
+  // Cada función retorna Insight | null. Filtramos nulls.
+  // El usuario ve hasta 4 recomendaciones priorizadas.
+  // ══════════════════════════════════════════════════════════════════════
+  const insights: Insight[] = [
+    buildBestDayInsight(stats),
+    buildTopServiceInsight(stats),
+    buildDeadHourInsight(stats),
+    buildInactiveClientsInsight(stats, () => {
+      // Acción: ir a marketing → nueva campaña con segmento 'inactivos' precargado
+      router.push({
+        pathname: '/marketing/new',
+        params: { segment: 'inactivos' },
+      } as any);
+    }),
+  ].filter((x): x is Insight => x !== null);
 
   if (planLoading || loading) {
     return (
@@ -618,7 +777,6 @@ export default function ReportsScreen() {
         {reportTab === 'general' && (
           <View style={s.content}>
 
-            {/* Grid 2x2 de KPI cards */}
             <View style={s.kpiGrid}>
               <View style={s.kpiRow}>
                 <KPICard
@@ -681,7 +839,6 @@ export default function ReportsScreen() {
               </View>
             </View>
 
-            {/* Hero pendientes */}
             {stats && stats.pendingRevenue > 0 && (
               <TouchableOpacity
                 style={[s.pendingCard, {
@@ -704,11 +861,7 @@ export default function ReportsScreen() {
               </TouchableOpacity>
             )}
 
-            {/* ═══════════════════════════════════════════════════════════
-                NUEVAS GRÁFICAS (Commit 2)
-                ═══════════════════════════════════════════════════════════ */}
-
-            {/* Gráfica de línea: ingresos por día de la semana */}
+            {/* Gráfica de línea de ingresos */}
             <LineChartCard
               title="Ingresos"
               totalValue={`$${(stats?.monthRevenue || 0).toLocaleString('es-MX')}`}
@@ -723,13 +876,26 @@ export default function ReportsScreen() {
               isDark={isDark}
             />
 
-            {/* Donut chart: ingresos por servicio */}
+            {/* Donut de ingresos por servicio */}
             <DonutChartCard
               title="Ingresos por servicio"
               totalLabel="Total"
               totalValue={`$${(stats?.monthRevenue || 0).toLocaleString('es-MX')}`}
               data={stats?.revenueByService || []}
               rangeLabel={MONTHS_ES[selectedMonth].slice(0, 3)}
+              surfaceColor={tc.surface}
+              textColor={tc.text}
+              textMutedColor={tc.textMuted}
+              borderColor={tc.border}
+              isDark={isDark}
+            />
+
+            {/* ═══════════════════════════════════════════════════════════
+                INSIGHTS RULE-BASED (Commit 3)
+                Solo se renderiza si hay al menos 1 insight con datos suficientes.
+                ═══════════════════════════════════════════════════════════ */}
+            <InsightsCard
+              insights={insights}
               surfaceColor={tc.surface}
               textColor={tc.text}
               textMutedColor={tc.textMuted}
