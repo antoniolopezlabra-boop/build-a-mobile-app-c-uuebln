@@ -9,52 +9,58 @@ const SUPABASE_KEY   = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
 const FROM_DOMAIN    = Deno.env.get('RESEND_FROM_DOMAIN') ?? ''
 
 // ════════════════════════════════════════════════════════════════════════
+// Helpers schema-agnósticos: el schema real usa `phone`/`address` SIN
+// prefijo `business_`. Estos helpers prueban ambos nombres para sobrevivir
+// a futuras migraciones de schema sin tronar.
+// `business_email` NO existe en BD — caemos al email del owner via auth.users.
+// ════════════════════════════════════════════════════════════════════════
+function getProfileEmail(profile: any): string {
+  return profile?.business_email || profile?.email || ''
+}
+function getProfilePhone(profile: any): string {
+  return profile?.business_phone || profile?.phone || profile?.alternative_phone || ''
+}
+function getProfileAddress(profile: any): string {
+  return profile?.business_address || profile?.address || ''
+}
+
+// ════════════════════════════════════════════════════════════════════════
 // ANTI-SPAM: Validar contenido del email para evitar filtros
 // ════════════════════════════════════════════════════════════════════════
 function checkSpamScore(subject: string, body: string): { ok: boolean; warnings: string[] } {
   const warnings: string[] = []
 
-  // Mayúsculas excesivas en asunto
   const upperRatio = (subject.match(/[A-ZÁÉÍÓÚÑ]/g) || []).length / Math.max(1, subject.length)
   if (upperRatio > 0.5 && subject.length > 10) {
     warnings.push('Asunto con demasiadas mayúsculas')
   }
 
-  // Múltiples signos de exclamación
   if ((subject.match(/!/g) || []).length > 1) {
     warnings.push('Asunto con múltiples signos de exclamación')
   }
 
-  // Palabras spam comunes
   const spamWords = ['GRATIS', 'OFERTA', '100% gratis', 'GANA', 'OFERTA LIMITADA', 'CLICK AQUÍ', 'URGENTE']
   const upperSubject = subject.toUpperCase()
   const upperBody = body.toUpperCase()
   for (const w of spamWords) {
     if (upperSubject.includes(w) || upperBody.includes(w)) {
       warnings.push(`Palabra "${w}" puede activar filtros spam`)
-      break // un solo warning suficiente
+      break
     }
   }
 
   return { ok: warnings.length === 0, warnings }
 }
 
-// ════════════════════════════════════════════════════════════════════════
-// ANTI-SPAM: Headers profesionales para mejorar deliverability
-// ════════════════════════════════════════════════════════════════════════
 function buildHeaders(unsubscribeUrl: string): Record<string, string> {
   return {
-    // Gmail/Outlook ahora REQUIEREN List-Unsubscribe en envíos masivos (>= 5000/día)
-    // Aunque tu volumen sea menor, ponerlo mejora la reputación.
     'List-Unsubscribe': `<${unsubscribeUrl}>`,
     'List-Unsubscribe-Post': 'List-Unsubscribe=One-Click',
-    // Identifica el email como transaccional/marketing legítimo
     'X-Entity-Ref-ID': crypto.randomUUID(),
   }
 }
 
 serve(async (req) => {
-  // CORS: esta función solo se llama desde la app móvil (Plan Luxury, marketing).
   const corsHeaders = corsForApp(req)
   const preflight = handleCorsPreflightRequest(req, corsHeaders)
   if (preflight) return preflight
@@ -118,38 +124,30 @@ serve(async (req) => {
       throw new Error('Parámetros requeridos: campaignId O (userId + subject + body)')
     }
 
-    // ── Validar contenido para detectar posibles spam triggers ──
     const spamCheck = checkSpamScore(subject, body)
     if (spamCheck.warnings.length > 0) {
       console.warn(`[send-campaign] Spam warnings: ${spamCheck.warnings.join(' | ')}`)
     }
 
-    // Obtener perfil del negocio (incluye email para reply-to y nombre del owner)
+    // Obtener perfil del negocio (schema-agnóstico — usa select('*'))
     const { data: business } = await supabase
       .from('business_profiles')
-      .select('business_name, business_email, business_phone, business_address')
+      .select('*')
       .eq('user_id', userId)
       .maybeSingle()
     const businessName    = business?.business_name || 'VYLTA'
-    const businessEmail   = business?.business_email || ''
-    const businessPhone   = business?.business_phone || ''
-    const businessAddress = business?.business_address || ''
+    const businessEmail   = getProfileEmail(business)
+    const businessPhone   = getProfilePhone(business)
+    const businessAddress = getProfileAddress(business)
 
-    // ────────────────────────────────────────────────────────────────────
-    // ANTI-SPAM: Construir from address profesional
-    // ────────────────────────────────────────────────────────────────────
-    // Sanitizar el nombre del negocio para evitar caracteres que rompan SMTP
     const safeName = businessName.replace(/[<>"]/g, '').trim().slice(0, 50)
-    // Usar 'hola@' en lugar de 'noreply@' — los proveedores penalizan 'noreply'
-    // porque señala "no esperamos respuesta" (peor deliverability)
     const fromAddress = `hola@${FROM_DOMAIN}`
     const fromField = `${safeName} <${fromAddress}>`
 
-    // Reply-to: usa el email del negocio si está, sino el del owner
+    // Reply-to: usa el email del negocio si está, sino el del owner (auth.users)
     const { data: ownerData } = await supabase.auth.admin.getUserById(userId)
     const ownerEmail = businessEmail || ownerData?.user?.email || `soporte@${FROM_DOMAIN}`
 
-    // Obtener clientes con email según segmento
     let query = supabase.from('clients').select('id, name, email')
       .eq('user_id', userId)
       .not('email', 'is', null)
@@ -189,7 +187,6 @@ serve(async (req) => {
           .replace(/\{\{nombre\}\}/g, client.name || '')
           .replace(/\{\{negocio\}\}/g, businessName)
 
-        // URL de unsubscribe (placeholder — implementar endpoint real más adelante)
         const unsubscribeUrl = `https://vylta.lat/unsubscribe?u=${userId}&c=${client.id}`
 
         const res = await fetch('https://api.resend.com/emails', {
@@ -201,7 +198,7 @@ serve(async (req) => {
           body: JSON.stringify({
             from:     fromField,
             to:       [client.email],
-            reply_to: ownerEmail, // ← clave para deliverability: respuestas van al negocio
+            reply_to: ownerEmail,
             subject:  personalizedSubject,
             text:     buildPlainText(personalizedSubject, personalizedBody, businessName, businessEmail, businessPhone, businessAddress, unsubscribeUrl),
             html:     buildEmailHtml(personalizedSubject, personalizedBody, businessName, businessEmail, businessPhone, businessAddress, unsubscribeUrl, client.name || ''),
@@ -259,7 +256,7 @@ serve(async (req) => {
       success: true,
       sent,
       failed,
-      spamWarnings: spamCheck.warnings, // ← devolver al frontend para mostrar
+      spamWarnings: spamCheck.warnings,
     })
 
   } catch (error: any) {
@@ -268,11 +265,6 @@ serve(async (req) => {
   }
 })
 
-// ════════════════════════════════════════════════════════════════════════
-// PLAIN TEXT version — Gmail/Outlook puntúan mejor cuando el email tiene
-// versión texto + HTML (multipart/alternative). Sin esto, los filtros
-// asumen que es marketing puro.
-// ════════════════════════════════════════════════════════════════════════
 function buildPlainText(
   subject: string,
   body: string,
@@ -301,9 +293,6 @@ function buildPlainText(
   return lines.join('\n')
 }
 
-// ════════════════════════════════════════════════════════════════════════
-// HTML version — diseño limpio, profesional, anti-spam
-// ════════════════════════════════════════════════════════════════════════
 function buildEmailHtml(
   subject: string,
   body: string,
@@ -316,13 +305,11 @@ function buildEmailHtml(
 ): string {
   const safeName = clientName.split(' ')[0] || 'cliente'
 
-  // Renderizar body con saltos de línea
   const lines = body
     .split('\n')
     .map(l => l.trim() ? `<p style="margin:0 0 14px;font-size:15px;line-height:1.7;color:#374151;">${escapeHtml(l)}</p>` : '<br>')
     .join('')
 
-  // Footer con info de contacto del negocio (CAN-SPAM/CAS compliance)
   const contactLines: string[] = []
   if (businessEmail)   contactLines.push(`<a href="mailto:${escapeHtml(businessEmail)}" style="color:#10B981;text-decoration:none;">${escapeHtml(businessEmail)}</a>`)
   if (businessPhone)   contactLines.push(escapeHtml(businessPhone))
@@ -337,7 +324,6 @@ function buildEmailHtml(
 <title>${escapeHtml(subject)}</title>
 </head>
 <body style="margin:0;padding:0;background:#F8FAFC;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;">
-  <!-- Preheader: texto que aparece como preview en la bandeja -->
   <div style="display:none;max-height:0;overflow:hidden;color:#F8FAFC;">
     Mensaje de ${escapeHtml(businessName)} para ${escapeHtml(safeName)}
   </div>
@@ -345,25 +331,21 @@ function buildEmailHtml(
     <tr>
       <td align="center">
         <table width="600" cellpadding="0" cellspacing="0" border="0" style="max-width:600px;width:100%;background:#FFFFFF;border-radius:12px;overflow:hidden;border:1px solid #E2E8F0;">
-          <!-- Header con nombre del negocio -->
           <tr>
             <td style="background:#10B981;padding:24px 32px;">
               <p style="margin:0;color:#FFFFFF;font-size:20px;font-weight:700;letter-spacing:-0.01em;">${escapeHtml(businessName)}</p>
             </td>
           </tr>
-          <!-- Asunto como h1 -->
           <tr>
             <td style="padding:32px 32px 0;">
               <h1 style="margin:0 0 8px;font-size:22px;font-weight:700;color:#0F172A;line-height:1.3;">${escapeHtml(subject)}</h1>
             </td>
           </tr>
-          <!-- Cuerpo del mensaje -->
           <tr>
             <td style="padding:16px 32px 32px;">
               ${lines}
             </td>
           </tr>
-          <!-- Info de contacto del negocio (importante para deliverability) -->
           ${contactLines.length > 0 ? `
           <tr>
             <td style="padding:0 32px 24px;">
@@ -379,7 +361,6 @@ function buildEmailHtml(
               </table>
             </td>
           </tr>` : ''}
-          <!-- Footer con unsubscribe (CAN-SPAM compliance) -->
           <tr>
             <td style="background:#F8FAFC;padding:20px 32px;border-top:1px solid #E2E8F0;">
               <p style="margin:0 0 8px;font-size:12px;color:#94A3B8;text-align:center;line-height:1.6;">
