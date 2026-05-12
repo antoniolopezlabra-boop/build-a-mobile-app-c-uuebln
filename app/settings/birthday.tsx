@@ -10,9 +10,29 @@ import { ConfirmModal } from '@/components/button';
 import { useAuth } from '@/contexts/AuthContext';
 import MaterialIcons from '@expo/vector-icons/MaterialIcons';
 
+// ══════════════════════════════════════════════════════════════════════
+// Recordatorios de cumpleaños — POR EMAIL (no WhatsApp)
+//
+// Decisión May 2026: los recordatorios de cumpleaños se envían por email
+// (no por WhatsApp) para cumplir con políticas de Meta. Meta considera
+// los mensajes de felicitación como Marketing (no Utility), y enviar
+// Marketing sin opt-in explícito pone en riesgo el WABA del negocio.
+//
+// Email es libre de esas restricciones — Resend ya está configurado en
+// noreply@vylta.lat para emails transaccionales y promocionales.
+//
+// Mantenemos los nombres de columna `birthday_reminders_enabled` y
+// `birthday_message` por compatibilidad con datos existentes; el
+// contenido ahora se interpreta como cuerpo de email plano.
+// ══════════════════════════════════════════════════════════════════════
+
 const DEFAULT_MESSAGE =
-  '¡Hola {{nombre}}! 🎂 Todo el equipo de {{negocio}} te desea un feliz cumpleaños. ' +
-  '¡Que sea un día especial! Nos alegra mucho tenerte como cliente.';
+  '¡Hola {{nombre}}! 🎂\n\n' +
+  'Todo el equipo de {{negocio}} te desea un feliz cumpleaños. ' +
+  '¡Que sea un día especial!\n\n' +
+  'Nos alegra mucho tenerte como cliente y esperamos verte pronto.';
+
+const DEFAULT_SUBJECT = '🎂 ¡Feliz cumpleaños, {{nombre}}!';
 
 const VARIABLES = [
   { key: '{{nombre}}', label: 'Nombre del cliente' },
@@ -25,6 +45,7 @@ export default function BirthdayScreen() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [enabled, setEnabled] = useState(false);
+  const [subject, setSubject] = useState(DEFAULT_SUBJECT);
   const [message, setMessage] = useState(DEFAULT_MESSAGE);
   const [includeDiscount, setIncludeDiscount] = useState(false);
   const [discountText, setDiscountText] = useState('10% de descuento en tu próxima visita');
@@ -39,12 +60,15 @@ export default function BirthdayScreen() {
       const { supabase } = await import('@/lib/supabase');
       const { data } = await supabase
         .from('business_profiles')
-        .select('birthday_reminders_enabled, birthday_message, birthday_discount_text')
+        .select('birthday_reminders_enabled, birthday_message, birthday_email_subject, birthday_discount_text')
         .eq('user_id', user?.id)
         .single();
       if (data) {
         setEnabled(data.birthday_reminders_enabled || false);
         setMessage(data.birthday_message || DEFAULT_MESSAGE);
+        if ((data as any).birthday_email_subject) {
+          setSubject((data as any).birthday_email_subject);
+        }
         if (data.birthday_discount_text) {
           setIncludeDiscount(true);
           setDiscountText(data.birthday_discount_text);
@@ -63,15 +87,33 @@ export default function BirthdayScreen() {
       setErrorModal({ visible: true, message: 'El mensaje no puede estar vacío' });
       return;
     }
+    if (enabled && !subject.trim()) {
+      setErrorModal({ visible: true, message: 'El asunto del email no puede estar vacío' });
+      return;
+    }
     setSaving(true);
     try {
       const { supabase } = await import('@/lib/supabase');
-      await supabase.from('business_profiles').update({
+      const updates: any = {
         birthday_reminders_enabled: enabled,
         birthday_message: message.trim(),
         birthday_discount_text: includeDiscount ? discountText.trim() : null,
         updated_at: new Date().toISOString(),
-      }).eq('user_id', user?.id);
+      };
+      // Intentamos guardar el asunto del email; si la columna no existe
+      // (migración pendiente), Supabase rechaza la columna pero el resto
+      // de campos sí se guardan vía retry.
+      try {
+        await supabase
+          .from('business_profiles')
+          .update({ ...updates, birthday_email_subject: subject.trim() })
+          .eq('user_id', user?.id);
+      } catch {
+        await supabase
+          .from('business_profiles')
+          .update(updates)
+          .eq('user_id', user?.id);
+      }
       setSuccessModal(true);
     } catch (e: any) {
       setErrorModal({ visible: true, message: e?.message || 'Error al guardar' });
@@ -80,12 +122,15 @@ export default function BirthdayScreen() {
     }
   };
 
-  // Preview del mensaje con datos reales del negocio
+  // Preview del email con datos reales del negocio
+  const businessName = businessProfile?.businessName || 'Tu Negocio';
+  const previewSubject = subject
+    .replace(/{{nombre}}/g, 'María')
+    .replace(/{{negocio}}/g, businessName);
   const previewMessage = (() => {
-    const name = businessProfile?.businessName || 'Tu Negocio';
     let msg = message
       .replace(/{{nombre}}/g, 'María')
-      .replace(/{{negocio}}/g, name);
+      .replace(/{{negocio}}/g, businessName);
     if (includeDiscount && discountText.trim()) {
       msg += `\n\n🎁 ${discountText.trim()}`;
     }
@@ -124,7 +169,7 @@ export default function BirthdayScreen() {
         </TouchableOpacity>
         <View style={s.headerMid}>
           <Text style={s.title}>Cumpleaños</Text>
-          <Text style={s.subtitle}>Mensaje automático</Text>
+          <Text style={s.subtitle}>Email automático</Text>
         </View>
         <View style={{ width: 32 }} />
       </View>
@@ -134,13 +179,13 @@ export default function BirthdayScreen() {
         {/* Banner explicativo */}
         <View style={s.banner}>
           <View style={s.bannerIcon}>
-            <MaterialIcons name="cake" size={28} color="#EC4899" />
+            <MaterialIcons name="mail" size={28} color="#EC4899" />
           </View>
           <View style={s.bannerText}>
-            <Text style={s.bannerTitle}>Mensajes de cumpleaños</Text>
+            <Text style={s.bannerTitle}>Felicitaciones por email</Text>
             <Text style={s.bannerDesc}>
-              VYLTA envía automáticamente un WhatsApp a tus clientes el día de su cumpleaños.
-              Solo necesitas tener su fecha registrada en el perfil.
+              VYLTA envía automáticamente un email a tus clientes el día de su cumpleaños.
+              Solo necesitas tener su email registrado en el perfil.
             </Text>
           </View>
         </View>
@@ -151,7 +196,7 @@ export default function BirthdayScreen() {
             <View style={s.toggleInfo}>
               <Text style={s.toggleLabel}>Activar recordatorios</Text>
               <Text style={s.toggleSub}>
-                {enabled ? 'Tus clientes recibirán un mensaje en su cumpleaños' : 'Desactivado'}
+                {enabled ? 'Tus clientes recibirán un email en su cumpleaños' : 'Desactivado'}
               </Text>
             </View>
             <Switch
@@ -166,16 +211,33 @@ export default function BirthdayScreen() {
         {/* Config (solo si está habilitado) */}
         {enabled && (
           <>
+            {/* Asunto del email */}
+            <Text style={s.sectionLabel}>ASUNTO DEL EMAIL</Text>
+            <View style={s.card}>
+              <Text style={s.fieldLabel}>Subject line</Text>
+              <TextInput
+                style={s.input}
+                value={subject}
+                onChangeText={setSubject}
+                placeholder="Asunto del email..."
+                placeholderTextColor="#CBD5E1"
+                returnKeyType="done"
+              />
+              <Text style={s.helpText}>
+                Lo que verá tu cliente en su bandeja antes de abrir el email.
+              </Text>
+            </View>
+
             {/* Mensaje */}
             <Text style={s.sectionLabel}>MENSAJE</Text>
             <View style={s.card}>
-              <Text style={s.fieldLabel}>Texto del mensaje</Text>
+              <Text style={s.fieldLabel}>Cuerpo del email</Text>
               <TextInput
                 style={s.textarea}
                 value={message}
                 onChangeText={setMessage}
                 multiline
-                numberOfLines={5}
+                numberOfLines={6}
                 textAlignVertical="top"
                 placeholder="Escribe el mensaje de cumpleaños..."
                 placeholderTextColor="#CBD5E1"
@@ -196,7 +258,7 @@ export default function BirthdayScreen() {
                 ))}
               </View>
 
-              <TouchableOpacity style={s.resetBtn} onPress={() => setMessage(DEFAULT_MESSAGE)}>
+              <TouchableOpacity style={s.resetBtn} onPress={() => { setMessage(DEFAULT_MESSAGE); setSubject(DEFAULT_SUBJECT); }}>
                 <MaterialIcons name="refresh" size={14} color="#94A3B8" />
                 <Text style={s.resetText}>Restaurar mensaje predeterminado</Text>
               </TouchableOpacity>
@@ -208,7 +270,7 @@ export default function BirthdayScreen() {
               <View style={s.toggleRow}>
                 <View style={s.toggleInfo}>
                   <Text style={s.toggleLabel}>Incluir descuento o promoción</Text>
-                  <Text style={s.toggleSub}>Se agrega al final del mensaje</Text>
+                  <Text style={s.toggleSub}>Se agrega al final del email</Text>
                 </View>
                 <Switch
                   value={includeDiscount}
@@ -230,34 +292,41 @@ export default function BirthdayScreen() {
               )}
             </View>
 
-            {/* Preview del mensaje */}
+            {/* Preview del email */}
             <Text style={s.sectionLabel}>VISTA PREVIA</Text>
             <View style={s.previewContainer}>
-              <View style={s.previewBubbleWrap}>
-                <View style={s.previewHeader}>
-                  <View style={s.previewAvatar}>
-                    <MaterialIcons name="storefront" size={16} color="#fff" />
+              <View style={s.emailCard}>
+                {/* Email header */}
+                <View style={s.emailHeader}>
+                  <View style={s.emailAvatar}>
+                    <MaterialIcons name="cake" size={18} color="#fff" />
                   </View>
-                  <Text style={s.previewSender}>
-                    {businessProfile?.businessName || 'Tu Negocio'}
-                  </Text>
+                  <View style={{ flex: 1 }}>
+                    <Text style={s.emailFrom}>{businessName}</Text>
+                    <Text style={s.emailFromMail}>noreply@vylta.lat</Text>
+                  </View>
+                  <Text style={s.emailTime}>9:00 AM</Text>
                 </View>
-                <View style={s.previewBubble}>
-                  <Text style={s.previewText}>{previewMessage}</Text>
-                  <Text style={s.previewTime}>9:00 AM ✓✓</Text>
+                {/* Asunto */}
+                <Text style={s.emailSubject}>{previewSubject}</Text>
+                {/* Cuerpo */}
+                <Text style={s.emailBody}>{previewMessage}</Text>
+                {/* Footer del email */}
+                <View style={s.emailFooter}>
+                  <Text style={s.emailFooterText}>Enviado con cariño desde {businessName}</Text>
                 </View>
               </View>
               <Text style={s.previewNote}>
-                Así verá el mensaje tu cliente. El nombre "María" es solo un ejemplo.
+                Así se verá el email en la bandeja de tu cliente. El nombre "María" es solo un ejemplo.
               </Text>
             </View>
 
-            {/* Info sobre fechas */}
+            {/* Info sobre emails */}
             <View style={s.infoBox}>
               <MaterialIcons name="info-outline" size={16} color="#3B82F6" />
               <Text style={s.infoText}>
-                Solo los clientes con fecha de cumpleaños registrada recibirán el mensaje.
-                Puedes agregar o editar la fecha en el perfil de cada cliente.
+                Solo los clientes con fecha de cumpleaños Y email registrados recibirán la felicitación.
+                Puedes agregar o editar estos datos en el perfil de cada cliente.
               </Text>
             </View>
           </>
@@ -322,9 +391,10 @@ const s = StyleSheet.create({
 
   // Mensaje
   fieldLabel: { fontSize: 13, fontWeight: '600', color: '#64748B', marginBottom: 8 },
+  helpText: { fontSize: 11, color: '#94A3B8', marginTop: 6, fontStyle: 'italic' },
   textarea: {
     backgroundColor: '#F8FAFC', borderRadius: 12, padding: 14,
-    fontSize: 14, color: '#0F172A', minHeight: 120,
+    fontSize: 14, color: '#0F172A', minHeight: 140,
     borderWidth: 0.5, borderColor: '#E2E8F0', lineHeight: 20,
   },
   varsLabel: { fontSize: 11, color: '#94A3B8', fontWeight: '600', marginTop: 12, marginBottom: 8 },
@@ -342,17 +412,22 @@ const s = StyleSheet.create({
     fontSize: 14, color: '#0F172A', borderWidth: 0.5, borderColor: '#E2E8F0',
   },
 
-  // Preview WhatsApp
+  // Preview Email (en lugar de burbuja WhatsApp)
   previewContainer: { marginBottom: 10 },
-  previewBubbleWrap: {
-    backgroundColor: '#E5EFDB', borderRadius: 16, padding: 14,
+  emailCard: {
+    backgroundColor: '#fff', borderRadius: 14, padding: 14,
+    borderWidth: 0.5, borderColor: '#E2E8F0',
+    shadowColor: '#000', shadowOpacity: 0.05, shadowRadius: 8, elevation: 2,
   },
-  previewHeader: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 10 },
-  previewAvatar: { width: 28, height: 28, borderRadius: 14, backgroundColor: '#EC4899', justifyContent: 'center', alignItems: 'center' },
-  previewSender: { fontSize: 13, fontWeight: '700', color: '#1B1B1B' },
-  previewBubble: { backgroundColor: '#fff', borderRadius: 12, padding: 12 },
-  previewText: { fontSize: 14, color: '#111', lineHeight: 20 },
-  previewTime: { fontSize: 10, color: '#94A3B8', textAlign: 'right', marginTop: 6 },
+  emailHeader: { flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 10 },
+  emailAvatar: { width: 36, height: 36, borderRadius: 18, backgroundColor: '#EC4899', justifyContent: 'center', alignItems: 'center' },
+  emailFrom: { fontSize: 13, fontWeight: '700', color: '#0F172A' },
+  emailFromMail: { fontSize: 11, color: '#94A3B8' },
+  emailTime: { fontSize: 11, color: '#94A3B8' },
+  emailSubject: { fontSize: 15, fontWeight: '700', color: '#0F172A', marginBottom: 10, lineHeight: 22 },
+  emailBody: { fontSize: 13, color: '#475569', lineHeight: 20 },
+  emailFooter: { marginTop: 12, paddingTop: 10, borderTopWidth: 0.5, borderTopColor: '#F1F5F9' },
+  emailFooterText: { fontSize: 10, color: '#94A3B8', textAlign: 'center', fontStyle: 'italic' },
   previewNote: { fontSize: 11, color: '#94A3B8', marginTop: 8, textAlign: 'center', fontStyle: 'italic' },
 
   // Info
