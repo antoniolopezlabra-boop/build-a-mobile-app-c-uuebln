@@ -12,19 +12,16 @@ import { getCurrentUserId } from '@/utils/api';
 import { getCached, setCached, CACHE_TTL } from '@/utils/cache';
 import MaterialIcons from '@expo/vector-icons/MaterialIcons';
 import KPICard from '@/components/reports/KPICard';
+import LineChartCard from '@/components/reports/LineChartCard';
+import DonutChartCard, { ServiceSlice } from '@/components/reports/DonutChartCard';
 
 // ══════════════════════════════════════════════════════════════════════
 // VYLTA — Reportes Ejecutivos (rediseño Mayo 2026)
 //
-// Dashboard con look ejecutivo:
-//   • Header con saludo personalizado + selector de mes ejecutivo
-//   • 4 KPI cards en grid 2x2 con % de variación vs mes anterior
-//   • Tab "General" / "Mi equipo" (mantiene funcionalidad Luxury)
-//   • Modal de citas y crecimiento de clientes (sin cambios)
-//
-// Próximos commits agregarán:
-//   • Commit 2: Gráfica de línea de ingresos + donut de servicios
-//   • Commit 3: Sección de Insights (rule-based, sin LLM)
+// Commit 1: header + 4 KPI cards + cálculo de variaciones
+// Commit 2 (este): + Gráfica de línea de ingresos diarios
+//                  + Donut chart de ingresos por servicio
+// Commit 3: Insights rule-based (sin LLM)
 // ══════════════════════════════════════════════════════════════════════
 
 interface Stats {
@@ -48,11 +45,13 @@ interface Stats {
   clientsThisMonth: number;
   clientsLastMonth: number;
   clientsPerWeek: number[];
-  // ── NUEVOS campos para dashboard ejecutivo ──
-  lastMonthRevenue: number;       // ingresos del mes anterior (para calcular variación)
-  lastMonthAppointments: number;  // citas del mes anterior
-  avgTicket: number;              // ticket promedio = monthRevenue / completedThisMonth
-  avgTicketLastMonth: number;     // ticket promedio del mes anterior
+  lastMonthRevenue: number;
+  lastMonthAppointments: number;
+  avgTicket: number;
+  avgTicketLastMonth: number;
+  // ── NUEVOS campos para gráficas (Commit 2) ──
+  dailyRevenue: { label: string; value: number }[]; // 7 puntos Lun-Dom con ingresos del mes agrupados por día de la semana
+  revenueByService: ServiceSlice[];                 // ordenado desc por amount
 }
 
 interface AppointmentItem {
@@ -89,23 +88,18 @@ const STATUS_CONFIG: Record<string, { color: string; label: string }> = {
   'Pagado':     { color: '#10B981', label: 'Pagado' },
 };
 
+// Colores rotativos para el donut de servicios
+const SERVICE_COLORS = ['#10B981', '#6366F1', '#F59E0B', '#F472B6', '#3B82F6', '#A855F7', '#14B8A6'];
+
+const DAYS_ES = ['Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb', 'Dom'];
+
 function getReportsCacheKey(year: number, month: number): string {
   return `reports_stats_${year}_${month}`;
 }
 
-// ── Helper: calcular % variación entre dos números ──
-// Retorna null si el valor anterior es 0 (división por cero = no comparable)
 function calcChange(current: number, previous: number): number | null {
   if (previous === 0) return current > 0 ? 100 : null;
   return Math.round(((current - previous) / previous) * 100);
-}
-
-// ── Helper: formatear moneda en estilo ejecutivo ──
-// $45,250 / $1.2K / $1.5M según magnitud
-function formatCurrency(amount: number): string {
-  if (amount >= 1000000) return `$${(amount / 1000000).toFixed(1)}M`;
-  if (amount >= 10000)   return `$${(amount / 1000).toFixed(0)}K`;
-  return `$${amount.toLocaleString('es-MX')}`;
 }
 
 export default function ReportsScreen() {
@@ -143,7 +137,6 @@ export default function ReportsScreen() {
     (selectedYear === earliestMonth.year && selectedMonth <= earliestMonth.month)
   );
 
-  // ── Carga inicial: límite de meses + detección de equipo ──
   useEffect(() => {
     let cancelled = false;
     (async () => {
@@ -296,25 +289,74 @@ export default function ReportsScreen() {
 
       // ── Revenue mes actual ──
       const [{ data: revLegacy }, { data: revNew }] = await Promise.all([
-        supabase.from('appointments').select('service_cost').eq('user_id', userId).eq('status', 'Pagado').gte('date', monthStartStr).lte('date', monthEndStr),
-        supabase.from('appointments').select('service_cost').eq('user_id', userId).eq('status', 'Completada').eq('paid', true).gte('date', monthStartStr).lte('date', monthEndStr),
+        supabase.from('appointments').select('date, service_cost, service_name').eq('user_id', userId).eq('status', 'Pagado').gte('date', monthStartStr).lte('date', monthEndStr),
+        supabase.from('appointments').select('date, service_cost, service_name').eq('user_id', userId).eq('status', 'Completada').eq('paid', true).gte('date', monthStartStr).lte('date', monthEndStr),
       ]);
 
       const { data: penD } = await supabase.from('appointments')
         .select('service_cost').eq('user_id', userId).eq('status', 'Completada')
         .or('paid.is.null,paid.eq.false').gte('date', monthStartStr).lte('date', monthEndStr);
 
-      const monthRevenue   = [...(revLegacy || []), ...(revNew || [])].reduce((s: number, a: any) => s + (a.service_cost || 0), 0);
+      // Unimos ambos arrays para reusar en revenue, daily y donut
+      const paidAppointments = [...(revLegacy || []), ...(revNew || [])];
+      const monthRevenue   = paidAppointments.reduce((s: number, a: any) => s + (a.service_cost || 0), 0);
       const pendingRevenue = (penD || []).reduce((s: number, a: any) => s + (a.service_cost || 0), 0);
 
-      // ── Revenue mes anterior (para calcular variación %) ──
+      // ══════════════════════════════════════════════════════════════════
+      // CÁLCULO 1: dailyRevenue — ingresos agrupados por día de la semana
+      //
+      // Inicializamos array [0,0,0,0,0,0,0] donde idx 0=Lun, 6=Dom.
+      // JavaScript getDay() devuelve: 0=Dom, 1=Lun ... 6=Sáb
+      // Convertimos a nuestra convención Lun-Dom con:
+      //   getDay() === 0 ? 6 : getDay() - 1
+      //
+      // Sumamos service_cost en el día correspondiente.
+      // Esto da una vista clara de qué días son más fuertes.
+      // ══════════════════════════════════════════════════════════════════
+      const dailyByWeekday = [0, 0, 0, 0, 0, 0, 0];
+      paidAppointments.forEach((a: any) => {
+        if (!a.date || !a.service_cost) return;
+        // Parseamos como local time agregando T12:00 para evitar desfases UTC
+        const d = new Date(a.date + 'T12:00:00');
+        const jsDay = d.getDay();
+        const idx = jsDay === 0 ? 6 : jsDay - 1;
+        dailyByWeekday[idx] += a.service_cost;
+      });
+      const dailyRevenue = dailyByWeekday.map((value, i) => ({
+        label: DAYS_ES[i],
+        value: Math.round(value),
+      }));
+
+      // ══════════════════════════════════════════════════════════════════
+      // CÁLCULO 2: revenueByService — ingresos por servicio
+      //
+      // Agrupamos por service_name con un Map. Citas sin service_name caen
+      // en bucket "Sin nombre". Convertimos a array y ordenamos desc.
+      // Asignamos colores rotativos del catálogo SERVICE_COLORS.
+      // ══════════════════════════════════════════════════════════════════
+      const serviceMap = new Map<string, number>();
+      paidAppointments.forEach((a: any) => {
+        const name = (a.service_name || 'Sin nombre').trim();
+        const current = serviceMap.get(name) || 0;
+        serviceMap.set(name, current + (a.service_cost || 0));
+      });
+      const revenueByService: ServiceSlice[] = Array.from(serviceMap.entries())
+        .map(([name, amount], idx) => ({
+          name,
+          amount: Math.round(amount),
+          color: SERVICE_COLORS[idx % SERVICE_COLORS.length],
+        }))
+        .sort((a, b) => b.amount - a.amount)
+        // Reasignar colores después de ordenar para que el más grande siempre sea verde
+        .map((slice, idx) => ({ ...slice, color: SERVICE_COLORS[idx % SERVICE_COLORS.length] }));
+
+      // ── Revenue mes anterior ──
       const [{ data: revLegacyPrev }, { data: revNewPrev }] = await Promise.all([
         supabase.from('appointments').select('service_cost').eq('user_id', userId).eq('status', 'Pagado').gte('date', lastMonthStartStr).lte('date', lastMonthEndStr),
         supabase.from('appointments').select('service_cost').eq('user_id', userId).eq('status', 'Completada').eq('paid', true).gte('date', lastMonthStartStr).lte('date', lastMonthEndStr),
       ]);
       const lastMonthRevenue = [...(revLegacyPrev || []), ...(revNewPrev || [])].reduce((s: number, a: any) => s + (a.service_cost || 0), 0);
 
-      // ── Citas mes anterior (count) ──
       const { count: lastMonthAppointmentsCount } = await supabase
         .from('appointments')
         .select('*', { count: 'exact', head: true })
@@ -322,11 +364,9 @@ export default function ReportsScreen() {
         .gte('date', lastMonthStartStr)
         .lte('date', lastMonthEndStr);
 
-      // ── Ticket promedio: revenue / citas completadas en cada mes ──
       const completedThisMonth = (mA || []).filter((a: any) => ['Completada', 'Pagado'].includes(a.status)).length;
       const avgTicket = completedThisMonth > 0 ? Math.round(monthRevenue / completedThisMonth) : 0;
 
-      // Para ticket promedio del mes anterior, necesitamos las citas completadas del mes anterior
       const { data: lastMonthCompletedData } = await supabase
         .from('appointments')
         .select('id')
@@ -337,7 +377,6 @@ export default function ReportsScreen() {
       const lastMonthCompleted = lastMonthCompletedData?.length || 0;
       const avgTicketLastMonth = lastMonthCompleted > 0 ? Math.round(lastMonthRevenue / lastMonthCompleted) : 0;
 
-      // ── Clientes mes actual / anterior ──
       const { count: clientsThisMonth } = await supabase.from('clients').select('*', { count: 'exact', head: true }).eq('user_id', userId).gte('created_at', monthStartStr).lte('created_at', monthEndStr + 'T23:59:59');
       const { count: clientsLastMonth } = await supabase.from('clients').select('*', { count: 'exact', head: true }).eq('user_id', userId).gte('created_at', lastMonthStartStr).lte('created_at', lastMonthEndStr + 'T23:59:59');
 
@@ -370,6 +409,8 @@ export default function ReportsScreen() {
         lastMonthAppointments: lastMonthAppointmentsCount || 0,
         avgTicket,
         avgTicketLastMonth,
+        dailyRevenue,
+        revenueByService,
       };
       setStats(fs);
       setCached(cacheKey, fs, CACHE_TTL.REPORTS);
@@ -456,10 +497,8 @@ export default function ReportsScreen() {
   const formatDate = (d: string) =>
     new Date(d + 'T12:00:00').toLocaleDateString('es-MX', { weekday: 'short', day: 'numeric', month: 'short' });
 
-  // ── Saludo personalizado: usa primer nombre del owner ──
   const firstName = businessProfile?.businessName?.split(' ')[0] || user?.user_metadata?.full_name?.split(' ')[0] || user?.email?.split('@')[0] || 'Antonio';
 
-  // ── Cálculos de variación % para los KPIs ──
   const revenueChange     = stats ? calcChange(stats.monthRevenue, stats.lastMonthRevenue) : null;
   const aptsChange        = stats ? calcChange(stats.monthAppointments, stats.lastMonthAppointments) : null;
   const ticketChange      = stats ? calcChange(stats.avgTicket, stats.avgTicketLastMonth) : null;
@@ -509,10 +548,6 @@ export default function ReportsScreen() {
             tintColor="#10B981" colors={['#10B981']} />
         }
       >
-        {/* ═══════════════════════════════════════════════════════════════
-            HEADER EJECUTIVO con saludo + selector de mes
-            Inspirado en mockups de dashboards Bloomberg/Stripe
-            ═══════════════════════════════════════════════════════════════ */}
         <View style={[s.header, { backgroundColor: tc.surface, borderBottomColor: tc.border }]}>
           <View style={s.headerTopRow}>
             <View style={{ flex: 1 }}>
@@ -532,7 +567,6 @@ export default function ReportsScreen() {
               </Text>
             </View>
 
-            {/* Selector de mes ejecutivo */}
             <View style={[s.monthSelector, { backgroundColor: tc.inputBg, borderColor: tc.border }]}>
               <TouchableOpacity
                 onPress={goToPrevMonth}
@@ -562,9 +596,6 @@ export default function ReportsScreen() {
           </View>
         </View>
 
-        {/* ═══════════════════════════════════════════════════════════════
-            TABS General / Mi equipo (solo si tiene staff)
-            ═══════════════════════════════════════════════════════════════ */}
         {isPremium && hasStaff && (
           <View style={[s.reportTabRow, { backgroundColor: tc.surface, borderBottomColor: tc.border }]}>
             <TouchableOpacity
@@ -584,13 +615,10 @@ export default function ReportsScreen() {
           </View>
         )}
 
-        {/* ═══════════════════════════════════════════════════════════════
-            CONTENIDO TAB GENERAL: 4 KPI cards + (próximamente gráficas e insights)
-            ═══════════════════════════════════════════════════════════════ */}
         {reportTab === 'general' && (
           <View style={s.content}>
 
-            {/* Grid 2x2 de KPI cards ejecutivos */}
+            {/* Grid 2x2 de KPI cards */}
             <View style={s.kpiGrid}>
               <View style={s.kpiRow}>
                 <KPICard
@@ -653,7 +681,7 @@ export default function ReportsScreen() {
               </View>
             </View>
 
-            {/* Hero secundario: ingresos pendientes — destacado */}
+            {/* Hero pendientes */}
             {stats && stats.pendingRevenue > 0 && (
               <TouchableOpacity
                 style={[s.pendingCard, {
@@ -676,7 +704,40 @@ export default function ReportsScreen() {
               </TouchableOpacity>
             )}
 
-            {/* Indicadores secundarios: completadas histórico */}
+            {/* ═══════════════════════════════════════════════════════════
+                NUEVAS GRÁFICAS (Commit 2)
+                ═══════════════════════════════════════════════════════════ */}
+
+            {/* Gráfica de línea: ingresos por día de la semana */}
+            <LineChartCard
+              title="Ingresos"
+              totalValue={`$${(stats?.monthRevenue || 0).toLocaleString('es-MX')}`}
+              changePercent={revenueChange}
+              changeLabel="vs mes anterior"
+              data={stats?.dailyRevenue || []}
+              rangeLabel={MONTHS_ES[selectedMonth].slice(0, 3)}
+              surfaceColor={tc.surface}
+              textColor={tc.text}
+              textMutedColor={tc.textMuted}
+              borderColor={tc.border}
+              isDark={isDark}
+            />
+
+            {/* Donut chart: ingresos por servicio */}
+            <DonutChartCard
+              title="Ingresos por servicio"
+              totalLabel="Total"
+              totalValue={`$${(stats?.monthRevenue || 0).toLocaleString('es-MX')}`}
+              data={stats?.revenueByService || []}
+              rangeLabel={MONTHS_ES[selectedMonth].slice(0, 3)}
+              surfaceColor={tc.surface}
+              textColor={tc.text}
+              textMutedColor={tc.textMuted}
+              borderColor={tc.border}
+              isDark={isDark}
+            />
+
+            {/* Indicadores secundarios */}
             <View style={s.secondaryRow}>
               <View style={[s.secondaryCard, { backgroundColor: tc.surface, borderColor: tc.border }]}>
                 <View style={s.secondaryIconWrap}>
@@ -704,21 +765,9 @@ export default function ReportsScreen() {
               </View>
             </View>
 
-            {/* Placeholder para gráficas e insights (próximos commits) */}
-            <View style={[s.placeholder, { backgroundColor: tc.surface, borderColor: tc.border }]}>
-              <MaterialIcons name="show-chart" size={28} color={tc.textMuted} />
-              <Text style={[s.placeholderTitle, { color: tc.text }]}>Gráficas en camino</Text>
-              <Text style={[s.placeholderDesc, { color: tc.textMuted }]}>
-                Próximamente verás aquí tu gráfica de ingresos por semana e ingresos por servicio.
-              </Text>
-            </View>
-
           </View>
         )}
 
-        {/* ═══════════════════════════════════════════════════════════════
-            CONTENIDO TAB MI EQUIPO (sin cambios respecto al fix anterior)
-            ═══════════════════════════════════════════════════════════════ */}
         {reportTab === 'equipo' && isPremium && (
           <View>
             <View style={[s.rangePicker, { backgroundColor: tc.surface, borderBottomColor: tc.border }]}>
@@ -812,9 +861,6 @@ export default function ReportsScreen() {
         )}
       </ScrollView>
 
-      {/* ═══════════════════════════════════════════════════════════════
-          MODAL: Historial de citas del mes
-          ═══════════════════════════════════════════════════════════════ */}
       <Modal visible={aptsModal} animationType="slide" transparent onRequestClose={() => setAptsModal(false)}>
         <View style={s.modalOverlay}>
           <TouchableOpacity style={s.modalBackdrop} activeOpacity={1} onPress={() => setAptsModal(false)} />
@@ -869,9 +915,6 @@ export default function ReportsScreen() {
         </View>
       </Modal>
 
-      {/* ═══════════════════════════════════════════════════════════════
-          MODAL: Crecimiento de clientes
-          ═══════════════════════════════════════════════════════════════ */}
       <Modal visible={clientsModal} animationType="slide" transparent onRequestClose={() => setClientsModal(false)}>
         <View style={s.modalOverlay}>
           <TouchableOpacity style={s.modalBackdrop} activeOpacity={1} onPress={() => setClientsModal(false)} />
@@ -945,7 +988,6 @@ const s = StyleSheet.create({
   paywallBtn:        { backgroundColor: '#10B981', paddingHorizontal: 28, paddingVertical: 14, borderRadius: 12 },
   paywallBtnText:    { color: '#fff', fontWeight: '700', fontSize: 15 },
 
-  // ── Header ejecutivo ──
   header:            { paddingHorizontal: 16, paddingTop: 12, paddingBottom: 14, borderBottomWidth: 0.5 },
   headerTopRow:      { flexDirection: 'row', alignItems: 'center', marginBottom: 10 },
   headerTitle:       { fontSize: 22, fontWeight: '800', letterSpacing: -0.5 },
@@ -957,35 +999,25 @@ const s = StyleSheet.create({
   monthSelectorMid:  { flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 6 },
   monthSelectorText: { fontSize: 11, fontWeight: '700' },
 
-  // ── Tabs ──
   reportTabRow:      { flexDirection: 'row', paddingHorizontal: 16, paddingVertical: 10, gap: 8, borderBottomWidth: 0.5 },
   reportTab:         { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, paddingVertical: 9, borderRadius: 10 },
   reportTabText:     { fontSize: 13, fontWeight: '600' },
 
-  // ── Contenido ──
   content:           { padding: 16, gap: 12 },
   kpiGrid:           { gap: 0 },
   kpiRow:            { flexDirection: 'row' },
 
-  // ── Pending card (destacado) ──
   pendingCard:       { flexDirection: 'row', alignItems: 'center', gap: 12, borderRadius: 14, padding: 14, borderWidth: 1 },
   pendingIconWrap:   { width: 40, height: 40, borderRadius: 10, backgroundColor: 'rgba(245,158,11,0.18)', justifyContent: 'center', alignItems: 'center' },
   pendingLabel:      { fontSize: 10, fontWeight: '800', letterSpacing: 0.8 },
   pendingValue:      { fontSize: 22, fontWeight: '800', letterSpacing: -0.5, marginTop: 2 },
 
-  // ── Secondary indicators ──
   secondaryRow:      { flexDirection: 'row' },
   secondaryCard:     { flex: 1, flexDirection: 'row', alignItems: 'center', gap: 12, borderRadius: 12, padding: 12, borderWidth: 0.5 },
   secondaryIconWrap: { width: 34, height: 34, borderRadius: 9, backgroundColor: 'rgba(99,102,241,0.10)', justifyContent: 'center', alignItems: 'center' },
   secondaryValue:    { fontSize: 18, fontWeight: '700' },
   secondaryLabel:    { fontSize: 11, marginTop: 1 },
 
-  // ── Placeholder ──
-  placeholder:       { borderRadius: 14, padding: 24, borderWidth: 0.5, alignItems: 'center', gap: 8, marginTop: 4 },
-  placeholderTitle:  { fontSize: 14, fontWeight: '700' },
-  placeholderDesc:   { fontSize: 12, textAlign: 'center', lineHeight: 18 },
-
-  // ── Rango y staff (sin cambios) ──
   rangePicker:       { flexDirection: 'row', padding: 12, gap: 8, borderBottomWidth: 0.5 },
   rangeBtn:          { flex: 1, paddingVertical: 8, borderRadius: 10, alignItems: 'center' },
   rangeBtnText:      { fontSize: 12, fontWeight: '600' },
@@ -1020,7 +1052,6 @@ const s = StyleSheet.create({
   goClientsBtn:      { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, backgroundColor: '#10B981', borderRadius: 14, padding: 14, marginTop: 4 },
   goClientsBtnText:  { color: '#fff', fontWeight: '700', fontSize: 14 },
 
-  // ── Staff (sin cambios) ──
   staffSectionLabel: { fontSize: 11, fontWeight: '800', letterSpacing: 1.2, marginBottom: 12, marginTop: 4 },
   staffEmptyWrap:    { alignItems: 'center', justifyContent: 'center', padding: 48, gap: 12 },
   staffEmptyTitle:   { fontSize: 18, fontWeight: '700' },
