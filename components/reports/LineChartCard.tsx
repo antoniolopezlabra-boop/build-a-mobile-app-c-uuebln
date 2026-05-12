@@ -1,44 +1,32 @@
 import React from 'react';
-import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
+import { View, Text, StyleSheet } from 'react-native';
 import Svg, { Path, Defs, LinearGradient, Stop, Line, Circle, Rect, Text as SvgText } from 'react-native-svg';
 import MaterialIcons from '@expo/vector-icons/MaterialIcons';
 
 // ══════════════════════════════════════════════════════════════════════
 // LineChartCard — Gráfica de línea ejecutiva con SVG nativo
 //
-// Diseño basado en mockups de dashboards Bloomberg/Stripe:
-//   ┌────────────────────────────────────────┐
-//   │ Ingresos              [Semana ▾]      │
-//   │ $45,250  ↑ 18% vs anterior             │
-//   │                                        │
-//   │  5K┤            ╭─●──╮                 │
-//   │  4K┤      ╭────╯     ╰─╮                │
-//   │  3K┤  ╭──╯              ╰─╮            │
-//   │  2K┤─╯                     ╰─          │
-//   │  1K┤                                    │
-//   │     L  M  M  J  V  S  D                 │
-//   └────────────────────────────────────────┘
-//
-// Implementación:
-//   - SVG nativo de React Native (sin librerías pesadas)
-//   - Curva Bezier suavizada usando interpolación catmull-rom
-//   - Área degradada bajo la línea
-//   - Tooltip flotante sobre el punto más alto (o más reciente con datos)
+// ── AJUSTE TIPOGRÁFICO MAY 2026 ──
+// Subimos los tamaños para alinearnos con el estándar de la app:
+//   - title 13px → 15px (alineado con headerTitle de cards similares)
+//   - totalValue 22px → 24px (más prominente, el dato principal)
+//   - changeText/changeLabel 11px → 12px
+//   - rangePillText 10px → 11px
+//   - SVG labels eje Y/X: 8-9px → 10-11px
 // ══════════════════════════════════════════════════════════════════════
 
 interface DataPoint {
-  label: string;   // "Lun", "Mar", etc.
-  value: number;   // monto del día
+  label: string;
+  value: number;
 }
 
 interface LineChartCardProps {
-  title: string;            // "Ingresos"
-  totalValue: string;       // "$45,250" — ya formateado
-  changePercent: number | null; // % vs anterior
-  changeLabel?: string;     // "vs semana pasada"
-  data: DataPoint[];        // array de 7 puntos (semana) — orden cronológico
-  rangeLabel?: string;      // "Esta semana" — texto del selector
-  // Tema
+  title: string;
+  totalValue: string;
+  changePercent: number | null;
+  changeLabel?: string;
+  data: DataPoint[];
+  rangeLabel?: string;
   surfaceColor: string;
   textColor: string;
   textMutedColor: string;
@@ -46,14 +34,13 @@ interface LineChartCardProps {
   isDark: boolean;
 }
 
-const CHART_HEIGHT = 130;
-const CHART_PADDING_LEFT = 24;     // espacio para eje Y
-const CHART_PADDING_RIGHT = 8;
-const CHART_PADDING_TOP = 18;      // espacio para tooltip
-const CHART_PADDING_BOTTOM = 22;   // espacio para labels eje X
+const CHART_HEIGHT = 150;
+const CHART_PADDING_LEFT = 28;
+const CHART_PADDING_RIGHT = 10;
+const CHART_PADDING_TOP = 22;
+const CHART_PADDING_BOTTOM = 26;
 const VIEWBOX_WIDTH = 320;
 
-// Helper: formatear valor del eje Y (1500 → "1.5K", 1500000 → "1.5M")
 function formatAxisValue(v: number): string {
   if (v === 0) return '0';
   if (v >= 1000000) return `${(v / 1000000).toFixed(1)}M`;
@@ -61,8 +48,6 @@ function formatAxisValue(v: number): string {
   return `${v}`;
 }
 
-// Helper: construir path SVG de línea suavizada con curvas Bezier
-// Usa interpolación Catmull-Rom simplificada para curvas suaves
 function buildSmoothPath(points: { x: number; y: number }[]): string {
   if (points.length === 0) return '';
   if (points.length === 1) return `M ${points[0].x} ${points[0].y}`;
@@ -75,7 +60,6 @@ function buildSmoothPath(points: { x: number; y: number }[]): string {
     const p2 = points[i + 1];
     const p3 = points[Math.min(points.length - 1, i + 2)];
 
-    // Control points para Catmull-Rom (tensión 0.5 = curva suave estándar)
     const tension = 0.2;
     const cp1x = p1.x + (p2.x - p0.x) * tension;
     const cp1y = p1.y + (p2.y - p0.y) * tension;
@@ -102,16 +86,11 @@ export default function LineChartCard({
   isDark,
 }: LineChartCardProps) {
 
-  // ── Cálculo del rango Y para el chart ──
-  // Si todos los valores son 0, usamos un rango fijo de 0 a 100 para evitar
-  // división por cero. Si hay datos, padding del 10% arriba para que la
-  // curva no toque el techo.
   const values = data.map(d => d.value);
-  const maxVal = Math.max(...values, 1); // mínimo 1 para evitar 0
-  const yMax = maxVal * 1.15; // 15% extra arriba para "respiración" visual
+  const maxVal = Math.max(...values, 1);
+  const yMax = maxVal * 1.15;
   const yMin = 0;
 
-  // ── Convertir datos a coordenadas SVG ──
   const chartWidth = VIEWBOX_WIDTH - CHART_PADDING_LEFT - CHART_PADDING_RIGHT;
   const chartHeight = CHART_HEIGHT - CHART_PADDING_TOP - CHART_PADDING_BOTTOM;
   const xStep = data.length > 1 ? chartWidth / (data.length - 1) : 0;
@@ -123,31 +102,25 @@ export default function LineChartCard({
     value: d.value,
   }));
 
-  // ── Línea suavizada y área ──
   const linePath = buildSmoothPath(points);
   const areaPath = linePath
     + ` L ${points[points.length - 1]?.x ?? 0} ${CHART_HEIGHT - CHART_PADDING_BOTTOM}`
     + ` L ${points[0]?.x ?? 0} ${CHART_HEIGHT - CHART_PADDING_BOTTOM} Z`;
 
-  // ── Encontrar punto destacado: el de mayor valor ──
-  // Si todos son 0, no resaltamos ninguno
   const highlightIdx = maxVal > 1
     ? values.indexOf(Math.max(...values))
     : -1;
   const highlightPoint = highlightIdx >= 0 ? points[highlightIdx] : null;
 
-  // ── Gridlines (5 horizontales) ──
   const gridLines = [0, 0.25, 0.5, 0.75, 1].map(t => ({
     y: CHART_PADDING_TOP + t * chartHeight,
     value: yMax - t * (yMax - yMin),
   }));
 
-  // ── Colores ──
   const lineColor = '#10B981';
   const gridColor = isDark ? '#1E293B' : '#F1F5F9';
-  const axisLabelColor = isDark ? '#475569' : '#94A3B8';
+  const axisLabelColor = isDark ? '#64748B' : '#94A3B8';
 
-  // ── Texto del cambio % ──
   const isPositive = changePercent !== null && changePercent > 0;
   const isNegative = changePercent !== null && changePercent < 0;
   const changeColor = isPositive ? '#10B981' : isNegative ? '#EF4444' : '#94A3B8';
@@ -155,12 +128,10 @@ export default function LineChartCard({
   const changeText = changePercent === null ? '—'
     : `${changePercent > 0 ? '+' : ''}${Math.round(changePercent)}%`;
 
-  // Si no hay datos suficientes, mostrar estado vacío
   const hasData = data.some(d => d.value > 0);
 
   return (
     <View style={[s.card, { backgroundColor: surfaceColor, borderColor }]}>
-      {/* Header con título y selector */}
       <View style={s.header}>
         <View style={{ flex: 1 }}>
           <Text style={[s.title, { color: textColor }]}>{title}</Text>
@@ -170,19 +141,17 @@ export default function LineChartCard({
         </View>
       </View>
 
-      {/* Valor total + cambio % */}
       <Text style={[s.totalValue, { color: textColor }]} numberOfLines={1} adjustsFontSizeToFit>
         {totalValue}
       </Text>
       <View style={s.changeRow}>
-        <MaterialIcons name={changeIcon} size={12} color={changeColor} />
+        <MaterialIcons name={changeIcon} size={14} color={changeColor} />
         <Text style={[s.changeText, { color: changeColor }]}>{changeText}</Text>
         <Text style={[s.changeLabel, { color: textMutedColor }]}>{changeLabel}</Text>
       </View>
 
-      {/* Chart SVG o empty state */}
       {hasData ? (
-        <Svg viewBox={`0 0 ${VIEWBOX_WIDTH} ${CHART_HEIGHT}`} width="100%" height={CHART_HEIGHT} style={{ marginTop: 8 }}>
+        <Svg viewBox={`0 0 ${VIEWBOX_WIDTH} ${CHART_HEIGHT}`} width="100%" height={CHART_HEIGHT} style={{ marginTop: 10 }}>
           <Defs>
             <LinearGradient id="areaGrad" x1="0" y1="0" x2="0" y2="1">
               <Stop offset="0" stopColor={lineColor} stopOpacity="0.35" />
@@ -190,7 +159,6 @@ export default function LineChartCard({
             </LinearGradient>
           </Defs>
 
-          {/* Gridlines horizontales + labels eje Y */}
           {gridLines.map((g, i) => (
             <React.Fragment key={`grid-${i}`}>
               <Line
@@ -205,7 +173,7 @@ export default function LineChartCard({
                 x={CHART_PADDING_LEFT - 4}
                 y={g.y + 3}
                 fill={axisLabelColor}
-                fontSize="8"
+                fontSize="10"
                 textAnchor="end"
               >
                 {formatAxisValue(g.value)}
@@ -213,10 +181,8 @@ export default function LineChartCard({
             </React.Fragment>
           ))}
 
-          {/* Área degradada */}
           <Path d={areaPath} fill="url(#areaGrad)" />
 
-          {/* Línea suavizada */}
           <Path
             d={linePath}
             stroke={lineColor}
@@ -226,7 +192,6 @@ export default function LineChartCard({
             strokeLinejoin="round"
           />
 
-          {/* Línea vertical punteada hacia el punto destacado */}
           {highlightPoint && (
             <Line
               x1={highlightPoint.x}
@@ -240,7 +205,6 @@ export default function LineChartCard({
             />
           )}
 
-          {/* Punto destacado */}
           {highlightPoint && (
             <Circle
               cx={highlightPoint.x}
@@ -252,22 +216,21 @@ export default function LineChartCard({
             />
           )}
 
-          {/* Tooltip sobre el punto destacado */}
           {highlightPoint && (
             <>
               <Rect
-                x={Math.max(CHART_PADDING_LEFT, Math.min(highlightPoint.x - 32, VIEWBOX_WIDTH - 72))}
-                y={Math.max(2, highlightPoint.y - 22)}
-                width="64"
-                height="18"
+                x={Math.max(CHART_PADDING_LEFT, Math.min(highlightPoint.x - 36, VIEWBOX_WIDTH - 80))}
+                y={Math.max(2, highlightPoint.y - 24)}
+                width="72"
+                height="20"
                 rx="5"
                 fill={isDark ? '#0F172A' : '#0F172A'}
               />
               <SvgText
-                x={Math.max(CHART_PADDING_LEFT + 32, Math.min(highlightPoint.x, VIEWBOX_WIDTH - 40))}
-                y={Math.max(14, highlightPoint.y - 10)}
+                x={Math.max(CHART_PADDING_LEFT + 36, Math.min(highlightPoint.x, VIEWBOX_WIDTH - 44))}
+                y={Math.max(15, highlightPoint.y - 11)}
                 fill="#10B981"
-                fontSize="9"
+                fontSize="11"
                 fontWeight="700"
                 textAnchor="middle"
               >
@@ -276,14 +239,13 @@ export default function LineChartCard({
             </>
           )}
 
-          {/* Labels eje X (Lun, Mar, etc.) */}
           {points.map((p, i) => (
             <SvgText
               key={`xlabel-${i}`}
               x={p.x}
               y={CHART_HEIGHT - 6}
               fill={axisLabelColor}
-              fontSize="9"
+              fontSize="11"
               textAnchor="middle"
             >
               {p.label}
@@ -292,7 +254,7 @@ export default function LineChartCard({
         </Svg>
       ) : (
         <View style={s.emptyChart}>
-          <MaterialIcons name="show-chart" size={32} color={textMutedColor} />
+          <MaterialIcons name="show-chart" size={36} color={textMutedColor} />
           <Text style={[s.emptyChartText, { color: textMutedColor }]}>
             Sin movimiento aún{'\n'}para este período.
           </Text>
@@ -305,7 +267,7 @@ export default function LineChartCard({
 const s = StyleSheet.create({
   card: {
     borderRadius: 14,
-    padding: 14,
+    padding: 16,
     borderWidth: 0.5,
   },
   header: {
@@ -315,21 +277,21 @@ const s = StyleSheet.create({
     marginBottom: 6,
   },
   title: {
-    fontSize: 13,
+    fontSize: 15,
     fontWeight: '700',
   },
   rangePill: {
-    paddingHorizontal: 8,
-    paddingVertical: 3,
-    borderRadius: 6,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 7,
     borderWidth: 0.5,
   },
   rangePillText: {
-    fontSize: 10,
+    fontSize: 11,
     fontWeight: '600',
   },
   totalValue: {
-    fontSize: 22,
+    fontSize: 24,
     fontWeight: '800',
     letterSpacing: -0.5,
     marginTop: 2,
@@ -338,14 +300,14 @@ const s = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 3,
-    marginTop: 2,
+    marginTop: 3,
   },
   changeText: {
-    fontSize: 11,
+    fontSize: 12,
     fontWeight: '700',
   },
   changeLabel: {
-    fontSize: 11,
+    fontSize: 12,
     fontWeight: '500',
     marginLeft: 2,
   },
@@ -354,11 +316,11 @@ const s = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     gap: 8,
-    marginTop: 8,
+    marginTop: 10,
   },
   emptyChartText: {
-    fontSize: 12,
+    fontSize: 13,
     textAlign: 'center',
-    lineHeight: 16,
+    lineHeight: 18,
   },
 });

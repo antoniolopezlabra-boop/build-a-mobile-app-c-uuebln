@@ -5,42 +5,27 @@ import MaterialIcons from '@expo/vector-icons/MaterialIcons';
 // ══════════════════════════════════════════════════════════════════════
 // InsightsCard — Recomendaciones accionables rule-based (sin LLM)
 //
-// Diseño:
-//   ┌─────────────────────────────────────────┐
-//   │ ⚡ Insights de tu negocio                │
-//   │                                          │
-//   │ ┃ Tu mejor día es viernes               │
-//   │ ┃ 32% de los ingresos del mes      →    │
-//   │                                          │
-//   │ ┃ Horario muerto: 14h-16h               │
-//   │ ┃ Considera promociones ese rango  →    │
-//   │                                          │
-//   │ ┃ 8 clientes inactivos 60+ días         │
-//   │ ┃ Reactivar con campaña            →    │
-//   └─────────────────────────────────────────┘
-//
-// Cada insight:
-//   - Tiene un acento de color a la izquierda (verde/ámbar/azul/morado)
-//   - Es tappable y ejecuta una acción concreta (navegación)
-//   - El fondo es un overlay sutil del color de acento
-//
-// Reglas de cálculo viven en el componente padre (reports.tsx) que pasa
-// un array de Insight ya procesados. Este componente solo renderiza.
+// ── AJUSTE TIPOGRÁFICO MAY 2026 ──
+// Subidos los tamaños para sinergia con resto de app:
+//   - header title 13px → 15px (alineado con resto de cards)
+//   - insightTitle 12px → 14px
+//   - insightSubtitle 11px → 12px
+//   - barra de acento 3px → 4px (más visible)
+//   - padding interno 8px → 12px (más respiración)
 // ══════════════════════════════════════════════════════════════════════
 
 export type InsightAccent = 'green' | 'amber' | 'blue' | 'purple' | 'rose';
 
 export interface Insight {
-  id: string;                // identificador único para el key
-  accent: InsightAccent;     // color del acento lateral
-  title: string;             // "Tu mejor día es viernes"
-  subtitle: string;          // "32% de los ingresos del mes"
-  onPress?: () => void;      // acción al tappear (opcional, si no se pasa el insight es informativo)
+  id: string;
+  accent: InsightAccent;
+  title: string;
+  subtitle: string;
+  onPress?: () => void;
 }
 
 interface InsightsCardProps {
   insights: Insight[];
-  // Tema
   surfaceColor: string;
   textColor: string;
   textMutedColor: string;
@@ -48,7 +33,6 @@ interface InsightsCardProps {
   isDark: boolean;
 }
 
-// Mapa de colores por accent
 const ACCENT_COLORS: Record<InsightAccent, { solid: string; bg: string; bgDark: string }> = {
   green:  { solid: '#10B981', bg: 'rgba(16,185,129,0.08)',  bgDark: 'rgba(16,185,129,0.12)' },
   amber:  { solid: '#F59E0B', bg: 'rgba(245,158,11,0.08)',  bgDark: 'rgba(245,158,11,0.12)' },
@@ -66,22 +50,19 @@ export default function InsightsCard({
   isDark,
 }: InsightsCardProps) {
 
-  // Si no hay insights, no renderizamos nada (no mostramos card vacío)
   if (insights.length === 0) {
     return null;
   }
 
   return (
     <View style={[s.card, { backgroundColor: surfaceColor, borderColor }]}>
-      {/* Header con ícono y título */}
       <View style={s.header}>
         <View style={s.headerIconWrap}>
-          <MaterialIcons name="bolt" size={14} color="#F59E0B" />
+          <MaterialIcons name="bolt" size={16} color="#F59E0B" />
         </View>
         <Text style={[s.title, { color: textColor }]}>Insights de tu negocio</Text>
       </View>
 
-      {/* Lista de insights */}
       <View style={s.list}>
         {insights.map(insight => {
           const colors = ACCENT_COLORS[insight.accent];
@@ -95,10 +76,8 @@ export default function InsightsCard({
               {...wrapperProps}
               style={[s.insightRow, { backgroundColor: bg }]}
             >
-              {/* Barra lateral de acento */}
               <View style={[s.accentBar, { backgroundColor: colors.solid }]} />
 
-              {/* Contenido: título + subtítulo */}
               <View style={s.insightContent}>
                 <Text style={[s.insightTitle, { color: textColor }]} numberOfLines={2}>
                   {insight.title}
@@ -108,9 +87,8 @@ export default function InsightsCard({
                 </Text>
               </View>
 
-              {/* Flecha si es tappable */}
               {insight.onPress && (
-                <MaterialIcons name="chevron-right" size={18} color={colors.solid} />
+                <MaterialIcons name="chevron-right" size={20} color={colors.solid} />
               )}
             </Wrapper>
           );
@@ -123,58 +101,58 @@ export default function InsightsCard({
 const s = StyleSheet.create({
   card: {
     borderRadius: 14,
-    padding: 14,
+    padding: 16,
     borderWidth: 0.5,
   },
   header: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 6,
-    marginBottom: 10,
+    gap: 8,
+    marginBottom: 12,
   },
   headerIconWrap: {
-    width: 22,
-    height: 22,
-    borderRadius: 7,
+    width: 26,
+    height: 26,
+    borderRadius: 8,
     backgroundColor: 'rgba(245,158,11,0.18)',
     justifyContent: 'center',
     alignItems: 'center',
   },
   title: {
-    fontSize: 13,
+    fontSize: 15,
     fontWeight: '700',
   },
   list: {
-    gap: 8,
+    gap: 10,
   },
   insightRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 8,
-    paddingVertical: 8,
-    paddingRight: 10,
-    borderRadius: 8,
+    gap: 10,
+    paddingVertical: 12,
+    paddingRight: 12,
+    borderRadius: 10,
     overflow: 'hidden',
   },
   accentBar: {
-    width: 3,
+    width: 4,
     alignSelf: 'stretch',
     borderTopLeftRadius: 2,
     borderBottomLeftRadius: 2,
-    marginRight: 4,
+    marginRight: 6,
   },
   insightContent: {
     flex: 1,
-    gap: 1,
+    gap: 2,
   },
   insightTitle: {
-    fontSize: 12,
+    fontSize: 14,
     fontWeight: '700',
     letterSpacing: -0.1,
   },
   insightSubtitle: {
-    fontSize: 11,
+    fontSize: 12,
     fontWeight: '500',
-    marginTop: 1,
+    marginTop: 2,
   },
 });

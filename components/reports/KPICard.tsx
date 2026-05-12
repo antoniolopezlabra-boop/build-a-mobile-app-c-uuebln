@@ -12,24 +12,25 @@ import MaterialIcons from '@expo/vector-icons/MaterialIcons';
 //   │ ↑ 18% vs ant.          │   ← variación con flecha y color semántico
 //   └────────────────────────┘
 //
-// Comportamiento:
-//   - Si change > 0 → flecha arriba + texto verde
-//   - Si change < 0 → flecha abajo + texto rojo
-//   - Si change === 0 o null → guion + texto gris
-//   - Si touchable === true → se puede tocar (cursor pointer, opacidad al press)
+// ── AJUSTE TIPOGRÁFICO MAY 2026 ──
+// Antoniob reportó que los tamaños de letra eran ligeramente más chicos
+// que el resto de la app, rompiendo la sinergia visual. Comparado contra
+// clients.tsx (que es la pestaña referencia):
+//   - label 10px → 11px
+//   - value 18px → 22px (alineado con headerStatNum=20)
+//   - changeText 10px → 12px
 // ══════════════════════════════════════════════════════════════════════
 
 interface KPICardProps {
   label: string;
-  value: string;             // ya formateado (ej: "$45,250", "127", "$356")
+  value: string;
   icon: keyof typeof MaterialIcons.glyphMap;
-  iconColor: string;         // color del ícono (ej: "#10B981")
-  iconBg?: string;           // fondo del círculo del ícono — calculado auto si no se pasa
-  change: number | null;     // % de variación vs período anterior; null = no comparar
-  comparisonLabel?: string;  // "vs ant.", "vs mes ant.", etc. Default: "vs ant."
-  onPress?: () => void;      // si se pasa, la card es touchable
-  // Modo oscuro/claro
-  surfaceColor: string;      // bg de la card (ej: tc.surface)
+  iconColor: string;
+  iconBg?: string;
+  change: number | null;
+  comparisonLabel?: string;
+  onPress?: () => void;
+  surfaceColor: string;
   textColor: string;
   textMutedColor: string;
   borderColor: string;
@@ -49,31 +50,26 @@ export default function KPICard({
   textMutedColor,
   borderColor,
 }: KPICardProps) {
-  // Calcular el fondo del ícono si no se pasó: usar el mismo color con 15% opacidad
-  // Convierte "#10B981" → "rgba(16,185,129,0.15)" — útil para mantener consistencia visual
   const computedIconBg = iconBg || hexToRgba(iconColor, 0.15);
 
-  // Determinar color y flecha del badge de variación
   const isPositive   = change !== null && change > 0;
   const isNegative   = change !== null && change < 0;
-  const isFlat       = change !== null && change === 0;
 
   const changeColor =
     isPositive ? '#10B981' :
     isNegative ? '#EF4444' :
-    '#94A3B8'; // flat o null
+    '#94A3B8';
 
   const changeIcon: keyof typeof MaterialIcons.glyphMap =
     isPositive ? 'trending-up' :
     isNegative ? 'trending-down' :
     'trending-flat';
 
-  // Texto del badge: "18%" o "-12%" o "0%" o "—"
   const changeText =
     change === null      ? '—' :
     change === 0         ? '0%' :
     change > 0           ? `${Math.round(change)}%` :
-                           `${Math.round(change)}%`;  // ya viene con el menos
+                           `${Math.round(change)}%`;
 
   const Wrapper: any = onPress ? TouchableOpacity : View;
   const wrapperProps = onPress ? { onPress, activeOpacity: 0.75 } : {};
@@ -86,7 +82,6 @@ export default function KPICard({
         { backgroundColor: surfaceColor, borderColor },
       ]}
     >
-      {/* Header: label + ícono */}
       <View style={s.header}>
         <Text
           style={[s.label, { color: textMutedColor }]}
@@ -96,18 +91,16 @@ export default function KPICard({
           {label}
         </Text>
         <View style={[s.iconWrap, { backgroundColor: computedIconBg }]}>
-          <MaterialIcons name={icon} size={14} color={iconColor} />
+          <MaterialIcons name={icon} size={16} color={iconColor} />
         </View>
       </View>
 
-      {/* Valor principal */}
       <Text style={[s.value, { color: textColor }]} numberOfLines={1} adjustsFontSizeToFit>
         {value}
       </Text>
 
-      {/* Badge de variación */}
       <View style={s.changeRow}>
-        <MaterialIcons name={changeIcon} size={11} color={changeColor} />
+        <MaterialIcons name={changeIcon} size={13} color={changeColor} />
         <Text style={[s.changeText, { color: changeColor }]}>
           {changeText}
         </Text>
@@ -119,10 +112,7 @@ export default function KPICard({
   );
 }
 
-// ── Helpers ──
-
 function hexToRgba(hex: string, alpha: number): string {
-  // Convierte "#10B981" a "rgba(16,185,129,0.15)" para fondos suaves
   const h = hex.replace('#', '');
   const r = parseInt(h.substring(0, 2), 16);
   const g = parseInt(h.substring(2, 4), 16);
@@ -134,37 +124,37 @@ const s = StyleSheet.create({
   card: {
     flex: 1,
     borderRadius: 14,
-    padding: 12,
+    padding: 14,
     borderWidth: 0.5,
-    minHeight: 92,
+    minHeight: 104,
     justifyContent: 'space-between',
   },
   header: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    marginBottom: 4,
+    marginBottom: 6,
   },
   label: {
-    fontSize: 10,
+    fontSize: 11,
     fontWeight: '600',
-    letterSpacing: 0.4,
+    letterSpacing: 0.5,
     textTransform: 'uppercase',
     flex: 1,
     marginRight: 6,
   },
   iconWrap: {
-    width: 26,
-    height: 26,
-    borderRadius: 8,
+    width: 30,
+    height: 30,
+    borderRadius: 9,
     justifyContent: 'center',
     alignItems: 'center',
   },
   value: {
-    fontSize: 18,
-    fontWeight: '700',
-    letterSpacing: -0.3,
-    marginVertical: 2,
+    fontSize: 22,
+    fontWeight: '800',
+    letterSpacing: -0.5,
+    marginVertical: 3,
   },
   changeRow: {
     flexDirection: 'row',
@@ -172,12 +162,13 @@ const s = StyleSheet.create({
     gap: 3,
   },
   changeText: {
-    fontSize: 10,
+    fontSize: 12,
     fontWeight: '700',
   },
   changeLabel: {
-    fontSize: 10,
+    fontSize: 12,
     fontWeight: '500',
     flex: 1,
+    marginLeft: 1,
   },
 });
