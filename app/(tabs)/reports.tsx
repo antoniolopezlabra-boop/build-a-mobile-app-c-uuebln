@@ -21,11 +21,11 @@ import InsightsCard, { Insight } from '@/components/reports/InsightsCard';
 //
 // Commit 1: header + 4 KPI cards + cálculo de variaciones
 // Commit 2: + Gráfica de línea de ingresos diarios + Donut de servicios
-// Commit 3 (este): + Insights rule-based (sin LLM)
-//   • "Tu mejor día es [día]" — día con más % de ingresos
-//   • "Servicio estrella: [nombre]" — servicio con más ingresos
-//   • "Horario muerto: [hora]" — hora con menos citas
-//   • "N clientes inactivos 60+ días" — clientes a reactivar
+// Commit 3: + Insights rule-based (sin LLM)
+// AJUSTE TIPOGRÁFICO MAY 2026: alineación con clients.tsx para sinergia visual
+//   • headerTitle 22 → 28px (igual que clients)
+//   • greeting 15 → 18px (más prominente)
+//   • todos los textos secundarios subidos 1-2px para consistencia
 // ══════════════════════════════════════════════════════════════════════
 
 interface Stats {
@@ -55,11 +55,10 @@ interface Stats {
   avgTicketLastMonth: number;
   dailyRevenue: { label: string; value: number }[];
   revenueByService: ServiceSlice[];
-  // ── NUEVOS campos para Insights (Commit 3) ──
-  bestWeekday: { name: string; percent: number } | null;  // día con mayor % de ingresos
-  topService: ServiceSlice | null;                          // servicio estrella
-  deadHourRange: string | null;                             // ej: "14h-16h" o null si no hay patrón claro
-  inactiveClientsCount: number;                             // clientes con last_visit > 60 días
+  bestWeekday: { name: string; percent: number } | null;
+  topService: ServiceSlice | null;
+  deadHourRange: string | null;
+  inactiveClientsCount: number;
 }
 
 interface AppointmentItem {
@@ -86,7 +85,6 @@ interface StaffStat {
 
 const MONTHS_ES = ['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'];
 
-// ── Nombres completos de los días para los insights (no abreviados) ──
 const DAY_FULL_NAMES = ['lunes', 'martes', 'miércoles', 'jueves', 'viernes', 'sábado', 'domingo'];
 
 const STATUS_CONFIG: Record<string, { color: string; label: string }> = {
@@ -112,29 +110,14 @@ function calcChange(current: number, previous: number): number | null {
   return Math.round(((current - previous) / previous) * 100);
 }
 
-// ══════════════════════════════════════════════════════════════════════
-// MOTOR DE INSIGHTS — Reglas determinísticas sin LLM
-//
-// Cada función analiza los datos del Stats y decide si genera un insight.
-// Si los datos no son suficientes para una recomendación útil, retorna null.
-//
-// Lógica clave:
-//   • No mostrar insights con poca data (ej: si solo hay 1 cita no hay
-//     "mejor día" — sería ruido)
-//   • Cada insight tiene un threshold mínimo para tener relevancia
-//   • Los textos están escritos en tono ejecutivo, no condescendiente
-// ══════════════════════════════════════════════════════════════════════
-
 function buildBestDayInsight(stats: Stats | null): Insight | null {
   if (!stats?.bestWeekday) return null;
-  // Requiere al menos 20% para ser significativo (si fuera 14% sería ~igual reparto)
   if (stats.bestWeekday.percent < 20) return null;
   return {
     id: 'best-day',
     accent: 'green',
     title: `Tu mejor día es ${stats.bestWeekday.name}`,
     subtitle: `${stats.bestWeekday.percent}% de tus ingresos del mes`,
-    // No es tappable por ahora — es informativo
   };
 }
 
@@ -142,7 +125,7 @@ function buildTopServiceInsight(stats: Stats | null): Insight | null {
   if (!stats?.topService) return null;
   if (stats.monthRevenue === 0) return null;
   const percent = Math.round((stats.topService.amount / stats.monthRevenue) * 100);
-  if (percent < 15) return null; // sin un servicio claramente dominante no aporta valor
+  if (percent < 15) return null;
   return {
     id: 'top-service',
     accent: 'purple',
@@ -373,7 +356,6 @@ export default function ReportsScreen() {
       const monthRevenue   = paidAppointments.reduce((s: number, a: any) => s + (a.service_cost || 0), 0);
       const pendingRevenue = (penD || []).reduce((s: number, a: any) => s + (a.service_cost || 0), 0);
 
-      // ── dailyRevenue (Commit 2) ──
       const dailyByWeekday = [0, 0, 0, 0, 0, 0, 0];
       paidAppointments.forEach((a: any) => {
         if (!a.date || !a.service_cost) return;
@@ -387,7 +369,6 @@ export default function ReportsScreen() {
         value: Math.round(value),
       }));
 
-      // ── revenueByService (Commit 2) ──
       const serviceMap = new Map<string, number>();
       paidAppointments.forEach((a: any) => {
         const name = (a.service_name || 'Sin nombre').trim();
@@ -403,16 +384,6 @@ export default function ReportsScreen() {
         .sort((a, b) => b.amount - a.amount)
         .map((slice, idx) => ({ ...slice, color: SERVICE_COLORS[idx % SERVICE_COLORS.length] }));
 
-      // ══════════════════════════════════════════════════════════════════
-      // CÁLCULOS PARA INSIGHTS (Commit 3)
-      //
-      // Todos se calculan de datos YA cargados arriba (paidAppointments,
-      // revenueByService, mA con start_time). Solo se hace UNA query nueva
-      // para contar clientes inactivos.
-      // ══════════════════════════════════════════════════════════════════
-
-      // ── 1. Mejor día de la semana: índice del valor máximo en dailyByWeekday
-      //    Si todos son 0 o no hay datos, bestWeekday = null
       let bestWeekday: { name: string; percent: number } | null = null;
       const totalDaily = dailyByWeekday.reduce((s, v) => s + v, 0);
       if (totalDaily > 0) {
@@ -427,19 +398,8 @@ export default function ReportsScreen() {
         };
       }
 
-      // ── 2. Servicio estrella: el primero del array ya ordenado desc
       const topService: ServiceSlice | null = revenueByService.length > 0 ? revenueByService[0] : null;
 
-      // ── 3. Horario muerto: hora con menos citas del mes
-      //    Tomamos start_time de TODAS las citas del mes (no solo pagadas),
-      //    extraemos la hora (entero) y contamos. Devolvemos el rango con
-      //    menos citas dentro del rango horario de operación detectado.
-      //
-      //    Lógica:
-      //      - Solo si hay >= 10 citas en el mes (sino no es significativo)
-      //      - Detectamos rango horario real (min y max horas con citas)
-      //      - Dentro de ese rango, buscamos el bucket de 1h con menos citas
-      //      - Si la diferencia entre max y min hora es < 3, no hay rango — null
       let deadHourRange: string | null = null;
       if ((mA?.length || 0) >= 10) {
         const hourCounts = new Map<number, number>();
@@ -454,9 +414,7 @@ export default function ReportsScreen() {
           if (h > maxHour) maxHour = h;
         });
 
-        // Solo sugerir si el rango operativo es razonable (al menos 3 horas)
         if (maxHour - minHour >= 3) {
-          // Buscamos la hora con menos citas DENTRO del rango operativo
           let minCount = Infinity;
           let deadHour = -1;
           for (let h = minHour; h < maxHour; h++) {
@@ -466,7 +424,6 @@ export default function ReportsScreen() {
               deadHour = h;
             }
           }
-          // Solo mostrar si el horario muerto tiene MENOS de la mitad del promedio
           const avgCount = (mA?.length || 0) / (maxHour - minHour + 1);
           if (deadHour >= 0 && minCount < avgCount * 0.5) {
             deadHourRange = `${deadHour}h-${deadHour + 1}h`;
@@ -474,8 +431,6 @@ export default function ReportsScreen() {
         }
       }
 
-      // ── 4. Clientes inactivos: count de clientes con last_visit > 60 días
-      //    Es una query nueva pero ligera (solo count, no trae filas)
       const sixtyDaysAgo = new Date();
       sixtyDaysAgo.setDate(sixtyDaysAgo.getDate() - 60);
       const sixtyDaysAgoStr = toLocalDateString(sixtyDaysAgo);
@@ -487,7 +442,6 @@ export default function ReportsScreen() {
         .lt('last_visit', sixtyDaysAgoStr);
       const inactiveClientsCount = inactiveCount || 0;
 
-      // ── Revenue mes anterior ──
       const [{ data: revLegacyPrev }, { data: revNewPrev }] = await Promise.all([
         supabase.from('appointments').select('service_cost').eq('user_id', userId).eq('status', 'Pagado').gte('date', lastMonthStartStr).lte('date', lastMonthEndStr),
         supabase.from('appointments').select('service_cost').eq('user_id', userId).eq('status', 'Completada').eq('paid', true).gte('date', lastMonthStartStr).lte('date', lastMonthEndStr),
@@ -645,17 +599,11 @@ export default function ReportsScreen() {
   const ticketChange      = stats ? calcChange(stats.avgTicket, stats.avgTicketLastMonth) : null;
   const newClientsChange  = stats ? calcChange(stats.clientsThisMonth, stats.clientsLastMonth) : null;
 
-  // ══════════════════════════════════════════════════════════════════════
-  // CONSTRUIR ARRAY DE INSIGHTS (Commit 3)
-  // Cada función retorna Insight | null. Filtramos nulls.
-  // El usuario ve hasta 4 recomendaciones priorizadas.
-  // ══════════════════════════════════════════════════════════════════════
   const insights: Insight[] = [
     buildBestDayInsight(stats),
     buildTopServiceInsight(stats),
     buildDeadHourInsight(stats),
     buildInactiveClientsInsight(stats, () => {
-      // Acción: ir a marketing → nueva campaña con segmento 'inactivos' precargado
       router.push({
         pathname: '/marketing/new',
         params: { segment: 'inactivos' },
@@ -719,7 +667,7 @@ export default function ReportsScreen() {
           <View style={s.headerGreetingRow}>
             <View style={{ flex: 1 }}>
               <Text style={[s.greeting, { color: tc.text }]}>
-                Hola, {firstName} <Text style={{ fontSize: 16 }}>👋</Text>
+                Hola, {firstName} <Text style={{ fontSize: 18 }}>👋</Text>
               </Text>
               <Text style={[s.greetingSub, { color: tc.textMuted }]}>
                 Aquí tienes el panorama general{'\n'}de tu negocio.
@@ -734,10 +682,10 @@ export default function ReportsScreen() {
                 activeOpacity={0.7}
                 hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
               >
-                <MaterialIcons name="chevron-left" size={16} color={tc.text} />
+                <MaterialIcons name="chevron-left" size={18} color={tc.text} />
               </TouchableOpacity>
               <View style={s.monthSelectorMid}>
-                <MaterialIcons name="event" size={12} color="#10B981" />
+                <MaterialIcons name="event" size={14} color="#10B981" />
                 <Text style={[s.monthSelectorText, { color: tc.text }]}>
                   {MONTHS_ES[selectedMonth].slice(0, 3)} {selectedYear}
                 </Text>
@@ -749,7 +697,7 @@ export default function ReportsScreen() {
                 activeOpacity={0.7}
                 hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
               >
-                <MaterialIcons name="chevron-right" size={16} color={tc.text} />
+                <MaterialIcons name="chevron-right" size={18} color={tc.text} />
               </TouchableOpacity>
             </View>
           </View>
@@ -761,14 +709,14 @@ export default function ReportsScreen() {
               style={[s.reportTab, { backgroundColor: tc.inputBg }, reportTab === 'general' && { backgroundColor: '#0F172A' }]}
               onPress={() => setReportTab('general')}
             >
-              <MaterialIcons name="dashboard" size={15} color={reportTab === 'general' ? '#fff' : tc.textMuted} />
+              <MaterialIcons name="dashboard" size={16} color={reportTab === 'general' ? '#fff' : tc.textMuted} />
               <Text style={[s.reportTabText, { color: reportTab === 'general' ? '#fff' : tc.textMuted }]}>General</Text>
             </TouchableOpacity>
             <TouchableOpacity
               style={[s.reportTab, { backgroundColor: tc.inputBg }, reportTab === 'equipo' && { backgroundColor: '#6366F1' }]}
               onPress={() => setReportTab('equipo')}
             >
-              <MaterialIcons name="group" size={15} color={reportTab === 'equipo' ? '#fff' : tc.textMuted} />
+              <MaterialIcons name="group" size={16} color={reportTab === 'equipo' ? '#fff' : tc.textMuted} />
               <Text style={[s.reportTabText, { color: reportTab === 'equipo' ? '#fff' : tc.textMuted }]}>Mi equipo</Text>
             </TouchableOpacity>
           </View>
@@ -849,7 +797,7 @@ export default function ReportsScreen() {
                 activeOpacity={0.85}
               >
                 <View style={s.pendingIconWrap}>
-                  <MaterialIcons name="schedule" size={20} color="#F59E0B" />
+                  <MaterialIcons name="schedule" size={22} color="#F59E0B" />
                 </View>
                 <View style={{ flex: 1 }}>
                   <Text style={[s.pendingLabel, { color: isDark ? '#FED7AA' : '#92400E' }]}>POR COBRAR</Text>
@@ -857,11 +805,10 @@ export default function ReportsScreen() {
                     ${stats.pendingRevenue.toLocaleString('es-MX')}
                   </Text>
                 </View>
-                <MaterialIcons name="chevron-right" size={20} color="#F59E0B" />
+                <MaterialIcons name="chevron-right" size={22} color="#F59E0B" />
               </TouchableOpacity>
             )}
 
-            {/* Gráfica de línea de ingresos */}
             <LineChartCard
               title="Ingresos"
               totalValue={`$${(stats?.monthRevenue || 0).toLocaleString('es-MX')}`}
@@ -876,7 +823,6 @@ export default function ReportsScreen() {
               isDark={isDark}
             />
 
-            {/* Donut de ingresos por servicio */}
             <DonutChartCard
               title="Ingresos por servicio"
               totalLabel="Total"
@@ -890,10 +836,6 @@ export default function ReportsScreen() {
               isDark={isDark}
             />
 
-            {/* ═══════════════════════════════════════════════════════════
-                INSIGHTS RULE-BASED (Commit 3)
-                Solo se renderiza si hay al menos 1 insight con datos suficientes.
-                ═══════════════════════════════════════════════════════════ */}
             <InsightsCard
               insights={insights}
               surfaceColor={tc.surface}
@@ -903,11 +845,10 @@ export default function ReportsScreen() {
               isDark={isDark}
             />
 
-            {/* Indicadores secundarios */}
             <View style={s.secondaryRow}>
               <View style={[s.secondaryCard, { backgroundColor: tc.surface, borderColor: tc.border }]}>
                 <View style={s.secondaryIconWrap}>
-                  <MaterialIcons name="check-circle" size={18} color="#10B981" />
+                  <MaterialIcons name="check-circle" size={20} color="#10B981" />
                 </View>
                 <View style={{ flex: 1 }}>
                   <Text style={[s.secondaryValue, { color: tc.text }]}>{stats?.completedAppointments || 0}</Text>
@@ -919,14 +860,14 @@ export default function ReportsScreen() {
             <View style={s.secondaryRow}>
               <View style={[s.secondaryCard, { backgroundColor: tc.surface, borderColor: tc.border }]}>
                 <View style={s.secondaryIconWrap}>
-                  <MaterialIcons name="people" size={18} color="#6366F1" />
+                  <MaterialIcons name="people" size={20} color="#6366F1" />
                 </View>
                 <View style={{ flex: 1 }}>
                   <Text style={[s.secondaryValue, { color: tc.text }]}>{stats?.totalClients || 0}</Text>
                   <Text style={[s.secondaryLabel, { color: tc.textMuted }]}>Total de clientes</Text>
                 </View>
                 <TouchableOpacity onPress={() => setClientsModal(true)} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
-                  <MaterialIcons name="bar-chart" size={18} color="#6366F1" />
+                  <MaterialIcons name="bar-chart" size={20} color="#6366F1" />
                 </TouchableOpacity>
               </View>
             </View>
@@ -1154,39 +1095,41 @@ const s = StyleSheet.create({
   paywallBtn:        { backgroundColor: '#10B981', paddingHorizontal: 28, paddingVertical: 14, borderRadius: 12 },
   paywallBtnText:    { color: '#fff', fontWeight: '700', fontSize: 15 },
 
-  header:            { paddingHorizontal: 16, paddingTop: 12, paddingBottom: 14, borderBottomWidth: 0.5 },
-  headerTopRow:      { flexDirection: 'row', alignItems: 'center', marginBottom: 10 },
-  headerTitle:       { fontSize: 22, fontWeight: '800', letterSpacing: -0.5 },
+  // ── Header ejecutivo ──
+  // Alineado con clients.tsx: paddingHorizontal=20, title=28px, subtitle=13px
+  header:            { paddingHorizontal: 20, paddingTop: 16, paddingBottom: 16, borderBottomWidth: 0.5 },
+  headerTopRow:      { flexDirection: 'row', alignItems: 'center', marginBottom: 14 },
+  headerTitle:       { fontSize: 28, fontWeight: '800', letterSpacing: -0.5 },
   headerGreetingRow: { flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'space-between', gap: 10 },
-  greeting:          { fontSize: 15, fontWeight: '700' },
-  greetingSub:       { fontSize: 11, marginTop: 2, lineHeight: 14 },
-  monthSelector:     { flexDirection: 'row', alignItems: 'center', borderRadius: 9, borderWidth: 0.5, padding: 2, gap: 2 },
-  monthSelectorBtn:  { padding: 4, borderRadius: 6 },
-  monthSelectorMid:  { flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 6 },
-  monthSelectorText: { fontSize: 11, fontWeight: '700' },
+  greeting:          { fontSize: 18, fontWeight: '700' },
+  greetingSub:       { fontSize: 13, marginTop: 3, lineHeight: 18 },
+  monthSelector:     { flexDirection: 'row', alignItems: 'center', borderRadius: 10, borderWidth: 0.5, padding: 3, gap: 2 },
+  monthSelectorBtn:  { padding: 5, borderRadius: 7 },
+  monthSelectorMid:  { flexDirection: 'row', alignItems: 'center', gap: 5, paddingHorizontal: 6 },
+  monthSelectorText: { fontSize: 13, fontWeight: '700' },
 
-  reportTabRow:      { flexDirection: 'row', paddingHorizontal: 16, paddingVertical: 10, gap: 8, borderBottomWidth: 0.5 },
-  reportTab:         { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, paddingVertical: 9, borderRadius: 10 },
-  reportTabText:     { fontSize: 13, fontWeight: '600' },
+  reportTabRow:      { flexDirection: 'row', paddingHorizontal: 20, paddingVertical: 12, gap: 8, borderBottomWidth: 0.5 },
+  reportTab:         { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, paddingVertical: 10, borderRadius: 10 },
+  reportTabText:     { fontSize: 14, fontWeight: '600' },
 
   content:           { padding: 16, gap: 12 },
   kpiGrid:           { gap: 0 },
   kpiRow:            { flexDirection: 'row' },
 
-  pendingCard:       { flexDirection: 'row', alignItems: 'center', gap: 12, borderRadius: 14, padding: 14, borderWidth: 1 },
-  pendingIconWrap:   { width: 40, height: 40, borderRadius: 10, backgroundColor: 'rgba(245,158,11,0.18)', justifyContent: 'center', alignItems: 'center' },
-  pendingLabel:      { fontSize: 10, fontWeight: '800', letterSpacing: 0.8 },
-  pendingValue:      { fontSize: 22, fontWeight: '800', letterSpacing: -0.5, marginTop: 2 },
+  pendingCard:       { flexDirection: 'row', alignItems: 'center', gap: 12, borderRadius: 14, padding: 16, borderWidth: 1 },
+  pendingIconWrap:   { width: 44, height: 44, borderRadius: 11, backgroundColor: 'rgba(245,158,11,0.18)', justifyContent: 'center', alignItems: 'center' },
+  pendingLabel:      { fontSize: 11, fontWeight: '800', letterSpacing: 1 },
+  pendingValue:      { fontSize: 24, fontWeight: '800', letterSpacing: -0.5, marginTop: 2 },
 
   secondaryRow:      { flexDirection: 'row' },
-  secondaryCard:     { flex: 1, flexDirection: 'row', alignItems: 'center', gap: 12, borderRadius: 12, padding: 12, borderWidth: 0.5 },
-  secondaryIconWrap: { width: 34, height: 34, borderRadius: 9, backgroundColor: 'rgba(99,102,241,0.10)', justifyContent: 'center', alignItems: 'center' },
-  secondaryValue:    { fontSize: 18, fontWeight: '700' },
-  secondaryLabel:    { fontSize: 11, marginTop: 1 },
+  secondaryCard:     { flex: 1, flexDirection: 'row', alignItems: 'center', gap: 12, borderRadius: 12, padding: 14, borderWidth: 0.5 },
+  secondaryIconWrap: { width: 36, height: 36, borderRadius: 9, backgroundColor: 'rgba(99,102,241,0.10)', justifyContent: 'center', alignItems: 'center' },
+  secondaryValue:    { fontSize: 20, fontWeight: '700' },
+  secondaryLabel:    { fontSize: 13, marginTop: 2 },
 
   rangePicker:       { flexDirection: 'row', padding: 12, gap: 8, borderBottomWidth: 0.5 },
   rangeBtn:          { flex: 1, paddingVertical: 8, borderRadius: 10, alignItems: 'center' },
-  rangeBtnText:      { fontSize: 12, fontWeight: '600' },
+  rangeBtnText:      { fontSize: 13, fontWeight: '600' },
 
   modalOverlay:      { flex: 1, justifyContent: 'flex-end' },
   modalBackdrop:     { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(0,0,0,0.5)' },
