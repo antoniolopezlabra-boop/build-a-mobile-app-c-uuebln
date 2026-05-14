@@ -86,13 +86,25 @@ export default function HomeScreen() {
     return () => sub.remove();
   }, []);
 
+  // ── Suscripción Realtime: cobros pendientes ──
+  // ⚡ PERFORMANCE FIX (May 2026): el filtro `user_id=eq.${userId}` se aplica
+  // en el SERVIDOR. Antes el WAL parser de Supabase enviaba TODOS los UPDATEs
+  // de appointments (de cualquier tenant) y filtrábamos en JavaScript.
+  // Esto consumía memoria del server proporcional al # de tenants activos.
+  // Con este filtro, solo recibimos los UPDATEs de NUESTRAS appointments.
   useEffect(() => {
     if (!user?.id) return;
     const userId = user.id;
     const channel = supabase.channel('paid-watch-' + userId)
-      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'appointments' }, payload => {
+      .on('postgres_changes', {
+        event: 'UPDATE',
+        schema: 'public',
+        table: 'appointments',
+        filter: `user_id=eq.${userId}`, // ⚡ filtro server-side (WAL parser)
+      }, payload => {
         const updated = payload.new as any;
-        if (updated.user_id !== userId) return;
+        // Ya no necesitamos el check `if (updated.user_id !== userId) return`
+        // porque el filtro server-side garantiza que solo recibimos NUESTROS eventos.
         if (updated.paid === true) setUnpaidAppointments(prev => prev.filter(a => a.id !== updated.id));
       }).subscribe();
     return () => { supabase.removeChannel(channel); };
