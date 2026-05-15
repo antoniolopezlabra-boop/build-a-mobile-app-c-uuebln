@@ -10,7 +10,8 @@ import { apiGet, apiPost } from '@/utils/api';
 import { invalidateCache } from '@/utils/cache';
 import React, { useEffect, useState, useRef, useCallback } from 'react';
 import { IconSymbol } from '@/components/IconSymbol';
-import { useRouter } from 'expo-router';
+import { useRouter, useFocusEffect } from 'expo-router';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { usePlan } from '@/contexts/PlanContext';
 import { useAuth } from '@/contexts/AuthContext';
 import { useGratuitoUsage } from '@/contexts/useGratuitoUsage';
@@ -61,6 +62,23 @@ interface StaffMember {
   color: string;
 }
 
+// ── Claves AsyncStorage para preservar el formulario al ir a crear cliente
+//    y volver con el cliente recién creado auto-seleccionado.
+const DRAFT_KEY = 'vylta_new_appt_draft';
+const NEW_CLIENT_KEY = 'vylta_new_appt_new_client';
+
+interface AppointmentDraft {
+  serviceText: string;
+  selectedCatalogServiceId: string | null;
+  selectedStaffId: string | null;
+  dateIso: string;
+  time: string;
+  selectedBlocks: string[];
+  notes: string;
+  serviceCost: string;
+  sendWhatsApp: boolean;
+}
+
 const durationLabel = (min: number) =>
   min < 60 ? `${min} min` : min === 60 ? '1 hora' : `${Math.floor(min / 60)}h${min % 60 > 0 ? ` ${min % 60}min` : ''}`;
 
@@ -84,12 +102,11 @@ function findBlockForSlot(
   staffId: string | null,
   blocks: TimeBlockData[]
 ): TimeBlockData | null {
-  // Defensa: si no hay bloques, retornar null inmediatamente
   if (!Array.isArray(blocks) || blocks.length === 0) return null;
 
-  const projectDay = jsDay === 0 ? 6 : jsDay - 1; // 0=Lun..6=Dom
+  const projectDay = jsDay === 0 ? 6 : jsDay - 1;
   for (const b of blocks) {
-    if (!b || typeof b !== 'object') continue; // defensa
+    if (!b || typeof b !== 'object') continue;
     if (b.staff_id) {
       if (b.staff_id !== staffId) continue;
     }
@@ -105,12 +122,6 @@ function findBlockForSlot(
   return null;
 }
 
-// ════════════════════════════════════════════════════════════════
-// ErrorBoundary local — captura cualquier error de render y muestra
-// un fallback amigable en lugar de dejar la pantalla en blanco.
-// CRÍTICO: sin este boundary, un error en un hook deja a Android
-// con pantalla totalmente blanca y JS muerto.
-// ════════════════════════════════════════════════════════════════
 class ScreenErrorBoundary extends React.Component<
   { children: React.ReactNode; onBack: () => void },
   { hasError: boolean; errorMsg: string }
@@ -161,8 +172,11 @@ function NewAppointmentInner() {
   const { isGratuito } = usePlan();
   const usage = useGratuitoUsage();
   const [loading, setLoading] = useState(false);
-  const [initialLoading, setInitialLoading] = useState(true); // ← NUEVO: spinner inicial
+  const [initialLoading, setInitialLoading] = useState(true);
   const saveLockRef = useRef(false);
+
+  // ── Ref para evitar restaurar dos veces el draft (en mount y al focus)
+  const draftRestoredRef = useRef(false);
 
   const [clients, setClients] = useState<Client[]>([]);
   const [selectedClient, setSelectedClient] = useState<Client | null>(null);
@@ -239,8 +253,33 @@ function NewAppointmentInner() {
 
   const clearCatalogService = () => { setSelectedCatalogService(null); setService(''); setServiceCost(''); };
 
-  // ── Carga inicial: TODO con Promise.allSettled para que ningún fallo aislado
-  //    deje la pantalla colgada. Cada loader interno también tiene try/catch.
+  // ── Guarda snapshot del formulario y navega a crear cliente.
+  //    Al regresar, useFocusEffect detectará el nuevo cliente y restaurará el form.
+  const goToCreateClient = async () => {
+    dismissKeyboard();
+    setShowClientPicker(false);
+    try {
+      const draft: AppointmentDraft = {
+        serviceText: service,
+        selectedCatalogServiceId: selectedCatalogService?.id ?? null,
+        selectedStaffId: selectedStaff?.id ?? null,
+        dateIso: date.toISOString(),
+        time,
+        selectedBlocks,
+        notes,
+        serviceCost,
+        sendWhatsApp,
+      };
+      await AsyncStorage.setItem(DRAFT_KEY, JSON.stringify(draft));
+      // Permitir que el draft se restaure cuando volvamos
+      draftRestoredRef.current = false;
+    } catch (e) {
+      console.warn('[new-appointment] no se pudo guardar draft:', e);
+    }
+    router.push('/clients/new?returnTo=appointments-new');
+  };
+
+  // ── Carga inicial: TODO con Promise.allSettled
   useEffect(() => {
     let mounted = true;
     const loadAll = async () => {
@@ -262,9 +301,98 @@ function NewAppointmentInner() {
     return () => { mounted = false; };
   }, []);
 
+  // ── Al regresar de crear un cliente, restaurar draft + auto-seleccionar cliente
+  useFocusEffect(
+    useCallback(() => {
+      // Si ya restauramos en este "viaje", no repetir hasta que se inicie otro flujo
+      if (draftRestoredRef.current) return;
+
+      let cancelled = false;
+      const restoreOnFocus = async () => {
+        try {
+          const [draftRaw, newClientRaw] = await Promise.all([
+            AsyncStorage.getItem(DRAFT_KEY),
+            AsyncStorage.getItem(NEW_CLIENT_KEY),
+          ]);
+
+          // Solo restauramos si hay un cliente nuevo creado (es decir, sí venimos de regreso del flujo)
+          if (!newClientRaw) {
+            // Si no venimos de crear cliente, no tocar nada y limpiar draft viejo si quedó.
+            if (draftRaw) await AsyncStorage.removeItem(DRAFT_KEY);
+            return;
+          }
+
+          if (cancelled) return;
+
+          // Parsear cliente recién creado
+          let newClient: Client | null = null;
+          try {
+            const parsed = JSON.parse(newClientRaw);
+            if (parsed?.id) newClient = parsed;
+          } catch {}
+
+          // Restaurar draft del formulario
+          if (draftRaw) {
+            try {
+              const draft: AppointmentDraft = JSON.parse(draftRaw);
+              if (draft) {
+                setService(draft.serviceText || '');
+                setNotes(draft.notes || '');
+                setServiceCost(draft.serviceCost || '');
+                setSendWhatsApp(draft.sendWhatsApp !== false);
+                setTime(draft.time || '09:00');
+                setSelectedBlocks(Array.isArray(draft.selectedBlocks) ? draft.selectedBlocks : []);
+                if (draft.dateIso) {
+                  const d = new Date(draft.dateIso);
+                  if (!isNaN(d.getTime())) setDate(d);
+                }
+                // selectedCatalogService y selectedStaff: los reasignamos cuando las listas estén cargadas
+                if (draft.selectedCatalogServiceId) {
+                  setCatalogServices(prev => {
+                    const found = prev.find(s => s.id === draft.selectedCatalogServiceId);
+                    if (found) setSelectedCatalogService(found);
+                    return prev;
+                  });
+                }
+                if (draft.selectedStaffId) {
+                  setStaffMembers(prev => {
+                    const found = prev.find(s => s.id === draft.selectedStaffId);
+                    if (found) setSelectedStaff(found);
+                    return prev;
+                  });
+                }
+              }
+            } catch (e) {
+              console.warn('[new-appointment] draft inválido:', e);
+            }
+          }
+
+          // Recargar clientes para que el nuevo aparezca en la lista, luego seleccionarlo
+          await loadClients();
+          if (newClient && !cancelled) {
+            setSelectedClient(newClient);
+          }
+
+          // Limpiar señales
+          await Promise.all([
+            AsyncStorage.removeItem(DRAFT_KEY),
+            AsyncStorage.removeItem(NEW_CLIENT_KEY),
+          ]);
+
+          draftRestoredRef.current = true;
+        } catch (e) {
+          console.warn('[new-appointment] restoreOnFocus error:', e);
+        }
+      };
+
+      restoreOnFocus();
+      return () => { cancelled = true; };
+    }, [])
+  );
+
   // Recalcular disponibilidad cuando cambia el servicio, fecha, colaborador o bloqueos
   useEffect(() => {
-    if (initialLoading) return; // no calcular hasta que la carga inicial termine
+    if (initialLoading) return;
     checkAvailability();
   }, [date, selectedStaff, timeBlocks, selectedCatalogService, initialLoading]);
 
@@ -287,7 +415,7 @@ function NewAppointmentInner() {
         .from('business_profiles')
         .select('allow_overlapping')
         .eq('user_id', userId)
-        .maybeSingle(); // ← maybeSingle en vez de single para no tronar si no existe
+        .maybeSingle();
       if (data) setAllowOverlapping(!!data.allow_overlapping);
     } catch (e) {
       console.warn('[new-appointment] loadOverlapConfig error:', e);
@@ -327,9 +455,6 @@ function NewAppointmentInner() {
     } catch (e) {
       console.warn('[new-appointment] loadClients error:', e);
       setClients([]);
-      // No mostramos modal en carga inicial — sólo loggeamos.
-      // Si fallara mostrar modal aquí dejaría la pantalla con un modal arriba
-      // antes de que termine de renderizarse, lo cual es mala UX.
     }
   };
 
@@ -337,7 +462,6 @@ function NewAppointmentInner() {
     try {
       const dateString = `${date.getFullYear()}-${String(date.getMonth()+1).padStart(2,'0')}-${String(date.getDate()).padStart(2,'0')}`;
 
-      // Promise.allSettled para que un fallo en una API no bloquee la otra
       const results = await Promise.allSettled([
         apiGet<any[]>(`/api/appointments/date/${dateString}`),
         apiGet<any[]>('/api/business-hours'),
@@ -348,7 +472,7 @@ function NewAppointmentInner() {
       const businessHours: any[] = results[1].status === 'fulfilled' && Array.isArray(results[1].value)
         ? results[1].value : [];
 
-      const dayOfWeek = date.getDay(); // JS: 0=Dom..6=Sab
+      const dayOfWeek = date.getDay();
 
       let dayConfig: any = null;
       if (selectedStaff?.id) {
@@ -378,7 +502,6 @@ function NewAppointmentInner() {
 
       if (!dayConfig || !dayConfig.isOpen) { setDayIsClosed(true); setTimeSlots([]); return; }
 
-      // Defensa: si startTime/endTime vienen mal, abortar amigablemente
       if (!dayConfig.startTime || !dayConfig.endTime ||
           typeof dayConfig.startTime !== 'string' ||
           typeof dayConfig.endTime !== 'string') {
@@ -387,7 +510,6 @@ function NewAppointmentInner() {
       }
 
       setDayIsClosed(false);
-      setSelectedBlocks([]);
 
       const startParts = dayConfig.startTime.split(':');
       const endParts   = dayConfig.endTime.split(':');
@@ -398,7 +520,6 @@ function NewAppointmentInner() {
       const dayStartMin = (isNaN(startHour) ? 9 : startHour) * 60 + (isNaN(startMin) ? 0 : startMin);
       const dayEndMin   = (isNaN(endHour) ? 18 : endHour) * 60 + (isNaN(endMin) ? 0 : endMin);
 
-      // Defensa: si end <= start, no generar slots
       if (dayEndMin <= dayStartMin) {
         setDayIsClosed(true); setTimeSlots([]); return;
       }
@@ -420,7 +541,6 @@ function NewAppointmentInner() {
       const todayString = `${today.getFullYear()}-${String(today.getMonth()+1).padStart(2,'0')}-${String(today.getDate()).padStart(2,'0')}`;
       const isToday = dateString === todayString;
 
-      // ─── PASADA 1 — Slots base ───
       const slots: TimeSlot[] = [];
 
       for (let totalMin = dayStartMin; totalMin < dayEndMin; totalMin += 30) {
@@ -474,7 +594,6 @@ function NewAppointmentInner() {
         });
       }
 
-      // ─── PASADA 2 — Validación por DURACIÓN ───
       const durationMin = selectedCatalogService?.durationMinutes ?? 30;
       const subBlocksNeeded = Math.ceil(durationMin / 30);
 
@@ -514,7 +633,6 @@ function NewAppointmentInner() {
 
       setTimeSlots(slots);
     } catch (e) {
-      // Defensa final: cualquier excepción no esperada NO debe colgar la pantalla.
       console.warn('[new-appointment] checkAvailability error:', e);
       setTimeSlots([]);
       setDayIsClosed(false);
@@ -575,7 +693,6 @@ function NewAppointmentInner() {
   const hasCatalog = catalogServices.length > 0;
   const hasStaff   = staffMembers.length > 0;
 
-  // ── Banner contador X/10 (solo Gratuito) ──
   const usageColor = usage.isAtLimit ? '#EF4444' : usage.isNearLimit ? '#F59E0B' : '#0EA5E9';
   const usageBgColor = usage.isAtLimit ? '#FEF2F2' : usage.isNearLimit ? '#FFFBEB' : '#E0F2FE';
   const usageBorderColor = usage.isAtLimit ? '#FCA5A5' : usage.isNearLimit ? '#FDE68A' : '#7DD3FC';
@@ -590,7 +707,6 @@ function NewAppointmentInner() {
 
   const hasInvalidByDuration = !!selectedCatalogService && timeSlots.some(s => s.unavailableReason);
 
-  // ── Loading inicial: spinner con header (NO pantalla blanca) ──
   if (initialLoading) {
     return (
       <SafeAreaView style={styles.container} edges={['top']}>
@@ -653,7 +769,14 @@ function NewAppointmentInner() {
 
           {/* Cliente */}
           <View style={styles.section}>
-            <Text style={styles.label}>Cliente *</Text>
+            {/* labelRow con botón "+ Nuevo cliente" estilo "Ver catálogo" */}
+            <View style={styles.labelRow}>
+              <Text style={styles.label}>Cliente *</Text>
+              <TouchableOpacity style={styles.catalogBtn} onPress={goToCreateClient}>
+                <MaterialIcons name="person-add-alt-1" size={14} color="#10B981" />
+                <Text style={styles.catalogBtnText}>Nuevo cliente</Text>
+              </TouchableOpacity>
+            </View>
             <TouchableOpacity style={styles.input} onPress={() => { dismissKeyboard(); setShowClientPicker(true); }}>
               <Text style={selectedClient ? styles.inputText : styles.inputPlaceholder}>
                 {selectedClient ? selectedClient.name : 'Seleccionar cliente'}
@@ -1105,17 +1228,30 @@ function NewAppointmentInner() {
               </TouchableOpacity>
             )}
 
+            {/* Acceso rápido "+ Crear nuevo cliente" siempre visible arriba de la lista */}
+            <TouchableOpacity style={styles.createClientFromModal} onPress={goToCreateClient}>
+              <View style={styles.createClientIcon}>
+                <MaterialIcons name="person-add-alt-1" size={18} color="#10B981" />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.createClientTitle}>Crear nuevo cliente</Text>
+                <Text style={styles.createClientSubtitle}>Regresarás a esta cita con el cliente ya seleccionado</Text>
+              </View>
+              <MaterialIcons name="chevron-right" size={20} color="#10B981" />
+            </TouchableOpacity>
+
             <ScrollView style={styles.clientsList} keyboardShouldPersistTaps="handled">
               {filteredClients.length === 0 ? (
                 <View style={styles.emptyClientState}>
                   <Text style={styles.emptyClientText}>
                     {searchQuery ? 'No se encontraron clientes' : 'No tienes clientes registrados'}
                   </Text>
-                  {!searchQuery && (
-                    <TouchableOpacity style={styles.addClientButton} onPress={() => { setShowClientPicker(false); router.push('/clients/new'); }}>
-                      <Text style={styles.addClientButtonText}>Agregar cliente</Text>
-                    </TouchableOpacity>
-                  )}
+                  {/* Botón en estado vacío también lleva a nuevo cliente preservando estado */}
+                  <TouchableOpacity style={styles.addClientButton} onPress={goToCreateClient}>
+                    <Text style={styles.addClientButtonText}>
+                      {searchQuery ? `Agregar "${searchQuery}" como nuevo cliente` : 'Agregar cliente'}
+                    </Text>
+                  </TouchableOpacity>
                 </View>
               ) : (
                 filteredClients.map((client) => (
@@ -1153,9 +1289,6 @@ function NewAppointmentInner() {
   );
 }
 
-// ── EXPORT con ErrorBoundary envolviendo el componente ──
-// Si algún hook o render falla, en lugar de pantalla blanca el usuario ve
-// un mensaje amigable y un botón para volver.
 export default function NewAppointmentScreen() {
   const router = useRouter();
   return (
@@ -1276,7 +1409,12 @@ const styles = StyleSheet.create({
   searchInput:            { backgroundColor: colors.background, borderRadius: 12, padding: 12, margin: 20, marginBottom: 0, fontSize: 16, color: colors.text },
   searchToggleBtn:        { flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: '#F8FAFC', borderRadius: 12, margin: 20, marginBottom: 0, paddingHorizontal: 16, paddingVertical: 12, borderWidth: 0.5, borderColor: '#E2E8F0' },
   searchToggleBtnText:    { fontSize: 14, color: '#94A3B8' },
-  clientsList:            { padding: 20 },
+  // Botón "+ Crear nuevo cliente" dentro del modal de selección
+  createClientFromModal:  { flexDirection: 'row', alignItems: 'center', gap: 12, backgroundColor: '#F0FDF4', borderRadius: 12, marginHorizontal: 20, marginTop: 12, paddingHorizontal: 14, paddingVertical: 12, borderWidth: 1, borderColor: '#BBF7D0' },
+  createClientIcon:       { width: 36, height: 36, borderRadius: 10, backgroundColor: '#DCFCE7', justifyContent: 'center', alignItems: 'center' },
+  createClientTitle:      { fontSize: 14, fontWeight: '700', color: '#065F46' },
+  createClientSubtitle:   { fontSize: 11, color: '#10B981', marginTop: 1, fontWeight: '500' },
+  clientsList:            { paddingHorizontal: 20, paddingTop: 12 },
   emptyClientState:       { alignItems: 'center', paddingVertical: 40 },
   emptyClientText:        { fontSize: 16, color: colors.textSecondary, marginBottom: 16 },
   addClientButton:        { backgroundColor: colors.primary, borderRadius: 12, paddingVertical: 12, paddingHorizontal: 24 },

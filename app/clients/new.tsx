@@ -14,7 +14,8 @@ import {
   Keyboard,
 } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
-import { useRouter } from 'expo-router';
+import { useRouter, useLocalSearchParams } from 'expo-router';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { colors } from '@/styles/commonStyles';
 import { IconSymbol } from '@/components/IconSymbol';
 import { ConfirmModal } from '@/components/button';
@@ -22,10 +23,20 @@ import { invalidateCache } from '@/utils/cache';
 import { apiPost } from '@/utils/api';
 import DateTimePicker from '@react-native-community/datetimepicker';
 
+// ── Clave AsyncStorage para señalizar al formulario de Nueva Cita
+//    cuál cliente acabamos de crear (auto-selección al regresar).
+const NEW_APPT_NEW_CLIENT_KEY = 'vylta_new_appt_new_client';
+
 export default function NewClientScreen() {
   const router = useRouter();
-  const insets = useSafeAreaInsets(); // FIX #1 y #7: safe area para header y date picker
-  const saveLockRef = useRef(false);  // FIX #9: guard doble-submit
+  const insets = useSafeAreaInsets();
+  const saveLockRef = useRef(false);
+
+  // ── returnTo: si viene 'appointments-new', al guardar exitoso
+  //    guardamos el ID del nuevo cliente en AsyncStorage y router.back()
+  //    para que la pantalla anterior (Nueva Cita) lo auto-seleccione.
+  const params = useLocalSearchParams<{ returnTo?: string }>();
+  const returnTo = params.returnTo || '';
 
   const [saving, setSaving] = useState(false);
   const [showDatePicker, setShowDatePicker] = useState(false);
@@ -39,7 +50,6 @@ export default function NewClientScreen() {
   const [notes, setNotes] = useState('');
 
   const handleSave = async () => {
-    // FIX #9: guard doble-submit con ref
     if (saveLockRef.current) return;
 
     Keyboard.dismiss();
@@ -64,16 +74,29 @@ export default function NewClientScreen() {
         name:     fullName.trim(),
         phone:    phone.trim(),
         email:    email.trim() || undefined,
-        // FIX timezone: el DatePicker devuelve Date local. toISOString() convertía a UTC
-        // y en UTC-6 (México) quedaba 1 día antes. Usar toLocalDateString preserva la fecha local.
         birthday: birthday ? toLocalDateString(birthday) : undefined,
         notes:    notes.trim() || undefined,
       };
-      await apiPost('/api/clients', body);
+      const created = await apiPost<{ id: string; name: string; phone: string }>('/api/clients', body);
       invalidateCache('clients_list');
+
+      // ── Si venimos de Nueva Cita, guardar el ID del cliente recién creado
+      //    para que la pantalla anterior lo auto-seleccione al regresar.
+      if (returnTo === 'appointments-new' && created?.id) {
+        try {
+          await AsyncStorage.setItem(NEW_APPT_NEW_CLIENT_KEY, JSON.stringify({
+            id: created.id,
+            name: created.name || fullName.trim(),
+            phone: created.phone || phone.trim(),
+          }));
+        } catch (e) {
+          console.warn('[clients/new] no se pudo guardar señal de regreso:', e);
+        }
+      }
+
       router.back();
     } catch (error: any) {
-      saveLockRef.current = false; // desbloquear solo en error
+      saveLockRef.current = false;
       setErrorModal({ visible: true, message: error?.message || 'Error al crear el cliente' });
     } finally {
       setSaving(false);
@@ -95,7 +118,6 @@ export default function NewClientScreen() {
         onDismiss={() => setErrorModal({ visible: false, message: '' })}
       />
 
-      {/* FIX #1: header sin paddingTop hardcodeado — SafeAreaView edges={['top']} ya lo maneja */}
       <View style={styles.header}>
         <TouchableOpacity onPress={() => router.back()} style={styles.backButton}>
           <IconSymbol android_material_icon_name="arrow-back" size={24} color={colors.text} />
@@ -106,6 +128,16 @@ export default function NewClientScreen() {
 
       <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={{ flex: 1 }}>
         <ScrollView contentContainerStyle={styles.scrollContent} keyboardShouldPersistTaps="handled">
+          {/* Hint contextual: si vienen desde Nueva Cita, indicar que regresará automáticamente */}
+          {returnTo === 'appointments-new' && (
+            <View style={styles.contextHint}>
+              <IconSymbol android_material_icon_name="info-outline" size={16} color="#0EA5E9" />
+              <Text style={styles.contextHintText}>
+                Al guardar, regresarás a la cita con este cliente ya seleccionado.
+              </Text>
+            </View>
+          )}
+
           <Text style={styles.fieldLabel}>Nombre completo *</Text>
           <TextInput
             style={styles.input}
@@ -169,13 +201,14 @@ export default function NewClientScreen() {
           >
             {saving
               ? <ActivityIndicator color="#FFFFFF" />
-              : <Text style={styles.saveButtonText}>Guardar Cliente</Text>
+              : <Text style={styles.saveButtonText}>
+                  {returnTo === 'appointments-new' ? 'Guardar y volver a la cita' : 'Guardar Cliente'}
+                </Text>
             }
           </TouchableOpacity>
         </ScrollView>
       </KeyboardAvoidingView>
 
-      {/* FIX #7: date picker con paddingBottom del safe area para home indicator */}
       {showDatePicker && (
         <View style={styles.datePickerModal}>
           <View style={[styles.datePickerContainer, { paddingBottom: insets.bottom + 12 }]}>
@@ -202,12 +235,14 @@ export default function NewClientScreen() {
 
 const styles = StyleSheet.create({
   container:              { flex: 1, backgroundColor: colors.background },
-  // FIX #1: header sin paddingTop hardcodeado
   header:                 { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 20, paddingVertical: 16, backgroundColor: colors.card, borderBottomWidth: 1, borderBottomColor: colors.border },
   backButton:             { padding: 4 },
   title:                  { fontSize: 20, fontWeight: 'bold', color: colors.text },
   placeholder:            { width: 32 },
   scrollContent:          { padding: 20, paddingBottom: 40 },
+  // Hint cuando vienen desde Nueva Cita
+  contextHint:            { flexDirection: 'row', alignItems: 'flex-start', gap: 8, backgroundColor: '#E0F2FE', borderRadius: 10, padding: 12, borderWidth: 1, borderColor: '#7DD3FC' },
+  contextHintText:        { flex: 1, fontSize: 13, color: '#0369A1', lineHeight: 18, fontWeight: '500' },
   fieldLabel:             { fontSize: 14, fontWeight: '600', color: colors.text, marginBottom: 8, marginTop: 16 },
   input:                  { backgroundColor: colors.card, borderRadius: 12, padding: 14, fontSize: 16, color: colors.text, borderWidth: 1, borderColor: colors.border },
   textArea:               { height: 100, textAlignVertical: 'top' },
@@ -217,7 +252,6 @@ const styles = StyleSheet.create({
   saveButton:             { backgroundColor: colors.primary, borderRadius: 12, padding: 16, alignItems: 'center', marginTop: 32 },
   saveButtonDisabled:     { opacity: 0.6 },
   saveButtonText:         { color: '#FFFFFF', fontSize: 18, fontWeight: '600' },
-  // FIX #7: date picker con overlay
   datePickerModal:        { position: 'absolute', inset: 0, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-end' },
   datePickerContainer:    { backgroundColor: '#fff', borderTopLeftRadius: 20, borderTopRightRadius: 20, padding: 20 },
   datePickerTitle:        { fontSize: 17, fontWeight: '600', color: '#0F172A', textAlign: 'center', marginBottom: 8 },
