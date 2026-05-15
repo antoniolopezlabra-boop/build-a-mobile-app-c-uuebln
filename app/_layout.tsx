@@ -1,7 +1,7 @@
 import { Stack, useRouter, useSegments } from 'expo-router';
 import { StripeProvider } from '@stripe/stripe-react-native';
 import { STRIPE_PUBLISHABLE_KEY } from '@/services/stripe';
-import { LogBox, View, ActivityIndicator } from 'react-native';
+import { LogBox, View, ActivityIndicator, Image, StyleSheet, Text } from 'react-native';
 import { useEffect, useState, useRef } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
@@ -28,7 +28,35 @@ function ThemeUserSync() {
   return null;
 }
 
-function NavigationGuard() {
+// ─────────────────────────────────────────────────────────────────────────────
+// AppSplash — Pantalla que se muestra ENCIMA de todo mientras los guards
+// terminan de decidir a dónde mandar al usuario. Soluciona el "flash" de
+// onboarding/login que se veía por ~500ms al reabrir la app con sesión activa.
+// Se ocultaba al render normal de expo-router antes de que NavigationGuard
+// pudiera redirigir; ahora el splash bloquea visualmente hasta que el guard
+// emite su "ready".
+// ─────────────────────────────────────────────────────────────────────────────
+function AppSplash() {
+  return (
+    <View style={splashStyles.container} pointerEvents="auto">
+      <View style={splashStyles.logoWrap}>
+        <Image
+          source={require('@/assets/images/app-icon-hkt.png')}
+          style={splashStyles.logo}
+          resizeMode="contain"
+        />
+      </View>
+      <Text style={splashStyles.brand}>VYLTA</Text>
+      <ActivityIndicator
+        size="small"
+        color="#10B981"
+        style={{ marginTop: 24 }}
+      />
+    </View>
+  );
+}
+
+function NavigationGuard({ onReady }: { onReady: () => void }) {
   const { user, loading: authLoading, isStaffAccount } = useAuth();
   const { isAdmin, loading: adminLoading } = useAdmin();
   const router = useRouter();
@@ -41,6 +69,7 @@ function NavigationGuard() {
 
   const hasRedirectedToSetup = useRef(false);
   const isNavigating = useRef(false);
+  const readyEmittedRef = useRef(false);
 
   // Carga del flag global de "ya vio onboarding marketing"
   useEffect(() => {
@@ -82,12 +111,33 @@ function NavigationGuard() {
     // No autenticado → onboarding marketing o login
     if (!user && !inAuthScreen) {
       navigate(hasSeenOnboarding ? '/auth/login' : '/auth/onboarding');
+      // Emitimos ready en el siguiente tick para dar tiempo al replace.
+      // Esto evita ver el destino antes de que la navegación se complete.
+      setTimeout(() => {
+        if (!readyEmittedRef.current) {
+          readyEmittedRef.current = true;
+          onReady();
+        }
+      }, 50);
       return;
     }
 
     // Colaboradores: redirigir a su app, nunca a setup ni admin
     if (user && isStaffAccount) {
-      if (!inStaffApp) navigate('/staff-app');
+      if (!inStaffApp) {
+        navigate('/staff-app');
+        setTimeout(() => {
+          if (!readyEmittedRef.current) {
+            readyEmittedRef.current = true;
+            onReady();
+          }
+        }, 50);
+      } else {
+        if (!readyEmittedRef.current) {
+          readyEmittedRef.current = true;
+          onReady();
+        }
+      }
       return;
     }
 
@@ -97,13 +147,32 @@ function NavigationGuard() {
     if (user && setupCompleted === false && !inSetupWizard && !hasRedirectedToSetup.current) {
       hasRedirectedToSetup.current = true;
       navigate('/setup');
+      setTimeout(() => {
+        if (!readyEmittedRef.current) {
+          readyEmittedRef.current = true;
+          onReady();
+        }
+      }, 50);
       return;
     }
 
     // Admin: solo redirigir si ya completó (o saltó) el setup
     if (user && isAdmin && setupCompleted === true && !inAdminScreen) {
       navigate('/admin');
+      setTimeout(() => {
+        if (!readyEmittedRef.current) {
+          readyEmittedRef.current = true;
+          onReady();
+        }
+      }, 50);
       return;
+    }
+
+    // ── Llegamos aquí: usuario autenticado, no necesita ninguna redirección.
+    //    Ya está en la pantalla correcta (ej. tabs/home). Listo para mostrar.
+    if (!readyEmittedRef.current) {
+      readyEmittedRef.current = true;
+      onReady();
     }
   }, [user, isAdmin, authLoading, adminLoading, hasSeenOnboarding, setupCompleted, segments]);
 
@@ -115,6 +184,28 @@ function AppStatusBar() {
   return <StatusBar style={isDark ? 'light' : 'dark'} />;
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// AppShell: envuelve el Stack y maneja el splash inicial.
+// El splash se monta SIEMPRE al arrancar y solo desaparece cuando
+// NavigationGuard emite onReady (es decir, ya decidió a dónde mandar al user).
+// ─────────────────────────────────────────────────────────────────────────────
+function AppShell() {
+  const [appReady, setAppReady] = useState(false);
+
+  return (
+    <>
+      <ThemeUserSync />
+      <NavigationGuard onReady={() => setAppReady(true)} />
+      <Stack screenOptions={{ headerShown: false }} />
+      <OfflineBanner />
+      <AppStatusBar />
+      {/* Splash overlay: bloquea cualquier pantalla intermedia hasta que el
+          NavigationGuard haya decidido a dónde ir. Se desmonta una vez listo. */}
+      {!appReady && <AppSplash />}
+    </>
+  );
+}
+
 export default function RootLayout() {
   return (
     <ThemeProvider>
@@ -124,11 +215,7 @@ export default function RootLayout() {
             <AppStateProvider>
               <PlanProvider>
                 <AdminProvider>
-                  <ThemeUserSync />
-                  <NavigationGuard />
-                  <Stack screenOptions={{ headerShown: false }} />
-                  <OfflineBanner />
-                  <AppStatusBar />
+                  <AppShell />
                 </AdminProvider>
               </PlanProvider>
             </AppStateProvider>
@@ -138,3 +225,42 @@ export default function RootLayout() {
     </ThemeProvider>
   );
 }
+
+const splashStyles = StyleSheet.create({
+  container: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: '#FFFFFF',
+    justifyContent: 'center',
+    alignItems: 'center',
+    zIndex: 9999,
+    elevation: 9999, // Android elevation para asegurar que quede arriba
+  },
+  logoWrap: {
+    width: 120,
+    height: 120,
+    borderRadius: 28,
+    backgroundColor: '#0F172A',
+    justifyContent: 'center',
+    alignItems: 'center',
+    shadowColor: '#0F172A',
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.15,
+    shadowRadius: 16,
+    elevation: 8,
+  },
+  logo: {
+    width: 96,
+    height: 96,
+  },
+  brand: {
+    marginTop: 20,
+    fontSize: 28,
+    fontWeight: '900',
+    color: '#0F172A',
+    letterSpacing: 2,
+  },
+});
