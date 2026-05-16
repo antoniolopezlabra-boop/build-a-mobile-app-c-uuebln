@@ -36,18 +36,18 @@ export const PLAN_PRICES = {
         isVip: false,
     },
 
-    // ─── PLANES VIP ANUALES (May 2026) ──────────────────────────
+    // ─── PLANES VIP ANUALES (May 15 2026) ───────────────────────
     // VIP Premium Anual ($4,390 MXN/año) — recurring yearly, ahorra 1 mes
     vip_basico: {
         priceId: 'price_vip_basico_4390',
-        link: 'PENDIENTE_CREAR_EN_STRIPE_DASHBOARD', // TODO: reemplazar tras crear Payment Link
+        link: 'https://buy.stripe.com/8x2fZjaeCeBGayI7oh38403',
         billingCycle: 'annual' as const,
         isVip: true,
     },
     // VIP Luxury Anual ($8,790 MXN/año) — recurring yearly, ahorra 1 mes
     vip_premium: {
         priceId: 'price_vip_premium_8790',
-        link: 'PENDIENTE_CREAR_EN_STRIPE_DASHBOARD', // TODO: reemplazar tras crear Payment Link
+        link: 'https://buy.stripe.com/14A7sN5YmgJOdKU23X38404',
         billingCycle: 'annual' as const,
         isVip: true,
     },
@@ -80,12 +80,6 @@ export const openStripePaymentLink = (planType: PurchasablePlan, userId: string)
   }
 
   const baseUrl = planConfig.link;
-
-  // Guard: detectar Payment Links no configurados (planes VIP recién agregados)
-  if (baseUrl === 'PENDIENTE_CREAR_EN_STRIPE_DASHBOARD') {
-    console.error(`[Stripe] Payment Link pendiente para ${planType}. Crear en Stripe Dashboard primero.`);
-    return;
-  }
 
   // CRÍTICO: Pasar client_reference_id como parámetro en la URL
   const url = `${baseUrl}?client_reference_id=${encodeURIComponent(userId)}`;
