@@ -21,7 +21,19 @@ export default function Index() {
       if (user) {
         const { data: { session } } = await supabase.auth.getSession();
         const authUser = session?.user;
-        if (!authUser) { router.replace('/auth/onboarding'); return; }
+        // ⚡ FIX (May 17 2026): si no hay sesión válida, ir a LOGIN (no onboarding).
+        //
+        // BUG ORIGINAL: aquí se hacía router.replace('/auth/onboarding').
+        // Esto causaba que después de hacer logout (especialmente desde el
+        // panel admin), el Index se re-montaba con `user` aún truthy en el
+        // state de React pero la sesión de Supabase ya invalidada. La línea
+        // forzaba ir al onboarding marketing aunque el usuario ya conociera
+        // la app y solo quisiera volver a iniciar sesión.
+        //
+        // La decisión entre /auth/login y /auth/onboarding la toma el
+        // NavigationGuard de _layout.tsx basándose en has_seen_onboarding.
+        // Index NO debería forzar onboarding por su cuenta.
+        if (!authUser) { router.replace('/auth/login'); return; }
 
         // Colaborador → su propia app
         if (isStaffAccount) {
