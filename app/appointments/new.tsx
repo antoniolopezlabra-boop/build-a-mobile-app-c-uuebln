@@ -1,5 +1,5 @@
 
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import {
   View, Text, StyleSheet, ScrollView, KeyboardAvoidingView,
   Platform, TouchableOpacity, TextInput, ActivityIndicator,
@@ -171,6 +171,7 @@ function NewAppointmentInner() {
   const { user } = useAuth();
   const { isGratuito } = usePlan();
   const usage = useGratuitoUsage();
+  const insets = useSafeAreaInsets(); // ⚡ Safe-area inferior (botones Android, home indicator iOS)
   const [loading, setLoading] = useState(false);
   const [initialLoading, setInitialLoading] = useState(true);
   const saveLockRef = useRef(false);
@@ -707,6 +708,13 @@ function NewAppointmentInner() {
 
   const hasInvalidByDuration = !!selectedCatalogService && timeSlots.some(s => s.unavailableReason);
 
+  // ⚡ Padding inferior dinámico para respetar zona de tolerancia.
+  // - Android con botones clásicos de navegación: insets.bottom = 0 → mínimo 16px
+  // - Android con barra gestual:                   insets.bottom = ~16-24px → respeta el inset real
+  // - iPhone X+:                                   insets.bottom = ~34px (home indicator)
+  // Math.max garantiza un mínimo decente sin importar el caso.
+  const safeBottom = Math.max(insets.bottom, 16);
+
   if (initialLoading) {
     return (
       <SafeAreaView style={styles.container} edges={['top']}>
@@ -738,6 +746,11 @@ function NewAppointmentInner() {
       <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={{ flex: 1 }}>
         <ScrollView
           style={styles.content}
+          /* ⚡ contentContainerStyle con paddingBottom dinámico:
+             garantiza que el último elemento (botón Guardar Cita) NUNCA
+             quede pegado al borde inferior, respetando la zona de tolerancia
+             de cada dispositivo. */
+          contentContainerStyle={{ paddingBottom: safeBottom }}
           showsVerticalScrollIndicator={false}
           keyboardShouldPersistTaps="handled"
           keyboardDismissMode="on-drag"
@@ -1362,7 +1375,10 @@ const styles = StyleSheet.create({
   switchRow:              { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', backgroundColor: '#ffffff', borderRadius: 12, padding: 16 },
   switchLabel:            { flexDirection: 'row', alignItems: 'center', gap: 8, flex: 1 },
   switchText:             { fontSize: 16, fontWeight: '600', color: colors.text },
-  saveButton:             { backgroundColor: colors.primary, borderRadius: 12, padding: 16, alignItems: 'center', marginTop: 8, marginBottom: 32 },
+  // ⚡ saveButton: marginBottom eliminado para que el botón quede pegado al final
+  // del ScrollView; el paddingBottom dinámico del contentContainerStyle se encarga
+  // de respetar la zona de tolerancia (insets.bottom de la safe-area).
+  saveButton:             { backgroundColor: colors.primary, borderRadius: 12, padding: 16, alignItems: 'center', marginTop: 8 },
   saveButtonDisabled:     { opacity: 0.6 },
   saveButtonContent:      { flexDirection: 'row', alignItems: 'center', gap: 10 },
   saveButtonText:         { fontSize: 16, fontWeight: '600', color: '#ffffff' },
