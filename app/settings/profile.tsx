@@ -3,7 +3,7 @@ import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity,
   TextInput, ActivityIndicator,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { colors } from '@/styles/commonStyles';
 import { IconSymbol } from '@/components/IconSymbol';
@@ -13,20 +13,23 @@ import { BACKEND_URL, getBearerToken } from '@/utils/api';
 
 export default function ProfileSettingsScreen() {
   const router = useRouter();
+  const insets = useSafeAreaInsets();
   const { user, fetchUser } = useAuth();
-  const saveLockRef = useRef(false); // FIX #11: guard doble-submit
+  const saveLockRef = useRef(false);
   const [saving, setSaving] = useState(false);
   const [name, setName]     = useState('');
   const [email, setEmail]   = useState('');
   const [errorModal,   setErrorModal]   = useState({ visible: false, message: '' });
   const [successModal, setSuccessModal] = useState(false);
 
+  // ⚡ Padding inferior dinámico para respetar zona de tolerancia (May 17 2026)
+  const safeBottom = Math.max(insets.bottom, 16);
+
   useEffect(() => {
     if (user) { setName(user.name || ''); setEmail(user.email || ''); }
   }, [user]);
 
   const handleSave = async () => {
-    // FIX #11: guard doble-submit
     if (saveLockRef.current) return;
     if (!name.trim()) { setErrorModal({ visible: true, message: 'El nombre es requerido' }); return; }
 
@@ -54,7 +57,6 @@ export default function ProfileSettingsScreen() {
   };
 
   return (
-    // FIX #3: SafeAreaView edges={['top']} — sin paddingTop hardcodeado
     <SafeAreaView style={styles.container} edges={['top']}>
       <ConfirmModal
         visible={errorModal.visible} title="Error" message={errorModal.message}
@@ -67,7 +69,6 @@ export default function ProfileSettingsScreen() {
         onDismiss={() => { setSuccessModal(false); router.back(); }}
       />
 
-      {/* FIX #3: header sin paddingTop:48 */}
       <View style={styles.header}>
         <TouchableOpacity onPress={() => router.back()} style={styles.backButton}>
           <IconSymbol android_material_icon_name="arrow-back" size={24} color={colors.text} />
@@ -76,7 +77,7 @@ export default function ProfileSettingsScreen() {
         <View style={styles.placeholder} />
       </View>
 
-      <ScrollView contentContainerStyle={styles.scrollContent}>
+      <ScrollView contentContainerStyle={[styles.scrollContent, { paddingBottom: safeBottom }]}>
         <Text style={styles.fieldLabel}>Nombre completo</Text>
         <TextInput
           style={styles.input} value={name} onChangeText={setName}
@@ -102,12 +103,12 @@ export default function ProfileSettingsScreen() {
 
 const styles = StyleSheet.create({
   container:          { flex: 1, backgroundColor: colors.background },
-  // FIX #3: paddingTop quitado — SafeAreaView lo maneja
   header:             { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', padding: 20, paddingVertical: 16, backgroundColor: colors.card, borderBottomWidth: 1, borderBottomColor: colors.border },
   backButton:         { padding: 4 },
   title:              { fontSize: 20, fontWeight: 'bold', color: colors.text },
   placeholder:        { width: 32 },
-  scrollContent:      { padding: 20, paddingBottom: 40 },
+  // ⚡ paddingBottom removido: se aplica dinámico desde contentContainerStyle
+  scrollContent:      { padding: 20 },
   fieldLabel:         { fontSize: 14, fontWeight: '600', color: colors.text, marginBottom: 8, marginTop: 16 },
   input:              { backgroundColor: colors.card, borderRadius: 12, padding: 14, fontSize: 16, color: colors.text, borderWidth: 1, borderColor: colors.border },
   inputDisabled:      { backgroundColor: colors.background, color: colors.textSecondary },

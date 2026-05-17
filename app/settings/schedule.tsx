@@ -3,7 +3,7 @@ import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity,
   ActivityIndicator, Switch,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { colors } from '@/styles/commonStyles';
 import { IconSymbol } from '@/components/IconSymbol';
@@ -22,12 +22,16 @@ const DAYS = [
 
 export default function ScheduleSettingsScreen() {
   const router = useRouter();
+  const insets = useSafeAreaInsets();
   const [loading, setLoading]   = useState(true);
   const [saving, setSaving]     = useState(false);
   const [schedule, setSchedule] = useState<DaySchedule[]>([]);
   const [showTimePicker, setShowTimePicker] = useState<{ visible: boolean; dayOfWeek: number; field: 'startTime' | 'endTime' } | null>(null);
   const [errorModal,   setErrorModal]   = useState({ visible: false, message: '' });
   const [successModal, setSuccessModal] = useState(false);
+
+  // ⚡ Padding inferior dinámico para respetar zona de tolerancia (May 17 2026)
+  const safeBottom = Math.max(insets.bottom, 16);
 
   useEffect(() => { loadSchedule(); }, []);
 
@@ -91,7 +95,6 @@ export default function ScheduleSettingsScreen() {
   }
 
   return (
-    // FIX #5: SafeAreaView edges={['top']} — sin paddingTop:48
     <SafeAreaView style={styles.container} edges={['top']}>
       <ConfirmModal visible={errorModal.visible} title="Error" message={errorModal.message}
         buttons={[{ text: 'Aceptar', onPress: () => setErrorModal({ visible: false, message: '' }), style: 'cancel' }]}
@@ -100,7 +103,6 @@ export default function ScheduleSettingsScreen() {
         buttons={[{ text: 'Aceptar', onPress: () => { setSuccessModal(false); router.back(); }, style: 'default' }]}
         onDismiss={() => { setSuccessModal(false); router.back(); }} />
 
-      {/* FIX #5: sin paddingTop:48 */}
       <View style={styles.header}>
         <TouchableOpacity onPress={() => router.back()} style={styles.backButton}>
           <IconSymbol android_material_icon_name="arrow-back" size={24} color={colors.text} />
@@ -109,7 +111,7 @@ export default function ScheduleSettingsScreen() {
         <View style={styles.placeholder} />
       </View>
 
-      <ScrollView contentContainerStyle={styles.scrollContent}>
+      <ScrollView contentContainerStyle={[styles.scrollContent, { paddingBottom: safeBottom }]}>
         <Text style={styles.description}>
           Configura los días y horarios en los que tu negocio está abierto. Esto se usará para validar las citas.
         </Text>
@@ -159,12 +161,12 @@ export default function ScheduleSettingsScreen() {
 const styles = StyleSheet.create({
   container:          { flex: 1, backgroundColor: colors.background },
   loadingContainer:   { flex: 1, justifyContent: 'center', alignItems: 'center' },
-  // FIX #5: paddingTop removido
   header:             { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', padding: 20, paddingVertical: 16, backgroundColor: colors.card, borderBottomWidth: 1, borderBottomColor: colors.border },
   backButton:         { padding: 4 },
   title:              { fontSize: 20, fontWeight: 'bold', color: colors.text },
   placeholder:        { width: 32 },
-  scrollContent:      { padding: 20, paddingBottom: 40 },
+  // ⚡ paddingBottom removido: se aplica dinámico desde contentContainerStyle
+  scrollContent:      { padding: 20 },
   description:        { fontSize: 14, color: colors.textSecondary, lineHeight: 20, marginBottom: 24 },
   dayCard:            { backgroundColor: colors.card, borderRadius: 12, padding: 16, marginBottom: 12, shadowColor: '#000', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.05, shadowRadius: 4, elevation: 1 },
   dayHeader:          { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },

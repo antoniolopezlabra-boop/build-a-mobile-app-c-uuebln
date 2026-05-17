@@ -49,6 +49,12 @@ export default function NewClientScreen() {
   const [birthday, setBirthday] = useState<Date | null>(null);
   const [notes, setNotes] = useState('');
 
+  // ⚡ Padding inferior dinámico para respetar zona de tolerancia (May 17 2026)
+  // - Android botones clásicos: insets.bottom = 0 → mínimo 16px
+  // - Android barra gestual:    respeta el inset real
+  // - iPhone X+:                respeta el home indicator
+  const safeBottom = Math.max(insets.bottom, 16);
+
   const handleSave = async () => {
     if (saveLockRef.current) return;
 
@@ -127,7 +133,10 @@ export default function NewClientScreen() {
       </View>
 
       <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={{ flex: 1 }}>
-        <ScrollView contentContainerStyle={styles.scrollContent} keyboardShouldPersistTaps="handled">
+        <ScrollView
+          contentContainerStyle={[styles.scrollContent, { paddingBottom: safeBottom }]}
+          keyboardShouldPersistTaps="handled"
+        >
           {/* Hint contextual: si vienen desde Nueva Cita, indicar que regresará automáticamente */}
           {returnTo === 'appointments-new' && (
             <View style={styles.contextHint}>
@@ -239,7 +248,8 @@ const styles = StyleSheet.create({
   backButton:             { padding: 4 },
   title:                  { fontSize: 20, fontWeight: 'bold', color: colors.text },
   placeholder:            { width: 32 },
-  scrollContent:          { padding: 20, paddingBottom: 40 },
+  // ⚡ paddingBottom removido del estilo: se aplica dinámico desde contentContainerStyle
+  scrollContent:          { padding: 20 },
   // Hint cuando vienen desde Nueva Cita
   contextHint:            { flexDirection: 'row', alignItems: 'flex-start', gap: 8, backgroundColor: '#E0F2FE', borderRadius: 10, padding: 12, borderWidth: 1, borderColor: '#7DD3FC' },
   contextHintText:        { flex: 1, fontSize: 13, color: '#0369A1', lineHeight: 18, fontWeight: '500' },
