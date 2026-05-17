@@ -1,4 +1,4 @@
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import {
   View, Text, StyleSheet, ScrollView,
   TouchableOpacity, ActivityIndicator, Platform,
@@ -57,7 +57,6 @@ const timeToMin = (t: string): number => {
   return h * 60 + m;
 };
 
-// Mismo helper que new.tsx — bloqueo aplicable al slot.
 function findBlockForSlot(
   slotStartMin: number,
   slotEndMin: number,
@@ -83,8 +82,6 @@ function findBlockForSlot(
   return null;
 }
 
-// Calcula duración (minutos) de una cita a partir de start_time y end_time.
-// Si no hay end_time, asume 30 min.
 function calcAppointmentDuration(appt: Appointment): number {
   const start = appt.time;
   const end = appt.end_time || appt.endTime;
@@ -100,6 +97,10 @@ export default function RescheduleAppointmentScreen() {
   const { id } = useLocalSearchParams();
   const { colors: tc, isDark } = useTheme();
   const { user } = useAuth();
+  const insets = useSafeAreaInsets();
+
+  // ⚡ Padding inferior dinámico para respetar zona de tolerancia (May 17 2026)
+  const safeBottom = Math.max(insets.bottom, 16);
 
   const saveLockRef = useRef(false);
   const [loading, setLoading]   = useState(true);
@@ -117,7 +118,6 @@ export default function RescheduleAppointmentScreen() {
 
   useEffect(() => { loadAppointment(); loadTimeBlocks(); }, [id]);
 
-  // Recalcular slots cuando cambia fecha, cita o bloqueos.
   useEffect(() => {
     if (appointment) checkAvailability();
   }, [date, appointment, timeBlocks]);
@@ -150,10 +150,6 @@ export default function RescheduleAppointmentScreen() {
     }
   };
 
-  // Construye slots con la misma lógica de 2 pasadas que new.tsx:
-  //   PASADA 1: estado atómico de cada slot de 30 min (booked / past / blocked).
-  //   PASADA 2: validación por DURACIÓN del servicio que se está reagendando.
-  //             Excluye la propia cita del cálculo de bookeado.
   const checkAvailability = async () => {
     if (!appointment) return;
     setLoadingSlots(true);
@@ -164,7 +160,6 @@ export default function RescheduleAppointmentScreen() {
       const duration   = calcAppointmentDuration(appointment);
       const subBlocksNeeded = Math.ceil(duration / 30);
 
-      // Citas del día excluyendo la actual y canceladas
       const { data: appts } = await supabase
         .from('appointments')
         .select('start_time, end_time, status, staff_id')
@@ -173,13 +168,10 @@ export default function RescheduleAppointmentScreen() {
         .neq('id', appointment.id)
         .not('status', 'in', '("Cancelada","No asistió","Rechazada")');
 
-      // Si la cita tiene staff asignado, solo nos importan citas de ese mismo staff.
-      // Si no tiene staff, todas las citas del día cuentan como conflicto.
       const relevantAppts = staffId
         ? (appts ?? []).filter((a: any) => a.staff_id === staffId)
         : (appts ?? []);
 
-      // Horario laboral del día
       let startH = 9, startM = 0, endH = 19, endM = 0;
       const { data: bh } = await supabase
         .from('business_hours')
@@ -199,7 +191,6 @@ export default function RescheduleAppointmentScreen() {
       const dayStartMin = startH * 60 + startM;
       const dayEndMin   = endH * 60 + endM;
 
-      // ── PASADA 1: estado atómico de cada slot de 30 min ──
       const slots: TimeSlot[] = [];
       for (let total = dayStartMin; total < dayEndMin; total += 30) {
         const h = Math.floor(total/60);
@@ -232,9 +223,6 @@ export default function RescheduleAppointmentScreen() {
         });
       }
 
-      // ── PASADA 2: validar rango completo según duración de la cita ──
-      // Si la cita dura 90 min (3 sub-bloques), un slot inicial libre no es válido
-      // si el rango [t, t+90] invade un bloqueo, una cita o el cierre del día.
       if (subBlocksNeeded > 1) {
         for (let i = 0; i < slots.length; i++) {
           const startSlot = slots[i];
@@ -355,8 +343,11 @@ export default function RescheduleAppointmentScreen() {
         <View style={s.placeholder} />
       </View>
 
-      <ScrollView style={s.content} showsVerticalScrollIndicator={false}>
-        {/* Cita actual */}
+      <ScrollView
+        style={s.content}
+        contentContainerStyle={{ paddingBottom: safeBottom }}
+        showsVerticalScrollIndicator={false}
+      >
         <View style={[s.infoCard, { backgroundColor: tc.surface, borderColor: tc.border }]}>
           <Text style={[s.infoTitle, { color: tc.textMuted }]}>Cita actual</Text>
           <Text style={[s.infoClient, { color: tc.text }]}>{clientName}</Text>
@@ -366,7 +357,6 @@ export default function RescheduleAppointmentScreen() {
           </Text>
         </View>
 
-        {/* Nueva Fecha */}
         <View style={s.section}>
           <Text style={[s.label, { color: tc.text }]}>Nueva Fecha</Text>
           <TouchableOpacity style={[s.input, { backgroundColor: tc.surface, borderColor: tc.border }]} onPress={openDatePicker}>
@@ -382,7 +372,6 @@ export default function RescheduleAppointmentScreen() {
           />
         )}
 
-        {/* Nueva Hora */}
         <View style={s.section}>
           <Text style={[s.label, { color: tc.text }]}>Nueva Hora ({durationLabel})</Text>
           {loadingSlots ? (
@@ -440,7 +429,6 @@ export default function RescheduleAppointmentScreen() {
                 })}
               </ScrollView>
 
-              {/* Leyendas explicativas */}
               {(hasBlockedSlots || hasInvalidByDuration) && (
                 <View style={s.legendCol}>
                   {hasBlockedSlots && (
@@ -476,7 +464,6 @@ export default function RescheduleAppointmentScreen() {
         </TouchableOpacity>
       </ScrollView>
 
-      {/* iOS date panel */}
       {Platform.OS === 'ios' && showDatePanel && (
         <>
           <TouchableOpacity style={s.panelOverlay} activeOpacity={1} onPress={cancelDate} />
@@ -552,7 +539,8 @@ const s = StyleSheet.create({
   legendDot:          { width: 10, height: 10, borderRadius: 3, borderWidth: 1, marginTop: 2 },
   legendText:         { flex: 1, fontSize: 11, fontStyle: 'italic', lineHeight: 15 },
   slotHint:           { fontSize: 11, marginTop: 8 },
-  saveButton:         { backgroundColor: '#10B981', borderRadius: 12, padding: 16, alignItems: 'center', marginTop: 8, marginBottom: 32 },
+  // ⚡ marginBottom: 32 removido (se aplica dinámico desde contentContainerStyle)
+  saveButton:         { backgroundColor: '#10B981', borderRadius: 12, padding: 16, alignItems: 'center', marginTop: 8 },
   saveButtonDisabled: { opacity: 0.6 },
   saveButtonText:     { fontSize: 16, fontWeight: '700', color: '#ffffff' },
   panelOverlay:       { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.4)' },
