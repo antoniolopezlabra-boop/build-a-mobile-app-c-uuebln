@@ -1,5 +1,5 @@
 
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import {
   View, Text, StyleSheet, ScrollView,
   TouchableOpacity, ActivityIndicator, TextInput, Alert,
@@ -54,7 +54,6 @@ interface Appointment {
   staff_id?: string | null;
 }
 
-// FIX #7: clave dinámica de caché de reportes (año_mes actual)
 function getReportsCacheKey() {
   const n = new Date();
   return `reports_stats_${n.getFullYear()}_${n.getMonth() + 1}`;
@@ -65,6 +64,10 @@ export default function AppointmentDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const { colors: tc } = useTheme();
   const { user } = useAuth();
+  const insets = useSafeAreaInsets();
+
+  // ⚡ Padding inferior dinámico para respetar zona de tolerancia (May 17 2026)
+  const safeBottom = Math.max(insets.bottom, 16);
 
   const [loading, setLoading]             = useState(true);
   const [actionLoading, setActionLoading] = useState(false);
@@ -184,13 +187,12 @@ export default function AppointmentDetailScreen() {
     }
   };
 
-  // FIX #7: invalidar con clave dinámica que incluye año-mes
   const invalidateCaches = () => {
     invalidateCache('dashboard_stats');
     invalidateCache('today_appointments');
     invalidateCache('week_appointments');
     invalidateCache('appointments_list');
-    invalidateCache(getReportsCacheKey()); // clave dinámica — ej: reports_stats_2026_4
+    invalidateCache(getReportsCacheKey());
   };
 
   const handleReschedule = () => router.push(`/appointments/${id}/reschedule`);
@@ -298,7 +300,6 @@ export default function AppointmentDetailScreen() {
   return (
     <SafeAreaView style={[styles.container, { backgroundColor: tc.bg }]} edges={['top']}>
 
-      {/* Header */}
       <View style={[styles.header, { backgroundColor: tc.surface, borderBottomColor: tc.border }]}>
         <TouchableOpacity onPress={() => router.back()} style={styles.backButton}>
           <IconSymbol ios_icon_name="chevron.left" android_material_icon_name="arrow-back" size={24} color={tc.text} />
@@ -312,9 +313,12 @@ export default function AppointmentDetailScreen() {
         </TouchableOpacity>
       </View>
 
-      <ScrollView style={styles.content} showsVerticalScrollIndicator={false}>
+      <ScrollView
+        style={styles.content}
+        contentContainerStyle={{ paddingBottom: safeBottom }}
+        showsVerticalScrollIndicator={false}
+      >
 
-        {/* Status */}
         <View style={[styles.statusCard, { backgroundColor: tc.surface }]}>
           <View style={[styles.statusBadge, { backgroundColor: statusColor }]}>
             <Text style={styles.statusText}>{appointment.status}</Text>
@@ -327,7 +331,6 @@ export default function AppointmentDetailScreen() {
           )}
         </View>
 
-        {/* Información de la cita */}
         <View style={[styles.section, { backgroundColor: tc.surface }]}>
           <Text style={[styles.sectionTitle, { color: tc.text }]}>Información de la Cita</Text>
           <View style={styles.infoRow}>
@@ -362,7 +365,6 @@ export default function AppointmentDetailScreen() {
           )}
         </View>
 
-        {/* Colaborador */}
         {hasStaff && (
           <View style={[styles.section, { backgroundColor: tc.surface }]}>
             <View style={styles.staffSectionHeader}>
@@ -406,7 +408,6 @@ export default function AppointmentDetailScreen() {
           </View>
         )}
 
-        {/* Cliente */}
         <View style={[styles.section, { backgroundColor: tc.surface }]}>
           <View style={styles.clientSectionHeader}>
             <Text style={[styles.sectionTitle, { color: tc.text }]}>Cliente</Text>
@@ -442,7 +443,6 @@ export default function AppointmentDetailScreen() {
           </View>
         </View>
 
-        {/* Acciones */}
         <View style={[styles.actionsSection, { backgroundColor: tc.surface }]}>
           <Text style={[styles.sectionTitle, { color: tc.text }]}>Acciones</Text>
 
@@ -542,7 +542,6 @@ export default function AppointmentDetailScreen() {
         </View>
       </ScrollView>
 
-      {/* Modal: Asignar colaborador */}
       <Modal visible={assignStaffModal} transparent animationType="slide" onRequestClose={() => setAssignStaffModal(false)}>
         <KeyboardAvoidingView style={styles.modalOverlay} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
           <TouchableOpacity style={styles.modalBackdrop} activeOpacity={1} onPress={() => setAssignStaffModal(false)} />
@@ -609,7 +608,6 @@ export default function AppointmentDetailScreen() {
         </KeyboardAvoidingView>
       </Modal>
 
-      {/* Modal: Guardar como cliente */}
       <Modal visible={saveClientModal} transparent animationType="slide" onRequestClose={() => setSaveClientModal(false)}>
         <KeyboardAvoidingView style={styles.modalOverlay} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
           <TouchableOpacity style={styles.modalBackdrop} activeOpacity={1} onPress={() => setSaveClientModal(false)} />
@@ -717,7 +715,8 @@ const styles = StyleSheet.create({
   clientPhone:          { fontSize: 13 },
   notSavedPill:         { alignSelf: 'flex-start', backgroundColor: '#FEF3C7', paddingHorizontal: 8, paddingVertical: 3, borderRadius: 6, marginTop: 4 },
   notSavedText:         { fontSize: 11, color: '#92400E', fontWeight: '600' },
-  actionsSection:       { padding: 20, marginBottom: 32 },
+  // ⚡ marginBottom: 32 removido (se aplica dinámico desde contentContainerStyle)
+  actionsSection:       { padding: 20 },
   btnPrimary:           { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 10, backgroundColor: '#10B981', borderRadius: 14, paddingVertical: 16, marginBottom: 10 },
   btnPrimaryText:       { fontSize: 16, fontWeight: '800', color: '#fff' },
   btnSecondary:         { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, backgroundColor: '#EFF6FF', borderRadius: 12, paddingVertical: 13, marginBottom: 10, borderWidth: 1, borderColor: '#BFDBFE' },

@@ -12,7 +12,7 @@ import {
   Platform,
   Modal,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { colors } from '@/styles/commonStyles';
 import { IconSymbol } from '@/components/IconSymbol';
@@ -30,13 +30,11 @@ interface Client {
   isActive?: boolean;
 }
 
-// Constantes para el selector custom de fecha (sin DateTimePicker problemático)
 const MESES = [
   'Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio',
   'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre',
 ];
 const CURRENT_YEAR = new Date().getFullYear();
-// Rango de años para fecha de nacimiento: desde 1920 hasta el año actual
 const YEARS = Array.from({ length: CURRENT_YEAR - 1919 }, (_, i) => CURRENT_YEAR - i);
 
 function getDaysInMonth(year: number, month: number): number {
@@ -45,17 +43,19 @@ function getDaysInMonth(year: number, month: number): number {
 
 export default function EditClientScreen() {
   const router = useRouter();
+  const insets = useSafeAreaInsets();
   const params = useLocalSearchParams();
   const id = Array.isArray(params.id) ? params.id[0] : params.id;
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
 
-  // Date picker state
+  // ⚡ Padding inferior dinámico para respetar zona de tolerancia (May 17 2026)
+  const safeBottom = Math.max(insets.bottom, 16);
+
   const [showDatePicker, setShowDatePicker] = useState(false);
   const [showAndroidNative, setShowAndroidNative] = useState(false);
   const [tempBirthday, setTempBirthday] = useState<Date>(new Date(1990, 0, 1));
 
-  // Estados separados para los 3 selectores en iOS (custom)
   const [selectedDay, setSelectedDay] = useState(1);
   const [selectedMonth, setSelectedMonth] = useState(0);
   const [selectedYear, setSelectedYear] = useState(1990);
@@ -158,17 +158,14 @@ export default function EditClientScreen() {
     }
 
     if (Platform.OS === 'android') {
-      // Android: usar el calendario nativo (que sí funciona perfecto)
       setTempBirthday(birthday || new Date(1990, 0, 1));
       setTimeout(() => setShowAndroidNative(true), 100);
     } else {
-      // iOS: usar nuestro selector custom (que SIEMPRE se ve bien)
       setShowDatePicker(true);
     }
   };
 
   const confirmCustomDate = () => {
-    // Validar que el día sea válido para el mes/año (ej: 31 de febrero no existe)
     const maxDays = getDaysInMonth(selectedYear, selectedMonth);
     const validDay = Math.min(selectedDay, maxDays);
     const newDate = new Date(selectedYear, selectedMonth, validDay);
@@ -187,7 +184,6 @@ export default function EditClientScreen() {
     }
   };
 
-  // Días disponibles según mes/año seleccionado
   const daysInSelectedMonth = getDaysInMonth(selectedYear, selectedMonth);
   const days = Array.from({ length: daysInSelectedMonth }, (_, i) => i + 1);
 
@@ -245,7 +241,7 @@ export default function EditClientScreen() {
         <View style={styles.placeholder} />
       </View>
 
-      <ScrollView contentContainerStyle={styles.scrollContent}>
+      <ScrollView contentContainerStyle={[styles.scrollContent, { paddingBottom: safeBottom }]}>
         <Text style={styles.fieldLabel}>Nombre completo *</Text>
         <TextInput
           style={styles.input}
@@ -338,10 +334,6 @@ export default function EditClientScreen() {
         </TouchableOpacity>
       </ScrollView>
 
-      {/* ─── iOS Custom Date Picker ───
-           Tres ScrollViews verticales: Día / Mes / Año.
-           SIN dependencia de DateTimePicker (que tiene bugs de visibilidad).
-           Render 100% controlado: SIEMPRE se ven los números. */}
       <Modal
         visible={showDatePicker}
         animationType="slide"
@@ -364,16 +356,13 @@ export default function EditClientScreen() {
               </TouchableOpacity>
             </View>
 
-            {/* Preview de la fecha seleccionada */}
             <View style={dpStyles.preview}>
               <Text style={dpStyles.previewText}>
                 {selectedDay} de {MESES[selectedMonth]} de {selectedYear}
               </Text>
             </View>
 
-            {/* 3 columnas: Día / Mes / Año */}
             <View style={dpStyles.pickerRow}>
-              {/* DÍA */}
               <View style={dpStyles.column}>
                 <Text style={dpStyles.columnLabel}>Día</Text>
                 <ScrollView
@@ -403,7 +392,6 @@ export default function EditClientScreen() {
                 </ScrollView>
               </View>
 
-              {/* MES */}
               <View style={dpStyles.column}>
                 <Text style={dpStyles.columnLabel}>Mes</Text>
                 <ScrollView
@@ -433,7 +421,6 @@ export default function EditClientScreen() {
                 </ScrollView>
               </View>
 
-              {/* AÑO */}
               <View style={dpStyles.column}>
                 <Text style={dpStyles.columnLabel}>Año</Text>
                 <ScrollView
@@ -471,8 +458,6 @@ export default function EditClientScreen() {
         </TouchableOpacity>
       </Modal>
 
-      {/* ─── Android Native Calendar Picker ───
-           El calendario nativo de Android funciona perfecto sin manipulación. */}
       {Platform.OS === 'android' && showAndroidNative && (
         <DateTimePicker
           value={tempBirthday}
@@ -517,9 +502,9 @@ const styles = StyleSheet.create({
   placeholder: {
     width: 32,
   },
+  // ⚡ paddingBottom removido: se aplica dinámico desde contentContainerStyle
   scrollContent: {
     padding: 20,
-    paddingBottom: 40,
   },
   fieldLabel: {
     fontSize: 14,
@@ -610,7 +595,6 @@ const styles = StyleSheet.create({
   },
 });
 
-// Estilos del Date Picker custom (3 columnas Día/Mes/Año)
 const dpStyles = StyleSheet.create({
   overlay: {
     flex: 1,
