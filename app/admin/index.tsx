@@ -212,7 +212,16 @@ export default function AdminDashboard() {
     <View style={s.container}>
       <SafeAreaView style={{ flex: 1 }} edges={['top']}>
         <View style={s.header}>
-          <TouchableOpacity onPress={async () => { await signOut(); router.replace('/auth/onboarding'); }} style={s.exitBtn}>
+          {/*
+            ⚡ FIX EXIT BUTTON (May 17 2026)
+            Antes: router.replace('/auth/onboarding')  ← BUG, te mandaba al onboarding
+                   aunque ya conocieras la app. Esto era la verdadera causa raíz del
+                   reporte "logout admin → onboarding" (no era el guard ni el Index).
+            Ahora: router.replace('/auth/login') — el destino correcto para un usuario
+                   que cierra sesión. El guard de _layout.tsx ya se encarga de la lógica
+                   de mostrar el onboarding solo si el dispositivo nunca ha visto la app.
+          */}
+          <TouchableOpacity onPress={async () => { await signOut(); router.replace('/auth/login'); }} style={s.exitBtn}>
             <Text style={s.exitText}>EXIT</Text>
           </TouchableOpacity>
           <View style={s.headerCenter}>
