@@ -54,42 +54,25 @@ function AppSplash() {
 }
 
 // ══════════════════════════════════════════════════════════════════════
-// FIX DEFINITIVO PARPADEO DE SETUP WIZARD (May 2026)
+// FIX DEFINITIVO PARPADEO DE SETUP WIZARD (May 2026, commit 1f9ef184)
+// La fuente de verdad para "setup completado" es Supabase (business_profile).
+// El splash cubre la UI hasta que el fetch termina (businessProfileLoaded === true).
 //
-// PROBLEMA HISTÓRICO:
-// Cada vez que un usuario REINSTALABA la app (o recibía APK nuevo), al hacer
-// login se le mostraba el setup wizard por 2-3 segundos antes de mandarlo al
-// home. Esto pasaba porque la lógica de "¿ya completó el setup?" se basaba en
-// un flag en AsyncStorage local (`setup_completed_<userId>`). Al reinstalar,
-// AsyncStorage queda vacío → el flag no existe → el guard creía que era
-// usuario nuevo → "flash" del wizard.
+// FIX ADMIN LOOP (May 17 2026, commit 343ca222)
+// Los admins del sistema están EXENTOS del setup wizard.
+// El check de isAdmin va ANTES del check de setupCompleted.
 //
-// FIX (commit 1f9ef184):
-// La fuente de verdad ahora es **Supabase**, NO AsyncStorage.
-// Si el usuario ya tiene un business_profile en la nube, completaron el setup.
-// Sobrevive a reinstalaciones, cambios de dispositivo, todo.
+// FIX ONBOARDING LOOP — segundo round (May 17 2026, este commit)
+// PROBLEMA: incluso con el flag has_seen_onboarding correctamente seteado
+// en AsyncStorage por AuthContext, el guard mostraba el onboarding al hacer
+// logout. La causa REAL no era el flag faltante en storage, era que el
+// useEffect que LEÍA el flag solo corría una vez al montar el componente
+// (deps vacías). Tras el logout, el state hasSeenOnboarding seguía con el
+// valor obsoleto cargado al arranque.
 //
-// Además: NO redirigimos a NINGUNA pantalla hasta que el fetch del
-// business_profile haya terminado (businessProfileLoaded === true).
-// Mientras tanto, el splash sigue cubriendo la UI → cero parpadeo.
-// ══════════════════════════════════════════════════════════════════════
-//
-// ══════════════════════════════════════════════════════════════════════
-// FIX ADMIN LOOP (May 17 2026 - segundo round)
-//
-// PROBLEMA REPORTADO:
-// Al iniciar sesión con cuenta admin del sistema (vylta_admins), el guard
-// nos mandaba al setup wizard porque los admins NO tienen business_profile
-// (no son dueños de negocio; son operadores de la plataforma).
-// businessProfile=null → setupCompleted=false → navigate('/setup') → loop.
-//
-// FIX:
-// Los administradores del sistema están EXENTOS del setup wizard. La
-// verificación de admin ahora va ANTES de la verificación de setup.
-// Si isAdmin=true → redirige a /admin (o subruta /admin/*) sin pasar por wizard.
-//
-// Además se permite navegación libre entre rutas /admin/* (negocios, promos,
-// admins, etc.) sin que el guard intercepte y regrese al wizard.
+// SOLUCIÓN: re-leer AsyncStorage cuando el `user` cambia (incluyendo de
+// truthy → null por logout). Así, después de cada cambio de sesión, el
+// guard re-sincroniza con el storage antes de decidir.
 // ══════════════════════════════════════════════════════════════════════
 function NavigationGuard({ onReady }: { onReady: () => void }) {
   const { user, businessProfile, businessProfileLoaded, loading: authLoading, isStaffAccount } = useAuth();
@@ -105,12 +88,19 @@ function NavigationGuard({ onReady }: { onReady: () => void }) {
   const isNavigating = useRef(false);
   const readyEmittedRef = useRef(false);
 
-  // Carga del flag global de "ya vio onboarding marketing"
+  // ⚡ FIX (May 17 2026): re-leer el flag CADA VEZ que cambia el estado de user.
+  // Antes solo se leía al montar (deps vacías) y nunca se actualizaba después.
+  // Eso causaba que tras logout el guard usara un valor obsoleto del state.
+  //
+  // Ahora: cualquier cambio en `user` (login, logout) dispara una re-lectura.
+  // Esto es seguro y barato (AsyncStorage es rápido en RN).
   useEffect(() => {
     AsyncStorage.getItem('has_seen_onboarding').then(val => {
-      setHasSeenOnboarding(val === 'true');
+      const seen = val === 'true';
+      console.log('[Guard] has_seen_onboarding leído de AsyncStorage:', val, '→', seen, '(user:', user?.email ?? 'null', ')');
+      setHasSeenOnboarding(seen);
     });
-  }, []);
+  }, [user?.id]);
 
   // Carga del flag de "el usuario decidió saltar el wizard" (caso edge)
   useEffect(() => {
@@ -144,6 +134,7 @@ function NavigationGuard({ onReady }: { onReady: () => void }) {
     const inSetupWizard = segments[0] === 'setup';
 
     const navigate = (path: string) => {
+      console.log('[Guard] → navegando a', path, '(user:', user?.email ?? 'null', ', hasSeenOnboarding:', hasSeenOnboarding, ', isAdmin:', isAdmin, ')');
       isNavigating.current = true;
       router.replace(path as any);
       setTimeout(() => { isNavigating.current = false; }, 600);
