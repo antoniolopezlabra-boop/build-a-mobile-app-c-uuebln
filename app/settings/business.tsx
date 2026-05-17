@@ -3,7 +3,7 @@ import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity,
   TextInput, ActivityIndicator, Modal, Image,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { colors } from '@/styles/commonStyles';
 import { IconSymbol } from '@/components/IconSymbol';
@@ -18,11 +18,9 @@ import {
   validateCustomBusinessType,
 } from '@/constants/businessTypes';
 
-// Lista de 31 tipos + 'Otro' definida en /constants/businessTypes.ts
-// (single source of truth, compartida con app/setup/index.tsx)
-
 export default function BusinessSettingsScreen() {
   const router = useRouter();
+  const insets = useSafeAreaInsets();
   const { businessProfile, refreshBusinessProfile } = useAuth();
   const [saving, setSaving]                 = useState(false);
   const [showTypePicker, setShowTypePicker] = useState(false);
@@ -30,9 +28,6 @@ export default function BusinessSettingsScreen() {
   const [errorModal, setErrorModal]         = useState({ visible: false, message: '' });
   const [successModal, setSuccessModal]     = useState(false);
   const [businessName, setBusinessName]     = useState('');
-  // selectedType es el valor del dropdown (puede ser 'Otro' o uno de la lista)
-  // customType es el texto libre cuando selectedType === 'Otro'
-  // El valor que se guarda en BD es selectedType (si !== 'Otro') o customType (si === 'Otro')
   const [selectedType, setSelectedType]     = useState('');
   const [customType, setCustomType]         = useState('');
   const [address, setAddress]               = useState('');
@@ -40,12 +35,13 @@ export default function BusinessSettingsScreen() {
   const [alternativePhone, setAlternativePhone] = useState('');
   const [logoUrl, setLogoUrl]               = useState('');
 
+  // ⚡ Padding inferior dinámico para respetar zona de tolerancia (May 17 2026)
+  const safeBottom = Math.max(insets.bottom, 16);
+
   useEffect(() => {
     if (businessProfile) {
       setBusinessName(businessProfile.businessName || '');
       const currentType = businessProfile.businessType || '';
-      // Si el valor guardado está en la lista oficial → lo seleccionamos directo
-      // Si NO está (ej: 'Especialista Parasitólogo') → selectedType='Otro' + customType=ese valor
       if (currentType && isCustomBusinessType(currentType)) {
         setSelectedType(BUSINESS_TYPE_OTHER);
         setCustomType(currentType);
@@ -96,7 +92,6 @@ export default function BusinessSettingsScreen() {
     }
   };
 
-  // Calcula el valor final que se guarda en BD
   const getEffectiveBusinessType = (): string => {
     if (selectedType === BUSINESS_TYPE_OTHER) {
       return customType.trim();
@@ -113,7 +108,6 @@ export default function BusinessSettingsScreen() {
       setErrorModal({ visible: true, message: 'El tipo de negocio es requerido' });
       return;
     }
-    // Validar input personalizado de 'Otro'
     if (selectedType === BUSINESS_TYPE_OTHER) {
       const v = validateCustomBusinessType(customType);
       if (!v.valid) {
@@ -140,7 +134,6 @@ export default function BusinessSettingsScreen() {
     }
   };
 
-  // Texto que se muestra en el botón del picker
   const pickerDisplayText = () => {
     if (!selectedType) return 'Seleccionar tipo';
     if (selectedType === BUSINESS_TYPE_OTHER) {
@@ -166,7 +159,7 @@ export default function BusinessSettingsScreen() {
         <View style={styles.placeholder} />
       </View>
 
-      <ScrollView contentContainerStyle={styles.scrollContent}>
+      <ScrollView contentContainerStyle={[styles.scrollContent, { paddingBottom: safeBottom }]}>
         <View style={styles.logoSection}>
           <Text style={styles.fieldLabel}>Logo del negocio</Text>
           <TouchableOpacity style={styles.logoContainer} onPress={handlePickLogo}>
@@ -194,7 +187,6 @@ export default function BusinessSettingsScreen() {
           <IconSymbol android_material_icon_name="arrow-drop-down" size={24} color={colors.textSecondary} />
         </TouchableOpacity>
 
-        {/* Input de texto libre cuando se selecciona 'Otro' */}
         {selectedType === BUSINESS_TYPE_OTHER && (
           <View style={styles.customInputWrap}>
             <Text style={styles.customInputLabel}>Especifica tu tipo de negocio o especialidad *</Text>
@@ -252,7 +244,6 @@ export default function BusinessSettingsScreen() {
                     onPress={() => {
                       setSelectedType(type);
                       setShowTypePicker(false);
-                      // Si selecciona algo distinto de 'Otro', limpiamos el customType
                       if (type !== BUSINESS_TYPE_OTHER) setCustomType('');
                     }}
                   >
@@ -275,7 +266,8 @@ const styles = StyleSheet.create({
   backButton:         { padding: 4 },
   title:              { fontSize: 20, fontWeight: 'bold', color: colors.text },
   placeholder:        { width: 32 },
-  scrollContent:      { padding: 20, paddingBottom: 40 },
+  // ⚡ paddingBottom removido: se aplica dinámico desde contentContainerStyle
+  scrollContent:      { padding: 20 },
   logoSection:        { alignItems: 'center', marginBottom: 24 },
   logoContainer:      { width: 120, height: 120, borderRadius: 60, overflow: 'hidden', marginBottom: 12 },
   logoImage:          { width: '100%', height: '100%' },
@@ -288,12 +280,9 @@ const styles = StyleSheet.create({
   pickerButton:       { backgroundColor: colors.card, borderRadius: 12, padding: 14, borderWidth: 1, borderColor: colors.border, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
   pickerText:         { flex: 1, fontSize: 16, color: colors.text },
   pickerPlaceholder:  { color: colors.textSecondary },
-
-  // Input de texto libre cuando es 'Otro'
   customInputWrap:    { backgroundColor: '#FEF3C7', borderRadius: 12, padding: 12, marginTop: 8, borderWidth: 1, borderColor: '#FDE68A' },
   customInputLabel:   { fontSize: 12, fontWeight: '700', color: '#92400E', marginBottom: 8, textTransform: 'uppercase', letterSpacing: 0.4 },
   customInputHint:    { fontSize: 11, color: '#A16207', marginTop: 4, textAlign: 'right' },
-
   saveButton:         { backgroundColor: colors.primary, borderRadius: 12, padding: 16, alignItems: 'center', marginTop: 32 },
   saveButtonDisabled: { opacity: 0.6 },
   saveButtonText:     { color: '#FFFFFF', fontSize: 18, fontWeight: '600' },
