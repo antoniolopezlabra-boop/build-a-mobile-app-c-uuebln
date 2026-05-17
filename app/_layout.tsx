@@ -57,24 +57,39 @@ function AppSplash() {
 // FIX DEFINITIVO PARPADEO DE SETUP WIZARD (May 2026)
 //
 // PROBLEMA HISTÓRICO:
-// Cada vez que un usuario REINSTALABA la app (o recibaía APK nuevo), al hacer
+// Cada vez que un usuario REINSTALABA la app (o recibía APK nuevo), al hacer
 // login se le mostraba el setup wizard por 2-3 segundos antes de mandarlo al
 // home. Esto pasaba porque la lógica de "¿ya completó el setup?" se basaba en
 // un flag en AsyncStorage local (`setup_completed_<userId>`). Al reinstalar,
 // AsyncStorage queda vacío → el flag no existe → el guard creía que era
 // usuario nuevo → "flash" del wizard.
 //
-// FIX:
+// FIX (commit 1f9ef184):
 // La fuente de verdad ahora es **Supabase**, NO AsyncStorage.
 // Si el usuario ya tiene un business_profile en la nube, completaron el setup.
-// Punto. Sobrevive a reinstalaciones, cambios de dispositivo, todo.
+// Sobrevive a reinstalaciones, cambios de dispositivo, todo.
 //
 // Además: NO redirigimos a NINGUNA pantalla hasta que el fetch del
 // business_profile haya terminado (businessProfileLoaded === true).
 // Mientras tanto, el splash sigue cubriendo la UI → cero parpadeo.
+// ══════════════════════════════════════════════════════════════════════
 //
-// Mantenemos AsyncStorage como SECUNDARIO solo para compatibilidad y para
-// recordar el "saltar wizard" (caso edge raro donde el user no quiere llenar).
+// ══════════════════════════════════════════════════════════════════════
+// FIX ADMIN LOOP (May 17 2026 - segundo round)
+//
+// PROBLEMA REPORTADO:
+// Al iniciar sesión con cuenta admin del sistema (vylta_admins), el guard
+// nos mandaba al setup wizard porque los admins NO tienen business_profile
+// (no son dueños de negocio; son operadores de la plataforma).
+// businessProfile=null → setupCompleted=false → navigate('/setup') → loop.
+//
+// FIX:
+// Los administradores del sistema están EXENTOS del setup wizard. La
+// verificación de admin ahora va ANTES de la verificación de setup.
+// Si isAdmin=true → redirige a /admin (o subruta /admin/*) sin pasar por wizard.
+//
+// Además se permite navegación libre entre rutas /admin/* (negocios, promos,
+// admins, etc.) sin que el guard intercepte y regrese al wizard.
 // ══════════════════════════════════════════════════════════════════════
 function NavigationGuard({ onReady }: { onReady: () => void }) {
   const { user, businessProfile, businessProfileLoaded, loading: authLoading, isStaffAccount } = useAuth();
@@ -120,6 +135,10 @@ function NavigationGuard({ onReady }: { onReady: () => void }) {
     if (user && setupSkipped === null) return;
 
     const inAuthScreen  = segments[0] === 'auth';
+    // ⚡ FIX: inAdminScreen detecta TODA la sección /admin (incluyendo
+    // subrutas como /admin/tenants, /admin/promo-codes, /admin/admins).
+    // segments[0] === 'admin' es true para cualquier subruta porque segments
+    // es el array de segmentos del path (ej: ['admin', 'tenants', '[id]']).
     const inAdminScreen = segments[0] === 'admin';
     const inStaffApp    = segments[0] === 'staff-app';
     const inSetupWizard = segments[0] === 'setup';
@@ -139,23 +158,39 @@ function NavigationGuard({ onReady }: { onReady: () => void }) {
       }
     };
 
-    // No autenticado → onboarding marketing o login
+    // ────────────────────────────────────────────────────────────────────
+    // ORDEN DE PRIORIDADES (importante: el orden ES la lógica)
+    // ────────────────────────────────────────────────────────────────────
+
+    // 1) NO AUTENTICADO → onboarding marketing o login
     if (!user && !inAuthScreen) {
       navigate(hasSeenOnboarding ? '/auth/login' : '/auth/onboarding');
       emitReady();
       return;
     }
 
-    // Colaboradores: redirigir a su app, nunca a setup ni admin
+    // 2) COLABORADORES (staff_accounts) → su app, nunca a setup ni admin
     if (user && isStaffAccount) {
       if (!inStaffApp) navigate('/staff-app');
       emitReady();
       return;
     }
 
-    // ⚡ SETUP WIZARD — NUEVA LÓGICA basada en Supabase
-    // setupCompleted = (tiene business_profile en BD) OR (el user lo saltó explícitamente)
-    // Solo redirigir si NO completado Y NO está ya en el wizard.
+    // 3) ⚡ ADMINISTRADORES DEL SISTEMA (vylta_admins) → área admin SIEMPRE.
+    //
+    // Los admins están EXENTOS del setup wizard porque no son dueños de
+    // negocio. Este check va ANTES del setupCompleted para evitar el loop.
+    //
+    // Si ya está en cualquier ruta /admin/* (negocios, promos, admins, etc.)
+    // NO redirigimos para permitir navegación libre dentro del panel admin.
+    if (user && isAdmin) {
+      if (!inAdminScreen) navigate('/admin');
+      emitReady();
+      return;
+    }
+
+    // 4) USUARIOS REGULARES sin setup completo → wizard.
+    // setupCompleted = (tiene business_profile en BD) OR (lo saltó explícitamente)
     const setupCompleted = businessProfile !== null || setupSkipped === true;
     if (user && !setupCompleted && !inSetupWizard) {
       navigate('/setup');
@@ -163,14 +198,7 @@ function NavigationGuard({ onReady }: { onReady: () => void }) {
       return;
     }
 
-    // Admin: solo redirigir si ya completó (o saltó) el setup
-    if (user && isAdmin && setupCompleted && !inAdminScreen) {
-      navigate('/admin');
-      emitReady();
-      return;
-    }
-
-    // Llegamos aquí: usuario autenticado, no necesita redirección.
+    // 5) USUARIO REGULAR con setup OK: no necesita redirección.
     emitReady();
   }, [
     user,
