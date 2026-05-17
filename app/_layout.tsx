@@ -28,14 +28,11 @@ function ThemeUserSync() {
   return null;
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
+// ───────────────────────────────────────────────────────────────────────────────
 // AppSplash — Pantalla que se muestra ENCIMA de todo mientras los guards
 // terminan de decidir a dónde mandar al usuario. Soluciona el "flash" de
-// onboarding/login que se veía por ~500ms al reabrir la app con sesión activa.
-// Se ocultaba al render normal de expo-router antes de que NavigationGuard
-// pudiera redirigir; ahora el splash bloquea visualmente hasta que el guard
-// emite su "ready".
-// ─────────────────────────────────────────────────────────────────────────────
+// onboarding/setup wizard que se veía por ~500ms-3seg al reabrir la app.
+// ───────────────────────────────────────────────────────────────────────────────
 function AppSplash() {
   return (
     <View style={splashStyles.container} pointerEvents="auto">
@@ -56,18 +53,40 @@ function AppSplash() {
   );
 }
 
+// ══════════════════════════════════════════════════════════════════════
+// FIX DEFINITIVO PARPADEO DE SETUP WIZARD (May 2026)
+//
+// PROBLEMA HISTÓRICO:
+// Cada vez que un usuario REINSTALABA la app (o recibaía APK nuevo), al hacer
+// login se le mostraba el setup wizard por 2-3 segundos antes de mandarlo al
+// home. Esto pasaba porque la lógica de "¿ya completó el setup?" se basaba en
+// un flag en AsyncStorage local (`setup_completed_<userId>`). Al reinstalar,
+// AsyncStorage queda vacío → el flag no existe → el guard creía que era
+// usuario nuevo → "flash" del wizard.
+//
+// FIX:
+// La fuente de verdad ahora es **Supabase**, NO AsyncStorage.
+// Si el usuario ya tiene un business_profile en la nube, completaron el setup.
+// Punto. Sobrevive a reinstalaciones, cambios de dispositivo, todo.
+//
+// Además: NO redirigimos a NINGUNA pantalla hasta que el fetch del
+// business_profile haya terminado (businessProfileLoaded === true).
+// Mientras tanto, el splash sigue cubriendo la UI → cero parpadeo.
+//
+// Mantenemos AsyncStorage como SECUNDARIO solo para compatibilidad y para
+// recordar el "saltar wizard" (caso edge raro donde el user no quiere llenar).
+// ══════════════════════════════════════════════════════════════════════
 function NavigationGuard({ onReady }: { onReady: () => void }) {
-  const { user, loading: authLoading, isStaffAccount } = useAuth();
+  const { user, businessProfile, businessProfileLoaded, loading: authLoading, isStaffAccount } = useAuth();
   const { isAdmin, loading: adminLoading } = useAdmin();
   const router = useRouter();
   const segments = useSegments();
 
   const [hasSeenOnboarding, setHasSeenOnboarding] = useState<boolean | null>(null);
-  // ── Setup wizard post-registro ──
-  // null = aún no sabemos si lo completó; true = ya lo hizo; false = primera vez
-  const [setupCompleted, setSetupCompleted] = useState<boolean | null>(null);
+  // Flag de "saltar wizard" — solo para casos donde el user explicitamente lo skipea
+  // (NUNCA usado para decidir si redirigir; eso depende de businessProfile).
+  const [setupSkipped, setSetupSkipped] = useState<boolean | null>(null);
 
-  const hasRedirectedToSetup = useRef(false);
   const isNavigating = useRef(false);
   const readyEmittedRef = useRef(false);
 
@@ -78,24 +97,27 @@ function NavigationGuard({ onReady }: { onReady: () => void }) {
     });
   }, []);
 
-  // Carga del flag específico por usuario: setup_completed_<userId>
-  // Se ejecuta cuando cambia el user.id (al hacer login o registrarse)
+  // Carga del flag de "el usuario decidió saltar el wizard" (caso edge)
   useEffect(() => {
     if (!user) {
-      setSetupCompleted(null);
-      hasRedirectedToSetup.current = false;
+      setSetupSkipped(null);
       return;
     }
-    AsyncStorage.getItem(`setup_completed_${user.id}`).then(val => {
-      setSetupCompleted(val === 'true');
+    AsyncStorage.getItem(`setup_skipped_${user.id}`).then(val => {
+      setSetupSkipped(val === 'true');
     });
   }, [user?.id]);
 
   useEffect(() => {
     if (authLoading || adminLoading) return;
     if (hasSeenOnboarding === null) return;
-    if (user && setupCompleted === null) return;
     if (isNavigating.current) return;
+
+    // ⚡ GUARD CRÍTICO: si hay un usuario logueado pero aún NO sabemos si tiene
+    // business_profile (fetch en curso), NO TOMAMOS NINGUNA DECISIÓN todavía.
+    // El splash seguirá cubriendo la UI hasta que sepamos con certeza.
+    if (user && !businessProfileLoaded) return;
+    if (user && setupSkipped === null) return;
 
     const inAuthScreen  = segments[0] === 'auth';
     const inAdminScreen = segments[0] === 'admin';
@@ -108,73 +130,60 @@ function NavigationGuard({ onReady }: { onReady: () => void }) {
       setTimeout(() => { isNavigating.current = false; }, 600);
     };
 
+    const emitReady = () => {
+      if (!readyEmittedRef.current) {
+        readyEmittedRef.current = true;
+        // Pequeño delay para que el replace tenga tiempo de completar antes de
+        // quitar el splash, evitando ver la pantalla anterior por un frame.
+        setTimeout(() => onReady(), 80);
+      }
+    };
+
     // No autenticado → onboarding marketing o login
     if (!user && !inAuthScreen) {
       navigate(hasSeenOnboarding ? '/auth/login' : '/auth/onboarding');
-      // Emitimos ready en el siguiente tick para dar tiempo al replace.
-      // Esto evita ver el destino antes de que la navegación se complete.
-      setTimeout(() => {
-        if (!readyEmittedRef.current) {
-          readyEmittedRef.current = true;
-          onReady();
-        }
-      }, 50);
+      emitReady();
       return;
     }
 
     // Colaboradores: redirigir a su app, nunca a setup ni admin
     if (user && isStaffAccount) {
-      if (!inStaffApp) {
-        navigate('/staff-app');
-        setTimeout(() => {
-          if (!readyEmittedRef.current) {
-            readyEmittedRef.current = true;
-            onReady();
-          }
-        }, 50);
-      } else {
-        if (!readyEmittedRef.current) {
-          readyEmittedRef.current = true;
-          onReady();
-        }
-      }
+      if (!inStaffApp) navigate('/staff-app');
+      emitReady();
       return;
     }
 
-    // ── Setup wizard: solo la primera vez que el usuario entra ──
-    // Si setupCompleted === false (no existe el flag en AsyncStorage), redirigir.
-    // El propio wizard guarda el flag al terminar o al saltar, así nunca vuelve.
-    if (user && setupCompleted === false && !inSetupWizard && !hasRedirectedToSetup.current) {
-      hasRedirectedToSetup.current = true;
+    // ⚡ SETUP WIZARD — NUEVA LÓGICA basada en Supabase
+    // setupCompleted = (tiene business_profile en BD) OR (el user lo saltó explícitamente)
+    // Solo redirigir si NO completado Y NO está ya en el wizard.
+    const setupCompleted = businessProfile !== null || setupSkipped === true;
+    if (user && !setupCompleted && !inSetupWizard) {
       navigate('/setup');
-      setTimeout(() => {
-        if (!readyEmittedRef.current) {
-          readyEmittedRef.current = true;
-          onReady();
-        }
-      }, 50);
+      emitReady();
       return;
     }
 
     // Admin: solo redirigir si ya completó (o saltó) el setup
-    if (user && isAdmin && setupCompleted === true && !inAdminScreen) {
+    if (user && isAdmin && setupCompleted && !inAdminScreen) {
       navigate('/admin');
-      setTimeout(() => {
-        if (!readyEmittedRef.current) {
-          readyEmittedRef.current = true;
-          onReady();
-        }
-      }, 50);
+      emitReady();
       return;
     }
 
-    // ── Llegamos aquí: usuario autenticado, no necesita ninguna redirección.
-    //    Ya está en la pantalla correcta (ej. tabs/home). Listo para mostrar.
-    if (!readyEmittedRef.current) {
-      readyEmittedRef.current = true;
-      onReady();
-    }
-  }, [user, isAdmin, authLoading, adminLoading, hasSeenOnboarding, setupCompleted, segments]);
+    // Llegamos aquí: usuario autenticado, no necesita redirección.
+    emitReady();
+  }, [
+    user,
+    isAdmin,
+    authLoading,
+    adminLoading,
+    hasSeenOnboarding,
+    businessProfile,
+    businessProfileLoaded,
+    setupSkipped,
+    isStaffAccount,
+    segments,
+  ]);
 
   return null;
 }
@@ -184,11 +193,11 @@ function AppStatusBar() {
   return <StatusBar style={isDark ? 'light' : 'dark'} />;
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
+// ───────────────────────────────────────────────────────────────────────────────
 // AppShell: envuelve el Stack y maneja el splash inicial.
 // El splash se monta SIEMPRE al arrancar y solo desaparece cuando
 // NavigationGuard emite onReady (es decir, ya decidió a dónde mandar al user).
-// ─────────────────────────────────────────────────────────────────────────────
+// ───────────────────────────────────────────────────────────────────────────────
 function AppShell() {
   const [appReady, setAppReady] = useState(false);
 
@@ -199,8 +208,6 @@ function AppShell() {
       <Stack screenOptions={{ headerShown: false }} />
       <OfflineBanner />
       <AppStatusBar />
-      {/* Splash overlay: bloquea cualquier pantalla intermedia hasta que el
-          NavigationGuard haya decidido a dónde ir. Se desmonta una vez listo. */}
       {!appReady && <AppSplash />}
     </>
   );
@@ -237,7 +244,7 @@ const splashStyles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
     zIndex: 9999,
-    elevation: 9999, // Android elevation para asegurar que quede arriba
+    elevation: 9999,
   },
   logoWrap: {
     width: 120,

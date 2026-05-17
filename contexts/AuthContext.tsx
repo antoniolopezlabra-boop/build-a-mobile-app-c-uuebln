@@ -32,14 +32,15 @@ interface BusinessProfile {
 interface AuthContextType {
   user: AppUser | null;
   businessProfile: BusinessProfile | null;
+  // ⚡ FIX (May 2026) anti-parpadeo de setup wizard:
+  // businessProfileLoaded indica si YA terminó el primer fetch a Supabase para
+  // saber si el usuario tiene perfil. true = ya sabemos (haya o no perfil);
+  // false = aún cargando, NO se debe tomar decisiones de routing todavía.
+  businessProfileLoaded: boolean;
   loading: boolean;
   authLoading: boolean;
   isStaffAccount: boolean;
   staffMemberData: StaffMemberData | null;
-  // FLUJO DE ONBOARDING (May 2026 — limpieza UX):
-  // register() solo crea la cuenta de auth con datos mínimos.
-  // Los datos del negocio (nombre, tipo, teléfono) se capturan en el setup wizard
-  // (Paso 1 — app/setup/index.tsx) que es donde se hace upsert a business_profiles.
   register: (params: { email: string; password: string; name: string }) => Promise<any>;
   login: (email: string, password: string) => Promise<void>;
   signOut: () => Promise<void>;
@@ -52,13 +53,15 @@ const AuthContext = createContext<AuthContextType | undefined>(undefined);
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<AppUser | null>(null);
   const [businessProfile, setBusinessProfile] = useState<BusinessProfile | null>(null);
+  // ⚡ FIX (May 2026): este flag se setea a true UNA VEZ que el primer fetch a
+  // business_profiles termina, sin importar si encontró perfil o no. Esto
+  // permite al NavigationGuard distinguir entre "aún cargando" y "no tiene".
+  const [businessProfileLoaded, setBusinessProfileLoaded] = useState(false);
   const [loading, setLoading] = useState(true);
   const [authLoading, setAuthLoading] = useState(false);
   const [isStaffAccount, setIsStaffAccount] = useState(false);
   const [staffMemberData, setStaffMemberData] = useState<StaffMemberData | null>(null);
 
-  // FIX race condition: los dos listeners (onAuthStateChange + getSession) podían
-  // cargar datos dos veces al arranque. Este ref detecta si ya cargamos para el usuario actual.
   const loadedUserIdRef = useRef<string | null>(null);
 
   useEffect(() => {
@@ -79,6 +82,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         setCacheUserId(null);
         setUser(null);
         setBusinessProfile(null);
+        // Reset al cerrar sesión para que el próximo login espere el fetch.
+        setBusinessProfileLoaded(false);
         setIsStaffAccount(false);
         setStaffMemberData(null);
         setLoading(false);
@@ -167,11 +172,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         .from('business_profiles')
         .select('*')
         .eq('user_id', userId)
-        .single();
+        .maybeSingle(); // ⚡ maybeSingle (no single) para no tirar error si no existe
 
-      if (error || !data) {
-        // Es normal que no haya business_profile para usuarios recién registrados
-        // que aún no completaron el setup wizard. setBusinessProfile(null) es correcto.
+      if (error) {
+        logger.error('[Auth] Error loading business profile:', error);
+        setBusinessProfile(null);
+        return;
+      }
+
+      if (!data) {
+        // Sin perfil = usuario nuevo que no ha completado el setup wizard
         setBusinessProfile(null);
         return;
       }
@@ -190,16 +200,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     } catch (error) {
       logger.error('[Auth] Error loading business profile:', error);
       setBusinessProfile(null);
+    } finally {
+      // ⚡ CRÍTICO: independientemente de si encontramos perfil o no,
+      // marcamos como "ya intentamos cargar". Esto le dice al NavigationGuard
+      // que ya puede tomar decisiones con confianza.
+      setBusinessProfileLoaded(true);
     }
   };
 
-  // ==========================================================================
-  // REGISTER: solo crea la cuenta de auth.
-  // El perfil del negocio (business_name, business_type, phone) se captura
-  // en el setup wizard (Paso 1 — app/setup/index.tsx) que hace upsert a
-  // business_profiles. Así evitamos pedir lo mismo dos veces y reducimos
-  // fricción en el momento más crítico (registro).
-  // ==========================================================================
   const register = async (params: { email: string; password: string; name: string }) => {
     try {
       setAuthLoading(true);
@@ -212,7 +220,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       });
       if (error) throw error;
       if (!data.user) throw new Error('No user returned');
-      return data; // expone {user, session} para que register.tsx pueda leer user.id
+      return data;
     } catch (error) {
       logger.error('[Auth] Registration error:', error);
       throw error;
@@ -224,6 +232,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const login = async (email: string, password: string) => {
     try {
       setAuthLoading(true);
+      // Resetear flag para que el guard espere el fetch del nuevo usuario.
+      setBusinessProfileLoaded(false);
       const { data, error } = await supabase.auth.signInWithPassword({ email, password });
       if (error) throw error;
     } catch (error) {
@@ -242,6 +252,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       loadedUserIdRef.current = null;
       setIsStaffAccount(false);
       setStaffMemberData(null);
+      setBusinessProfileLoaded(false);
       await supabase.auth.signOut();
       router.replace('/auth/login');
     } catch (error) {
@@ -268,7 +279,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   return (
     <AuthContext.Provider value={{
-      user, businessProfile, loading, authLoading,
+      user, businessProfile, businessProfileLoaded, loading, authLoading,
       isStaffAccount, staffMemberData,
       register, login, signOut, fetchUser, refreshBusinessProfile,
     }}>
