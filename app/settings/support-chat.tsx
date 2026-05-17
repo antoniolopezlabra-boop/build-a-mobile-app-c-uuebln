@@ -23,17 +23,17 @@ import { supabase } from '@/lib/supabase';
 // directamente a la API de Anthropic. En su lugar llama a la Edge Function
 // `ai-chat` que vive en Supabase.
 //
-// ── FIX safe-area Android (May 10 2026) ────────────────────────────────
-// Antes el input bar quedaba pegado al borde inferior, empalmado con los
-// botones de navegación de Android. Solución con useSafeAreaInsets().
-//
-// ── FIX input flotante en Android (May 11 2026) ────────────────────────
-// El KeyboardAvoidingView con behavior="height" en Android causaba que el
-// input se quedara en posición intermedia después de cerrar el teclado.
-// Causa: peleaba con windowSoftInputMode=adjustResize del manifest, que
-// Android ya hace automáticamente. Solución: NO envolver con KAV en
-// Android, dejar que el sistema operativo maneje el redimensionamiento.
-// Solo iOS necesita KAV con behavior="padding".
+// ── HISTORIAL DE FIXES DE TECLADO ───────────────────────────────────────
+// May 10 2026: fix safe-area Android (botones de navegación clásicos).
+// May 11 2026: removí KeyboardAvoidingView en Android porque causaba que el
+//   input se quedara flotando después de cerrar el teclado.
+// May 17 2026: ⚡ FIX DEFINITIVO — el teclado se superponía al input en
+//   Android porque windowSoftInputMode=adjustResize NO funciona cuando
+//   edgeToEdgeEnabled:true está activo en app.json. La solución es usar
+//   KeyboardAvoidingView con behavior="height" y un keyboardVerticalOffset
+//   correcto (la altura del header + status bar). Esto funciona en ambas
+//   plataformas SIN causar el bug del input flotante porque el offset
+//   compensa exactamente el espacio que ocupa el header fijo arriba.
 // ══════════════════════════════════════════════════════════════════════
 
 type Role = 'user' | 'assistant';
@@ -45,6 +45,9 @@ interface Message {
 }
 
 const SUPABASE_URL = 'https://nhjmwmkaduiaifgztymi.supabase.co';
+
+// Altura aproximada del header (paddingVertical:12 + altura del avatar 38 + borderBottom)
+const HEADER_HEIGHT = 64;
 
 const SUGGESTED_QUESTIONS = [
   '¿Cómo agrego un servicio nuevo?',
@@ -170,83 +173,20 @@ export default function SupportChatScreen() {
   const bottomPadding = Math.max(insets.bottom, 12);
 
   // ══════════════════════════════════════════════════════════════════════
-  // CONTENIDO COMÚN — el chat (ScrollView + InputBar).
-  // Se extrae para poder envolverlo en KAV solo en iOS, y dejarlo plano en
-  // Android (donde Android maneja el adjustResize automáticamente).
+  // ⚡ FIX TECLADO ANDROID (May 17 2026)
+  //
+  // Calculamos el keyboardVerticalOffset basado en:
+  //   - insets.top: status bar (Android) o notch (iOS)
+  //   - HEADER_HEIGHT: header del chat (back button + avatar + título)
+  //
+  // Este offset le dice a KeyboardAvoidingView CUÁNTO espacio hay arriba
+  // del área del chat. Sin esto, calcula mal el desplazamiento.
+  //
+  // En Android con edgeToEdgeEnabled:true (que tenemos), el sistema NO
+  // ajusta automáticamente el viewport al aparecer el teclado, así que
+  // KAV se vuelve obligatorio para que el input no quede tapado.
   // ══════════════════════════════════════════════════════════════════════
-  const chatContent = (
-    <>
-      <ScrollView
-        ref={scrollRef}
-        style={{ flex: 1 }}
-        contentContainerStyle={s.messagesContent}
-        showsVerticalScrollIndicator={false}
-        keyboardShouldPersistTaps="handled"
-      >
-        {messages.length === 0 && (
-          <View style={s.welcome}>
-            <View style={s.welcomeIcon}><Text style={s.welcomeIconText}>🤖</Text></View>
-            <Text style={[s.welcomeTitle, { color: tc.text }]}>¡Hola! Soy el asistente de VYLTA</Text>
-            <Text style={[s.welcomeDesc, { color: tc.textMuted }]}>
-              Pregúntame lo que quieras sobre cómo usar la app.
-            </Text>
-            <View style={s.suggestedWrap}>
-              {SUGGESTED_QUESTIONS.map((q) => (
-                <TouchableOpacity key={q}
-                  style={[s.suggestedChip, { backgroundColor: tc.surface, borderColor: '#10B981' }]}
-                  onPress={() => sendMessage(q)} activeOpacity={0.75}>
-                  <Text style={[s.suggestedText, { color: tc.text }]}>{q}</Text>
-                  <MaterialIcons name="send" size={13} color="#10B981" />
-                </TouchableOpacity>
-              ))}
-            </View>
-          </View>
-        )}
-
-        {messages.map((m) => <ChatBubble key={m.id} message={m} tc={tc} />)}
-
-        {loading && (
-          <View style={[bubble.row, { paddingHorizontal: 16, marginBottom: 12 }]}>
-            <View style={bubble.avatar}><Text style={bubble.avatarText}>V</Text></View>
-            <View style={[bubble.box, { backgroundColor: tc.surface, borderWidth: 0.5, borderColor: tc.border, borderBottomLeftRadius: 4 }]}>
-              <ActivityIndicator size="small" color="#10B981" />
-            </View>
-          </View>
-        )}
-      </ScrollView>
-
-      {/* ── INPUT BAR ──
-          paddingBottom dinámico:
-          - Android botones clásicos: insets.bottom = 0 → mínimo 12px
-          - Android barra gestual: respeta el inset real
-          - iPhone X+: respeta home indicator */}
-      <View
-        style={[
-          s.inputBar,
-          {
-            backgroundColor: tc.surface,
-            borderTopColor: tc.border,
-            paddingBottom: bottomPadding,
-          },
-        ]}
-      >
-        <TextInput
-          style={[s.input, { backgroundColor: tc.bg, color: tc.text, borderColor: tc.border }]}
-          value={input} onChangeText={setInput}
-          placeholder="Escribe tu pregunta sobre VYLTA..."
-          placeholderTextColor={tc.textMuted}
-          multiline maxLength={500}
-          onSubmitEditing={() => sendMessage()}
-          returnKeyType="send" blurOnSubmit={false} editable={!loading}
-        />
-        <TouchableOpacity
-          style={[s.sendBtn, (!input.trim() || loading) && s.sendBtnDisabled]}
-          onPress={() => sendMessage()} disabled={!input.trim() || loading} activeOpacity={0.8}>
-          <MaterialIcons name="send" size={20} color="#fff" />
-        </TouchableOpacity>
-      </View>
-    </>
-  );
+  const kavOffset = insets.top + HEADER_HEIGHT;
 
   return (
     <SafeAreaView style={[s.container, { backgroundColor: tc.bg }]} edges={['top']}>
@@ -265,21 +205,91 @@ export default function SupportChatScreen() {
       </View>
 
       {/* ══════════════════════════════════════════════════════════════════
-          PLATAFORMA-ESPECÍFICO:
-          - iOS: KeyboardAvoidingView con behavior="padding" funciona bien
-          - Android: NO envolver. Android maneja el redimensionamiento
-            automáticamente via windowSoftInputMode=adjustResize del manifest.
-            Envolverlo causa el bug del input que se queda flotando.
+          KeyboardAvoidingView con configuración por plataforma:
+          - iOS:     behavior="padding" — añade padding al contenedor
+          - Android: behavior="height"  — reduce la altura del contenedor
+          Ambos casos usan el mismo offset (status bar + header) para
+          calcular correctamente cuánto desplazar.
           ══════════════════════════════════════════════════════════════════ */}
-      {Platform.OS === 'ios' ? (
-        <KeyboardAvoidingView style={{ flex: 1 }} behavior="padding" keyboardVerticalOffset={0}>
-          {chatContent}
-        </KeyboardAvoidingView>
-      ) : (
-        <View style={{ flex: 1 }}>
-          {chatContent}
+      <KeyboardAvoidingView
+        style={{ flex: 1 }}
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        keyboardVerticalOffset={kavOffset}
+      >
+        <ScrollView
+          ref={scrollRef}
+          style={{ flex: 1 }}
+          contentContainerStyle={s.messagesContent}
+          showsVerticalScrollIndicator={false}
+          keyboardShouldPersistTaps="handled"
+        >
+          {messages.length === 0 && (
+            <View style={s.welcome}>
+              <View style={s.welcomeIcon}><Text style={s.welcomeIconText}>🤖</Text></View>
+              <Text style={[s.welcomeTitle, { color: tc.text }]}>¡Hola! Soy el asistente de VYLTA</Text>
+              <Text style={[s.welcomeDesc, { color: tc.textMuted }]}>
+                Pregúntame lo que quieras sobre cómo usar la app.
+              </Text>
+              <View style={s.suggestedWrap}>
+                {SUGGESTED_QUESTIONS.map((q) => (
+                  <TouchableOpacity key={q}
+                    style={[s.suggestedChip, { backgroundColor: tc.surface, borderColor: '#10B981' }]}
+                    onPress={() => sendMessage(q)} activeOpacity={0.75}>
+                    <Text style={[s.suggestedText, { color: tc.text }]}>{q}</Text>
+                    <MaterialIcons name="send" size={13} color="#10B981" />
+                  </TouchableOpacity>
+                ))}
+              </View>
+            </View>
+          )}
+
+          {messages.map((m) => <ChatBubble key={m.id} message={m} tc={tc} />)}
+
+          {loading && (
+            <View style={[bubble.row, { paddingHorizontal: 16, marginBottom: 12 }]}>
+              <View style={bubble.avatar}><Text style={bubble.avatarText}>V</Text></View>
+              <View style={[bubble.box, { backgroundColor: tc.surface, borderWidth: 0.5, borderColor: tc.border, borderBottomLeftRadius: 4 }]}>
+                <ActivityIndicator size="small" color="#10B981" />
+              </View>
+            </View>
+          )}
+        </ScrollView>
+
+        {/* ── INPUT BAR ──
+            paddingBottom dinámico:
+            - Cuando el teclado está cerrado:
+              · Android botones clásicos: insets.bottom = 0 → mínimo 12px
+              · Android barra gestual: respeta el inset real
+              · iPhone X+: respeta home indicator
+            - Cuando el teclado está abierto: KAV reduce la altura del
+              contenedor padre, así que esta barra queda justo sobre el
+              teclado. */}
+        <View
+          style={[
+            s.inputBar,
+            {
+              backgroundColor: tc.surface,
+              borderTopColor: tc.border,
+              paddingBottom: bottomPadding,
+            },
+          ]}
+        >
+          <TextInput
+            style={[s.input, { backgroundColor: tc.bg, color: tc.text, borderColor: tc.border }]}
+            value={input} onChangeText={setInput}
+            placeholder="Escribe tu pregunta sobre VYLTA..."
+            placeholderTextColor={tc.textMuted}
+            multiline maxLength={500}
+            onSubmitEditing={() => sendMessage()}
+            returnKeyType="send" blurOnSubmit={false} editable={!loading}
+          />
+          <TouchableOpacity
+            style={[s.sendBtn, (!input.trim() || loading) && s.sendBtnDisabled]}
+            onPress={() => sendMessage()} disabled={!input.trim() || loading} activeOpacity={0.8}>
+            <MaterialIcons name="send" size={20} color="#fff" />
+          </TouchableOpacity>
         </View>
-      )}
+      </KeyboardAvoidingView>
     </SafeAreaView>
   );
 }
