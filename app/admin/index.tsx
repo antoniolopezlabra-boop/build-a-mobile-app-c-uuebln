@@ -10,6 +10,7 @@ import { useFocusEffect } from '@react-navigation/native';
 import { useAdmin } from '@/contexts/AdminContext';
 import { useAuth } from '@/contexts/AuthContext';
 import { supabase } from '@/lib/supabase';
+import { logger } from '@/utils/logger';
 import Svg, { Path, Defs, LinearGradient, Stop, Text as SvgText, Line, Circle } from 'react-native-svg';
 
 const W = Dimensions.get('window').width;
@@ -157,7 +158,9 @@ export default function AdminDashboard() {
         supabase.from('business_profiles').select('created_at').gte('created_at', new Date(Date.now() - 56 * 86400000).toISOString()).order('created_at'),
         supabase.rpc('get_all_subscription_plans'),
       ]);
-      if (plansError) console.error('[Admin] Plans RPC error:', plansError);
+      // ⚡ SEC-003: logger.error siempre imprime (en futuro, Sentry lo capturará).
+      // logger.log/warn/info quedan silenciados en producción.
+      if (plansError) logger.error('[Admin] Plans RPC error:', plansError);
       const basicCount    = plans?.filter((p: any) => ['basico','básico'].includes((p.plan_type||'').toLowerCase().trim())).length || 0;
       const premiumCount  = plans?.filter((p: any) => (p.plan_type||'').toLowerCase().trim() === 'premium').length || 0;
       const gratuitoCount = plans?.filter((p: any) => (p.plan_type||'').toLowerCase().trim() === 'gratuito').length || 0;
@@ -192,7 +195,7 @@ export default function AdminDashboard() {
         dailyCitas: Object.entries(days).map(([label, value]) => ({ label, value })),
         weeklyNegocios: Object.entries(weeks).map(([label, value]) => ({ label, value })),
       });
-    } catch (e) { console.error('[Admin]', e); }
+    } catch (e) { logger.error('[Admin]', e); }
     finally { setLoading(false); setRefreshing(false); }
   };
 
