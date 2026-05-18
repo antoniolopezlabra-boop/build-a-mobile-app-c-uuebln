@@ -162,7 +162,8 @@ async function validateNoTimeConflict(
   const { data: conflicts, error } = await query.limit(1);
 
   if (error) {
-    console.error('[validateNoTimeConflict] DB error:', error);
+    // ⚡ SEC-003: logger.error siempre imprime (en futuro Sentry lo captura).
+    logger.error('[validateNoTimeConflict] DB error:', error);
     throw new Error('Error al validar disponibilidad del horario');
   }
 
@@ -219,8 +220,11 @@ async function validateNoTimeBlock(
     .or(staffFilter);
 
   if (error) {
-    console.warn('[validateNoTimeBlock] DB error:', error);
-    return; // No bloquear creación por error de DB; el cliente ya validó visualmente
+    // ⚡ SEC-003: logger.warn queda silenciado en producción (no es crítico).
+    // El comportamiento "no bloquear creación por error de DB" se preserva:
+    // el cliente ya validó visualmente, esto es una segunda defensa.
+    logger.warn('[validateNoTimeBlock] DB error:', error);
+    return;
   }
 
   if (!blocks || blocks.length === 0) return;
