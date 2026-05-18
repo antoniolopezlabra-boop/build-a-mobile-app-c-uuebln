@@ -1,238 +1,244 @@
 // ══════════════════════════════════════════════════════════════════════
-// errorMessages.ts — Mapeo de códigos de error a mensajes accionables
+// utils/errorMessages.ts — Mensajes de error contextualizados (UX-003)
 //
-// HALLAZGO UX-003 DEL REPORTE DE AUDITORÍA (May 17 2026)
-// Múltiples lugares mostraban Alert.alert('Error', 'No se pudo guardar')
-// genéricos. El usuario no sabía qué hacer ni si era su culpa, problema
-// de red, o bug. Esto frustra al usuario y aumenta churn temprano.
+// Este módulo mapea los códigos de error generados por utils/api.ts (y
+// otros lugares de la app) a mensajes accionables para el usuario final.
 //
-// SOLUCIÓN: helper centralizado getActionableErrorMessage(error) que
-// devuelve { title, message, action? } basándose en el código del error
-// (que utils/api.ts ya setea correctamente con err.code = 'PLAN_LIMIT_REACHED', etc.).
+// PROBLEMA RESUELTO:
+// Antes, los errores se mostraban como "Error: No se pudo guardar" sin
+// contexto. El usuario no sabía qué hacer ni si era su culpa.
 //
-// Esto da consistencia 100% al manejo de errores en toda la app.
+// AHORA:
+// Cada error se traduce a un mensaje específico con título, descripción
+// y, cuando aplica, una acción sugerida.
+//
+// USO:
+//   import { translateError } from '@/utils/errorMessages';
+//   try { ... } catch (e) {
+//     const { title, message, actionLabel } = translateError(e);
+//     Alert.alert(title, message, [
+//       { text: 'OK', style: 'cancel' },
+//       actionLabel && { text: actionLabel, onPress: ... }
+//     ]);
+//   }
 // ══════════════════════════════════════════════════════════════════════
 
-export interface ActionableError {
-  /** Título corto que va en el Alert (ej. "Sin espacio en tu plan") */
+export interface FriendlyError {
+  /** Título corto del Alert (4-6 palabras max) */
   title: string;
-  /** Cuerpo del mensaje, accionable y claro (ej. "Actualiza a Premium...") */
+  /** Mensaje principal del Alert (1-2 frases accionables) */
   message: string;
-  /** Texto sugerido para el botón de acción (ej. "Ver planes") */
+  /** Etiqueta del botón de acción sugerido (opcional) */
   actionLabel?: string;
-  /** Si la acción debe abrir una ruta de la app, aquí va el path */
-  actionPath?: string;
-  /** Indica si es un error del usuario (no del sistema) — útil para no
-      enviarlo a Sentry como "bug" cuando se integre en ARCH-002 */
-  isUserError?: boolean;
+  /** Identificador del tipo de acción sugerida (para router) */
+  action?: 'upgrade_plan' | 'change_settings' | 'retry' | 'contact_support' | 'change_time';
+  /** Código de error original (para Sentry / debugging) */
+  code?: string;
 }
 
 /**
- * Convierte cualquier error (de Supabase, fetch, o lanzado por utils/api.ts)
- * en un mensaje claro y accionable para mostrar al usuario.
- *
- * @example
- *   try { await apiPost('/api/appointments', body); }
- *   catch (e) {
- *     const err = getActionableErrorMessage(e);
- *     Alert.alert(err.title, err.message);
- *   }
+ * Traduce un Error a un FriendlyError accionable.
+ * Reconoce códigos específicos de la API (PLAN_LIMIT_REACHED, etc.) y
+ * patrones comunes (red, timeout, 401, etc.).
  */
-export function getActionableErrorMessage(error: any): ActionableError {
-  // Sin error → no debería pasar, pero por seguridad.
-  if (!error) {
+export function translateError(error: any): FriendlyError {
+  const code: string | undefined = error?.code;
+  const message: string = error?.message ?? String(error ?? '');
+  const lowerMsg = message.toLowerCase();
+
+  // ── Códigos de error de la API ────────────────────────────────────
+
+  if (code === 'PLAN_LIMIT_REACHED') {
     return {
-      title: 'Algo salió mal',
-      message: 'No pudimos completar la acción. Intenta de nuevo.',
+      title: 'Límite alcanzado',
+      message: 'Llegaste al tope de citas de tu Plan Básico este mes. Actualiza a Premium para citas ilimitadas y WhatsApp automático.',
+      actionLabel: 'Ver planes',
+      action: 'upgrade_plan',
+      code,
     };
   }
 
-  // ── 1. CÓDIGOS DE ERROR CUSTOM DE utils/api.ts ──────────────────────
-  // Estos los lanza nuestra capa de validación con err.code = '...'
-
-  if (error.code === 'PLAN_LIMIT_REACHED') {
+  if (code === 'SLOT_TAKEN') {
     return {
-      title: 'Alcanzaste el límite de tu plan',
-      message: 'Ya usaste tus 10 citas mensuales del Plan Básico. Actualiza a Premium para tener citas ilimitadas + WhatsApp automático.',
-      actionLabel: 'Ver Premium',
-      actionPath: '/settings/subscription',
-      isUserError: true,
+      title: 'Horario ocupado',
+      message: 'Ese horario acaba de ocuparse, probablemente por otra reserva. Elige otro slot disponible.',
+      actionLabel: 'Elegir otro horario',
+      action: 'change_time',
+      code,
     };
   }
 
-  if (error.code === 'SLOT_TAKEN') {
-    return {
-      title: 'Ese horario ya está ocupado',
-      message: 'Otra cita acaba de tomar ese horario. Por favor elige otro slot disponible en la agenda.',
-      isUserError: true,
-    };
-  }
-
-  if (error.code === 'SLOT_BLOCKED') {
-    // El message original viene con el nombre del bloqueo y rango horario,
-    // así que es bastante accionable tal cual. Lo aprovechamos.
+  if (code === 'SLOT_BLOCKED') {
     return {
       title: 'Horario bloqueado',
-      message: error.message || 'Ese horario está bloqueado en tu agenda. Elige otro horario disponible.',
-      isUserError: true,
+      message: message || 'Ese horario está bloqueado (descanso, comida o no disponible). Elige otro horario libre.',
+      actionLabel: 'Elegir otro horario',
+      action: 'change_time',
+      code,
     };
   }
 
-  if (error.code === 'OVERLAP_NOT_ALLOWED') {
+  if (code === 'OVERLAP_NOT_ALLOWED') {
     return {
-      title: 'Función exclusiva de Plan Luxury',
-      message: 'Las citas simultáneas solo están disponibles en el Plan Luxury. Actualiza tu plan para activar esta función y atender a varios clientes a la vez.',
-      actionLabel: 'Ver Luxury',
-      actionPath: '/settings/subscription',
-      isUserError: true,
+      title: 'Solo en Plan Luxury',
+      message: 'Las citas simultáneas solo están disponibles en el Plan Luxury. Actualiza tu plan para activar esta función.',
+      actionLabel: 'Ver Plan Luxury',
+      action: 'upgrade_plan',
+      code,
     };
   }
 
-  if (error.code === 'OVERLAP_TOGGLE_OFF') {
+  if (code === 'OVERLAP_TOGGLE_OFF') {
     return {
-      title: 'Activa citas simultáneas',
-      message: 'Tu plan permite citas simultáneas pero la opción está desactivada. Actívala desde Ajustes → Mi Negocio para crear citas que se traslapen.',
+      title: 'Función desactivada',
+      message: 'El toggle "Citas simultáneas" no está activado. Actívalo desde Ajustes > Mi Negocio para crear citas en el mismo horario.',
       actionLabel: 'Ir a Ajustes',
-      actionPath: '/settings/business',
-      isUserError: true,
+      action: 'change_settings',
+      code,
     };
   }
 
-  // ── 2. ERRORES DE SUPABASE (auth, RLS, conexión) ────────────────────
+  if (code === 'PLAN_REQUIRED') {
+    return {
+      title: 'Función Premium',
+      message: 'El asistente IA está disponible en Plan Premium y Luxury. Actualiza tu plan en Ajustes > Plan y Suscripción.',
+      actionLabel: 'Ver planes',
+      action: 'upgrade_plan',
+      code,
+    };
+  }
 
-  const code = error.code || error.error?.code || '';
-  const message = (error.message || error.error?.message || '').toLowerCase();
+  if (code === 'RATE_LIMITED') {
+    return {
+      title: 'Demasiadas solicitudes',
+      message: message || 'Has alcanzado el límite diario de mensajes al asistente IA. Intenta de nuevo mañana.',
+      code,
+    };
+  }
 
-  // Autenticación expirada
-  if (code === 'PGRST301' || message.includes('jwt expired') || message.includes('invalid jwt')) {
+  // ── Errores de autenticación ──────────────────────────────────────
+
+  if (lowerMsg.includes('invalid login') || lowerMsg.includes('invalid credentials') ||
+      lowerMsg.includes('email not confirmed') || message.includes('401')) {
+    return {
+      title: 'Correo o contraseña incorrectos',
+      message: 'Verifica tus credenciales e intenta de nuevo. Si olvidaste tu contraseña, puedes restablecerla.',
+      code: 'AUTH_INVALID',
+    };
+  }
+
+  if (lowerMsg.includes('no authenticated user') || lowerMsg.includes('session expired') ||
+      lowerMsg.includes('jwt expired')) {
     return {
       title: 'Tu sesión expiró',
-      message: 'Por favor inicia sesión de nuevo para continuar.',
-      actionLabel: 'Ir a iniciar sesión',
-      actionPath: '/auth/login',
+      message: 'Por favor vuelve a iniciar sesión.',
+      code: 'AUTH_EXPIRED',
     };
   }
 
-  // RLS bloqueando acceso
-  if (code === '42501' || message.includes('row-level security') || message.includes('permission denied')) {
+  // ── Errores de red ────────────────────────────────────────────────
+
+  if (lowerMsg.includes('network request failed') || lowerMsg.includes('fetch') ||
+      lowerMsg.includes('network') || lowerMsg.includes('failed to fetch')) {
     return {
-      title: 'No tienes permiso',
-      message: 'No tienes acceso a este recurso. Si crees que es un error, contáctanos.',
+      title: 'Sin conexión',
+      message: 'No pudimos conectarnos. Verifica tu internet e intenta de nuevo.',
+      actionLabel: 'Reintentar',
+      action: 'retry',
+      code: 'NETWORK_ERROR',
     };
   }
 
-  // Recurso no encontrado
-  if (code === 'PGRST116' || message.includes('not found') || message.includes('no rows')) {
+  if (lowerMsg.includes('timeout') || lowerMsg.includes('timed out')) {
     return {
-      title: 'No encontramos lo que buscas',
-      message: 'Este elemento puede haber sido eliminado. Refresca la pantalla.',
+      title: 'Se tardó demasiado',
+      message: 'La operación tardó más de lo esperado. Verifica tu conexión e intenta de nuevo.',
+      actionLabel: 'Reintentar',
+      action: 'retry',
+      code: 'TIMEOUT',
     };
   }
 
-  // Conflicto único (ej. email duplicado al registrarse)
-  if (code === '23505' || message.includes('duplicate key') || message.includes('already exists') || message.includes('already registered')) {
+  // ── Errores de Supabase / DB ──────────────────────────────────────
+
+  if (lowerMsg.includes('duplicate key') || lowerMsg.includes('unique constraint')) {
     return {
-      title: 'Ya existe',
-      message: 'Ese dato ya está registrado en el sistema. Verifica e intenta con otro valor.',
-      isUserError: true,
+      title: 'Registro duplicado',
+      message: 'Ya existe un registro con estos datos. Verifica que no hayas creado uno similar antes.',
+      code: 'DUPLICATE',
     };
   }
 
-  // FK violation (referencia a algo que no existe)
-  if (code === '23503' || message.includes('foreign key')) {
+  if (lowerMsg.includes('row-level security') || lowerMsg.includes('rls') ||
+      lowerMsg.includes('permission denied')) {
     return {
-      title: 'Datos incompletos',
-      message: 'Faltan datos relacionados. Asegúrate de tener un cliente y servicio antes de crear la cita.',
-      isUserError: true,
+      title: 'Sin permiso',
+      message: 'No tienes permiso para realizar esta acción. Si crees que es un error, contáctanos.',
+      actionLabel: 'Contactar soporte',
+      action: 'contact_support',
+      code: 'PERMISSION_DENIED',
     };
   }
 
-  // ── 3. ERRORES DE RED ───────────────────────────────────────────────
+  // ── Errores genéricos ─────────────────────────────────────────────
 
-  if (
-    message.includes('network request failed') ||
-    message.includes('failed to fetch') ||
-    message.includes('network error') ||
-    error.name === 'TypeError'
-  ) {
+  // Si el mensaje original es accionable y corto, úsalo directamente
+  if (message && message.length > 5 && message.length < 200 && !lowerMsg.includes('error:')) {
     return {
-      title: 'Sin conexión a internet',
-      message: 'No pudimos conectar al servidor. Verifica tu conexión Wi-Fi o datos móviles e intenta de nuevo.',
+      title: 'No se pudo completar',
+      message,
+      code: code ?? 'UNKNOWN',
     };
   }
 
-  // Timeout
-  if (message.includes('timeout') || message.includes('aborted') || error.name === 'AbortError') {
-    return {
-      title: 'La conexión es lenta',
-      message: 'El servidor tardó demasiado en responder. Verifica tu red e intenta de nuevo.',
-    };
-  }
-
-  // ── 4. ERRORES DE STRIPE / WHATSAPP / OTROS ─────────────────────────
-
-  if (message.includes('stripe')) {
-    return {
-      title: 'Problema con el pago',
-      message: 'No pudimos procesar el pago. Verifica los datos de tu tarjeta o intenta con otra forma de pago.',
-      isUserError: true,
-    };
-  }
-
-  if (message.includes('whatsapp') || message.includes('360dialog') || message.includes('waba')) {
-    return {
-      title: 'WhatsApp no disponible',
-      message: 'No pudimos enviar el mensaje de WhatsApp. La cita se guardó correctamente, pero el cliente no recibirá la notificación automática.',
-    };
-  }
-
-  // ── 5. FALLBACK GENÉRICO ────────────────────────────────────────────
-  // Si llegamos acá es un error que no clasificamos. Usamos el mensaje
-  // original si es legible, o uno genérico amigable.
-
-  const rawMsg = error.message || error.error?.message;
-  if (rawMsg && typeof rawMsg === 'string' && rawMsg.length > 0 && rawMsg.length < 200) {
-    return {
-      title: 'Algo salió mal',
-      message: rawMsg,
-    };
-  }
-
+  // Fallback final
   return {
     title: 'Algo salió mal',
-    message: 'No pudimos completar la acción. Intenta de nuevo en unos segundos.',
+    message: 'Ocurrió un error inesperado. Intenta de nuevo en un momento. Si persiste, escríbenos a soporte@vylta.lat.',
+    actionLabel: 'Reintentar',
+    action: 'retry',
+    code: code ?? 'UNKNOWN',
   };
 }
 
 /**
- * Helper para usar con Alert.alert nativo de React Native.
- * Devuelve los argumentos exactos en el orden correcto.
+ * Helper para mostrar un Alert estandarizado a partir de un error.
+ * Uso: showErrorAlert(error, navigationFunctions)
  *
- * @example
- *   import { Alert } from 'react-native';
- *   import { alertFromError } from '@/utils/errorMessages';
- *
- *   catch (e) {
- *     const [title, message, buttons] = alertFromError(e, router);
- *     Alert.alert(title, message, buttons);
- *   }
+ * Acepta un objeto con callbacks para cada acción (upgrade_plan, etc.)
+ * Si el callback no se provee para esa acción, solo muestra el botón OK.
  */
-export function alertFromError(
-  error: any,
-  router?: { push: (path: any) => void }
-): [string, string, Array<{ text: string; onPress?: () => void; style?: 'default' | 'cancel' | 'destructive' }>] {
-  const err = getActionableErrorMessage(error);
+export interface ErrorAlertActions {
+  onUpgradePlan?: () => void;
+  onChangeSettings?: () => void;
+  onRetry?: () => void;
+  onContactSupport?: () => void;
+  onChangeTime?: () => void;
+}
+
+export function buildErrorAlertButtons(
+  friendly: FriendlyError,
+  actions: ErrorAlertActions = {}
+): Array<{ text: string; onPress?: () => void; style?: 'default' | 'cancel' | 'destructive' }> {
   const buttons: Array<{ text: string; onPress?: () => void; style?: 'default' | 'cancel' | 'destructive' }> = [];
 
-  if (err.actionLabel && err.actionPath && router) {
-    buttons.push({
-      text: err.actionLabel,
-      onPress: () => router.push(err.actionPath as any),
-    });
-    buttons.push({ text: 'Cerrar', style: 'cancel' });
-  } else {
-    buttons.push({ text: 'Entendido', style: 'default' });
+  // Botón principal de acción (si existe)
+  if (friendly.action && friendly.actionLabel) {
+    let callback: (() => void) | undefined;
+    switch (friendly.action) {
+      case 'upgrade_plan':    callback = actions.onUpgradePlan;    break;
+      case 'change_settings': callback = actions.onChangeSettings; break;
+      case 'retry':           callback = actions.onRetry;          break;
+      case 'contact_support': callback = actions.onContactSupport; break;
+      case 'change_time':     callback = actions.onChangeTime;     break;
+    }
+    if (callback) {
+      buttons.push({ text: friendly.actionLabel, onPress: callback, style: 'default' });
+    }
   }
 
-  return [err.title, err.message, buttons];
+  // Siempre incluir un botón de cierre (OK / Cancelar)
+  buttons.push({ text: buttons.length > 0 ? 'Cancelar' : 'Entendido', style: 'cancel' });
+
+  return buttons;
 }
