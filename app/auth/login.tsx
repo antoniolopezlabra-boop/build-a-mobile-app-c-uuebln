@@ -14,6 +14,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { colors } from '@/styles/commonStyles';
 import { ConfirmModal } from '@/components/button';
 import { useAuth } from '@/contexts/AuthContext';
+import { logger } from '@/utils/logger';
 
 export default function LoginScreen() {
   const router = useRouter();
@@ -30,25 +31,27 @@ export default function LoginScreen() {
   };
 
   const handleLogin = async () => {
-    console.log('User tapped Login button');
+    logger.log('User tapped Login button');
 
     if (!email || !password) {
       showError('Por favor completa todos los campos');
       return;
     }
 
-    console.log('Submitting login:', { email });
+    logger.log('Submitting login:', { email });
 
     try {
       await login(email, password);
-      console.log('[Login] Login successful, navigating to home with reset');
+      logger.log('[Login] Login successful, navigating to home with reset');
       await AsyncStorage.setItem('has_seen_onboarding', 'true');
       
       // Use router.replace to clear navigation stack
       // This prevents going back to auth screens
       router.replace('/');
     } catch (error: any) {
-      console.error('Login failed:', error);
+      // logger.error siempre imprime (incluso en producción) — pero como
+      // está envuelto en logger, en el futuro Sentry lo capturará automático.
+      logger.error('Login failed:', error);
       const message = error?.message?.includes('401') || error?.message?.includes('Invalid')
         ? 'Correo o contraseña incorrectos'
         : error?.message || 'Error al iniciar sesión. Intenta de nuevo.';
@@ -110,7 +113,7 @@ export default function LoginScreen() {
           <TouchableOpacity
             style={styles.forgotButton}
             onPress={() => {
-              console.log('User tapped forgot password link');
+              logger.log('User tapped forgot password link');
               router.push('/auth/forgot-password');
             }}
             disabled={authLoading}
@@ -136,7 +139,7 @@ export default function LoginScreen() {
           <TouchableOpacity
             style={styles.linkButton}
             onPress={() => {
-              console.log('User tapped register link');
+              logger.log('User tapped register link');
               router.push('/auth/register');
             }}
             disabled={authLoading}

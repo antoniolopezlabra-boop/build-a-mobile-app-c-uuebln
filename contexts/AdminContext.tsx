@@ -1,6 +1,7 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import { supabase } from '@/lib/supabase';
 import { useAuth } from './AuthContext';
+import { logger } from '@/utils/logger';
 
 interface AdminUser {
   id: string;
@@ -46,7 +47,7 @@ export function AdminProvider({ children }: { children: React.ReactNode }) {
         .eq('is_active', true)
         .single();
 
-      console.log('[AdminContext] result for', uid, ':', data?.role ?? 'not admin', error?.code ?? '');
+      logger.log('[AdminContext] result for', uid, ':', data?.role ?? 'not admin', error?.code ?? '');
 
       if (error || !data) {
         setAdminUser(null);
@@ -60,7 +61,7 @@ export function AdminProvider({ children }: { children: React.ReactNode }) {
         });
       }
     } catch (e) {
-      console.warn('[AdminContext] Error checking admin access:', e);
+      logger.warn('[AdminContext] Error checking admin access:', e);
       setAdminUser(null);
     } finally {
       setLoading(false);

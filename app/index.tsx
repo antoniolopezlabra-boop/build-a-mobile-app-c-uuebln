@@ -4,6 +4,7 @@ import { View, ActivityIndicator, StyleSheet, Text } from 'react-native';
 import { useAuth } from '@/contexts/AuthContext';
 import { supabase } from '@/lib/supabase';
 import { colors } from '@/styles/commonStyles';
+import { logger } from '@/utils/logger';
 
 export default function Index() {
   const router = useRouter();
@@ -15,24 +16,13 @@ export default function Index() {
     if (hasNavigated.current) return;
     hasNavigated.current = true;
 
-    console.log('[Index] Navigating. User:', user ? user.email : 'none', 'loading:', loading);
+    logger.log('[Index] Navigating. User:', user ? user.email : 'none', 'loading:', loading);
 
     const navigate = async () => {
       if (user) {
         const { data: { session } } = await supabase.auth.getSession();
         const authUser = session?.user;
         // ⚡ FIX (May 17 2026): si no hay sesión válida, ir a LOGIN (no onboarding).
-        //
-        // BUG ORIGINAL: aquí se hacía router.replace('/auth/onboarding').
-        // Esto causaba que después de hacer logout (especialmente desde el
-        // panel admin), el Index se re-montaba con `user` aún truthy en el
-        // state de React pero la sesión de Supabase ya invalidada. La línea
-        // forzaba ir al onboarding marketing aunque el usuario ya conociera
-        // la app y solo quisiera volver a iniciar sesión.
-        //
-        // La decisión entre /auth/login y /auth/onboarding la toma el
-        // NavigationGuard de _layout.tsx basándose en has_seen_onboarding.
-        // Index NO debería forzar onboarding por su cuenta.
         if (!authUser) { router.replace('/auth/login'); return; }
 
         // Colaborador → su propia app
@@ -41,7 +31,7 @@ export default function Index() {
           return;
         }
 
-        console.log('[Index] Auth UUID:', authUser.id);
+        logger.log('[Index] Auth UUID:', authUser.id);
 
         const { data: adminData } = await supabase
           .from('vylta_admins')
@@ -50,7 +40,7 @@ export default function Index() {
           .eq('is_active', true)
           .single();
 
-        console.log('[Index] Admin check:', JSON.stringify(adminData));
+        logger.log('[Index] Admin check:', JSON.stringify(adminData));
 
         if (adminData) {
           router.replace('/admin');

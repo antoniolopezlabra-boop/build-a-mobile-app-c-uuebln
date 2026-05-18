@@ -4,6 +4,7 @@ import { STRIPE_PUBLISHABLE_KEY } from '@/services/stripe';
 import { LogBox, View, ActivityIndicator, Image, StyleSheet, Text } from 'react-native';
 import { useEffect, useState, useRef } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { logger } from '@/utils/logger';
 
 LogBox.ignoreAllLogs();
 import { StatusBar } from 'expo-status-bar';
@@ -62,17 +63,16 @@ function AppSplash() {
 // Los admins del sistema están EXENTOS del setup wizard.
 // El check de isAdmin va ANTES del check de setupCompleted.
 //
-// FIX ONBOARDING LOOP — segundo round (May 17 2026, este commit)
-// PROBLEMA: incluso con el flag has_seen_onboarding correctamente seteado
-// en AsyncStorage por AuthContext, el guard mostraba el onboarding al hacer
-// logout. La causa REAL no era el flag faltante en storage, era que el
-// useEffect que LEÍA el flag solo corría una vez al montar el componente
-// (deps vacías). Tras el logout, el state hasSeenOnboarding seguía con el
-// valor obsoleto cargado al arranque.
+// FIX ONBOARDING LOOP — segundo round (May 17 2026, commit b852844d)
+// El useEffect que LEÍA el flag has_seen_onboarding solo corría una vez al
+// montar el componente (deps vacías). Tras el logout, el state seguía con
+// el valor obsoleto cargado al arranque. Solución: re-leer AsyncStorage
+// cuando el `user` cambia.
 //
-// SOLUCIÓN: re-leer AsyncStorage cuando el `user` cambia (incluyendo de
-// truthy → null por logout). Así, después de cada cambio de sesión, el
-// guard re-sincroniza con el storage antes de decidir.
+// FIX SEC-003 (May 17 2026, este commit)
+// Los console.log de debugging se reemplazaron por logger.log, que solo
+// imprime en modo desarrollo (if (__DEV__)). En producción, estos logs
+// quedan silenciados y NO filtran información del flujo de autenticación.
 // ══════════════════════════════════════════════════════════════════════
 function NavigationGuard({ onReady }: { onReady: () => void }) {
   const { user, businessProfile, businessProfileLoaded, loading: authLoading, isStaffAccount } = useAuth();
@@ -91,13 +91,10 @@ function NavigationGuard({ onReady }: { onReady: () => void }) {
   // ⚡ FIX (May 17 2026): re-leer el flag CADA VEZ que cambia el estado de user.
   // Antes solo se leía al montar (deps vacías) y nunca se actualizaba después.
   // Eso causaba que tras logout el guard usara un valor obsoleto del state.
-  //
-  // Ahora: cualquier cambio en `user` (login, logout) dispara una re-lectura.
-  // Esto es seguro y barato (AsyncStorage es rápido en RN).
   useEffect(() => {
     AsyncStorage.getItem('has_seen_onboarding').then(val => {
       const seen = val === 'true';
-      console.log('[Guard] has_seen_onboarding leído de AsyncStorage:', val, '→', seen, '(user:', user?.email ?? 'null', ')');
+      logger.log('[Guard] has_seen_onboarding leído de AsyncStorage:', val, '→', seen, '(user:', user?.email ?? 'null', ')');
       setHasSeenOnboarding(seen);
     });
   }, [user?.id]);
@@ -125,16 +122,12 @@ function NavigationGuard({ onReady }: { onReady: () => void }) {
     if (user && setupSkipped === null) return;
 
     const inAuthScreen  = segments[0] === 'auth';
-    // ⚡ FIX: inAdminScreen detecta TODA la sección /admin (incluyendo
-    // subrutas como /admin/tenants, /admin/promo-codes, /admin/admins).
-    // segments[0] === 'admin' es true para cualquier subruta porque segments
-    // es el array de segmentos del path (ej: ['admin', 'tenants', '[id]']).
     const inAdminScreen = segments[0] === 'admin';
     const inStaffApp    = segments[0] === 'staff-app';
     const inSetupWizard = segments[0] === 'setup';
 
     const navigate = (path: string) => {
-      console.log('[Guard] → navegando a', path, '(user:', user?.email ?? 'null', ', hasSeenOnboarding:', hasSeenOnboarding, ', isAdmin:', isAdmin, ')');
+      logger.log('[Guard] → navegando a', path, '(user:', user?.email ?? 'null', ', hasSeenOnboarding:', hasSeenOnboarding, ', isAdmin:', isAdmin, ')');
       isNavigating.current = true;
       router.replace(path as any);
       setTimeout(() => { isNavigating.current = false; }, 600);
@@ -143,8 +136,6 @@ function NavigationGuard({ onReady }: { onReady: () => void }) {
     const emitReady = () => {
       if (!readyEmittedRef.current) {
         readyEmittedRef.current = true;
-        // Pequeño delay para que el replace tenga tiempo de completar antes de
-        // quitar el splash, evitando ver la pantalla anterior por un frame.
         setTimeout(() => onReady(), 80);
       }
     };
@@ -168,12 +159,6 @@ function NavigationGuard({ onReady }: { onReady: () => void }) {
     }
 
     // 3) ⚡ ADMINISTRADORES DEL SISTEMA (vylta_admins) → área admin SIEMPRE.
-    //
-    // Los admins están EXENTOS del setup wizard porque no son dueños de
-    // negocio. Este check va ANTES del setupCompleted para evitar el loop.
-    //
-    // Si ya está en cualquier ruta /admin/* (negocios, promos, admins, etc.)
-    // NO redirigimos para permitir navegación libre dentro del panel admin.
     if (user && isAdmin) {
       if (!inAdminScreen) navigate('/admin');
       emitReady();
@@ -181,7 +166,6 @@ function NavigationGuard({ onReady }: { onReady: () => void }) {
     }
 
     // 4) USUARIOS REGULARES sin setup completo → wizard.
-    // setupCompleted = (tiene business_profile en BD) OR (lo saltó explícitamente)
     const setupCompleted = businessProfile !== null || setupSkipped === true;
     if (user && !setupCompleted && !inSetupWizard) {
       navigate('/setup');
@@ -212,11 +196,7 @@ function AppStatusBar() {
   return <StatusBar style={isDark ? 'light' : 'dark'} />;
 }
 
-// ───────────────────────────────────────────────────────────────────────────────
 // AppShell: envuelve el Stack y maneja el splash inicial.
-// El splash se monta SIEMPRE al arrancar y solo desaparece cuando
-// NavigationGuard emite onReady (es decir, ya decidió a dónde mandar al user).
-// ───────────────────────────────────────────────────────────────────────────────
 function AppShell() {
   const [appReady, setAppReady] = useState(false);
 
