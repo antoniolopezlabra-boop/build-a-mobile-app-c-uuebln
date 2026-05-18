@@ -297,6 +297,12 @@ export default function AppointmentDetailScreen() {
     ? staffMembers.find(m => m.id === appointment.staff_id)
     : null;
 
+  // ⚡ FIX BUG (May 18 2026): citas con status 'Reagendada' debían tratarse igual
+  // que 'Pendiente' — ambas requieren que el dueño confirme la (nueva) fecha
+  // con el cliente. Antes este estado NO tenía botones, dejando al usuario
+  // atascado sin poder confirmar/cancelar/reagendar nuevamente la cita.
+  const isPendingLike = appointment.status === 'Pendiente' || appointment.status === 'Reagendada';
+
   return (
     <SafeAreaView style={[styles.container, { backgroundColor: tc.bg }]} edges={['top']}>
 
@@ -487,8 +493,19 @@ export default function AppointmentDetailScreen() {
             </View>
           )}
 
-          {appointment.status === 'Pendiente' && (
+          {isPendingLike && (
             <View>
+              {/* ⚡ Banner informativo SOLO para citas reagendadas: aclara al
+                  dueño que la nueva fecha aún necesita confirmación del cliente. */}
+              {appointment.status === 'Reagendada' && (
+                <View style={[styles.solicitudBanner, { backgroundColor: '#FEF3C7', borderColor: '#F59E0B' }]}>
+                  <MaterialIcons name="event-repeat" size={16} color="#F59E0B" />
+                  <View style={{ flex: 1 }}>
+                    <Text style={[styles.solicitudTitle, { color: '#92400E' }]}>Cita reagendada</Text>
+                    <Text style={styles.solicitudSub}>Confirma la nueva fecha con el cliente.</Text>
+                  </View>
+                </View>
+              )}
               <TouchableOpacity style={styles.btnPrimary} onPress={() => showConfirmation('confirm', 'Confirmar Cita', '¿Deseas confirmar esta cita?')} activeOpacity={0.8}>
                 <MaterialIcons name="check-circle" size={22} color="#fff" />
                 <Text style={styles.btnPrimaryText}>Confirmar cita</Text>
