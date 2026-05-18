@@ -15,6 +15,7 @@ import { apiGet } from '@/utils/api';
 import { getCached, setCached, invalidateCache, CACHE_TTL } from '@/utils/cache';
 import { getStatusColor } from '@/utils/appointmentUtils';
 import { supabase } from '@/lib/supabase';
+import { logger } from '@/utils/logger';
 
 function getReportsCacheKey() {
   const n = new Date();
@@ -62,12 +63,24 @@ export default function HomeScreen() {
   const [unpaidAppointments, setUnpaidAppointments] = useState<UnpaidAppointment[]>([]);
   const [markingPaidId,     setMarkingPaidId]     = useState<string | null>(null);
 
+  // ⚡ FIX BUG-002 (May 17 2026): banner visual cuando el dashboard no pudo
+  // refrescar (red lenta, error de Supabase, etc.). Se muestra al usuario
+  // y se auto-oculta después de 5 segundos.
+  const [loadError, setLoadError] = useState<string | null>(null);
+
   const loadingRef  = useRef(false);
   const userIdRef   = useRef<string | undefined>(undefined);
   const prevPathRef = useRef(pathname);
 
   useEffect(() => { userIdRef.current = user?.id; }, [user?.id]);
   useEffect(() => { if (user?.id) loadDashboardData(user.id); }, [user?.id]);
+
+  // Auto-ocultar el banner de error después de 5 segundos.
+  useEffect(() => {
+    if (!loadError) return;
+    const t = setTimeout(() => setLoadError(null), 5000);
+    return () => clearTimeout(t);
+  }, [loadError]);
 
   useEffect(() => {
     const isHome = pathname === '/' || pathname.includes('(home)') ||
@@ -100,11 +113,9 @@ export default function HomeScreen() {
         event: 'UPDATE',
         schema: 'public',
         table: 'appointments',
-        filter: `user_id=eq.${userId}`, // ⚡ filtro server-side (WAL parser)
+        filter: `user_id=eq.${userId}`,
       }, payload => {
         const updated = payload.new as any;
-        // Ya no necesitamos el check `if (updated.user_id !== userId) return`
-        // porque el filtro server-side garantiza que solo recibimos NUESTROS eventos.
         if (updated.paid === true) setUnpaidAppointments(prev => prev.filter(a => a.id !== updated.id));
       }).subscribe();
     return () => { supabase.removeChannel(channel); };
@@ -132,8 +143,26 @@ export default function HomeScreen() {
       if (results[0].status === 'fulfilled') { setStats(results[0].value); setCached('dashboard_stats', results[0].value, CACHE_TTL.DASHBOARD); }
       if (results[1].status === 'fulfilled') { setTodayAppointments(results[1].value); setCached('today_appointments', results[1].value, CACHE_TTL.APPOINTMENTS); }
       if (results[2].status === 'fulfilled') { setWeekAppointments(results[2].value); setCached('week_appointments', results[2].value, CACHE_TTL.APPOINTMENTS); }
+
+      // ⚡ FIX BUG-002: detectar fallas parciales en el dashboard.
+      // Antes: } catch {} finally {}  <-- silenciaba TODOS los errores.
+      // Ahora: si alguna de las 3 promesas falló, loggeamos y avisamos al usuario.
+      const failed = results.filter(r => r.status === 'rejected');
+      if (failed.length > 0) {
+        failed.forEach((r: any) => logger.error('[Dashboard] partial load failed:', r.reason));
+        // Si las 3 fallaron, es probable problema de red. Si solo 1, es transitorio.
+        if (failed.length === results.length) {
+          setLoadError('No pudimos actualizar el dashboard. Verifica tu conexión.');
+        }
+      }
+
       await loadStaffMembers(userId);
-    } catch {} finally {
+    } catch (e) {
+      // ⚡ FIX BUG-002 (May 17 2026): antes este catch estaba vacío y silenciaba errores.
+      // Ahora loggeamos y mostramos un banner discreto al usuario.
+      logger.error('[Dashboard] loadDashboardData failed:', e);
+      setLoadError('No pudimos actualizar el dashboard. Verifica tu conexión.');
+    } finally {
       setLoading(false); setRefreshing(false); loadingRef.current = false;
     }
   };
@@ -143,7 +172,11 @@ export default function HomeScreen() {
       const { data } = await supabase.from('staff_members').select('id, name, color')
         .eq('user_id', userId).eq('is_active', true).order('sort_order');
       setStaffMembers(data || []);
-    } catch {}
+    } catch (e) {
+      // ⚡ FIX BUG-002: antes era catch vacío.
+      // No bloqueamos UX por esto (staff es opcional), pero registramos el error.
+      logger.error('[Dashboard] loadStaffMembers failed:', e);
+    }
   };
 
   const loadUnpaidAppointments = async (userId: string) => {
@@ -155,7 +188,9 @@ export default function HomeScreen() {
         .order('date', { ascending: false }).limit(20);
       if (error) throw error;
       setUnpaidAppointments((data ?? []) as unknown as UnpaidAppointment[]);
-    } catch (e) { console.warn('[Dashboard] loadUnpaidAppointments error:', e); }
+    } catch (e) {
+      logger.error('[Dashboard] loadUnpaidAppointments failed:', e);
+    }
   };
 
   const markAsPaid = async (apptId: string) => {
@@ -168,7 +203,8 @@ export default function HomeScreen() {
       invalidateCache(getReportsCacheKey());
       invalidateCache('dashboard_stats');
     } catch (e: any) {
-      Alert.alert('Error', e?.message ?? 'No se pudo registrar el pago');
+      logger.error('[Dashboard] markAsPaid failed:', e);
+      Alert.alert('Error', e?.message ?? 'No se pudo registrar el pago. Intenta de nuevo.');
     } finally { setMarkingPaidId(null); }
   };
 
@@ -179,7 +215,7 @@ export default function HomeScreen() {
 
   const getGreeting = () => {
     const h = new Date().getHours();
-    if (h < 12) return 'Buenos dias';
+    if (h < 12) return 'Buenos días';
     if (h < 19) return 'Buenas tardes';
     return 'Buenas noches';
   };
@@ -196,10 +232,6 @@ export default function HomeScreen() {
     : todayAppointments;
   const totalUnpaid = unpaidAppointments.reduce((sum, a) => sum + (a.service_cost || 0), 0);
 
-  // ── Color/estilo del banner Gratuito según uso ──
-  // <80%: verde (modo informativo)
-  // 80-99%: amarillo (modo advertencia)
-  // 100%: rojo (modo bloqueo)
   const usageColor = usage.isAtLimit ? '#EF4444' : usage.isNearLimit ? '#F59E0B' : colors.primary;
   const usageBgColor = usage.isAtLimit ? '#FEF2F2' : usage.isNearLimit ? '#FFFBEB' : '#ECFDF5';
   const usageBorderColor = usage.isAtLimit ? '#FCA5A5' : usage.isNearLimit ? '#FCD34D' : colors.primary + '33';
@@ -262,6 +294,23 @@ export default function HomeScreen() {
             )}
           </TouchableOpacity>
         </View>
+
+        {/* ⚡ BANNER DE ERROR (BUG-002 fix) — Aparece si el dashboard falló al cargar.
+            Se auto-oculta después de 5 segundos y permite hacer pull-to-refresh para reintentar. */}
+        {loadError && (
+          <TouchableOpacity
+            style={[s.errorBanner, { backgroundColor: '#FEF2F2', borderColor: '#FCA5A5' }]}
+            onPress={() => setLoadError(null)}
+            activeOpacity={0.85}
+          >
+            <MaterialIcons name="cloud-off" size={18} color="#DC2626" />
+            <View style={{ flex: 1 }}>
+              <Text style={s.errorBannerTitle}>Datos posiblemente desactualizados</Text>
+              <Text style={s.errorBannerDesc}>{loadError} Desliza hacia abajo para reintentar.</Text>
+            </View>
+            <MaterialIcons name="close" size={16} color="#DC2626" />
+          </TouchableOpacity>
+        )}
 
         {/* USAGE BANNER (Plan Básico/Gratuito) — Contador visual con barra de progreso */}
         {isGratuito && !usage.loading && (
@@ -538,6 +587,11 @@ const s = StyleSheet.create({
   avatar:          { width: 56, height: 56, borderRadius: 16, borderWidth: 2, borderColor: colors.primary },
   avatarFallback:  { width: 56, height: 56, borderRadius: 16, justifyContent: 'center', alignItems: 'center', borderWidth: 2, borderColor: colors.primary },
   avatarText:      { fontSize: 20, fontWeight: '900' },
+
+  // ⚡ Banner de error (BUG-002 fix) — discreto y no-bloqueante
+  errorBanner:     { flexDirection: 'row', alignItems: 'center', gap: 10, borderRadius: 12, padding: 12, marginBottom: 16, borderWidth: 1 },
+  errorBannerTitle:{ fontSize: 13, fontWeight: '700', color: '#DC2626' },
+  errorBannerDesc: { fontSize: 11, color: '#991B1B', marginTop: 2 },
 
   // Usage card (Plan Básico) — contador con barra de progreso
   usageCard:       { borderRadius: 16, padding: 16, marginBottom: 20, borderWidth: 1.5 },
