@@ -16,6 +16,7 @@ import { getCached, setCached, invalidateCache, CACHE_TTL } from '@/utils/cache'
 import { getStatusColor } from '@/utils/appointmentUtils';
 import { supabase } from '@/lib/supabase';
 import { logger } from '@/utils/logger';
+import { translateError, buildErrorAlertButtons } from '@/utils/errorMessages';
 
 function getReportsCacheKey() {
   const n = new Date();
@@ -145,12 +146,9 @@ export default function HomeScreen() {
       if (results[2].status === 'fulfilled') { setWeekAppointments(results[2].value); setCached('week_appointments', results[2].value, CACHE_TTL.APPOINTMENTS); }
 
       // ⚡ FIX BUG-002: detectar fallas parciales en el dashboard.
-      // Antes: } catch {} finally {}  <-- silenciaba TODOS los errores.
-      // Ahora: si alguna de las 3 promesas falló, loggeamos y avisamos al usuario.
       const failed = results.filter(r => r.status === 'rejected');
       if (failed.length > 0) {
         failed.forEach((r: any) => logger.error('[Dashboard] partial load failed:', r.reason));
-        // Si las 3 fallaron, es probable problema de red. Si solo 1, es transitorio.
         if (failed.length === results.length) {
           setLoadError('No pudimos actualizar el dashboard. Verifica tu conexión.');
         }
@@ -158,8 +156,7 @@ export default function HomeScreen() {
 
       await loadStaffMembers(userId);
     } catch (e) {
-      // ⚡ FIX BUG-002 (May 17 2026): antes este catch estaba vacío y silenciaba errores.
-      // Ahora loggeamos y mostramos un banner discreto al usuario.
+      // ⚡ FIX BUG-002 (May 17 2026): antes este catch estaba vacío.
       logger.error('[Dashboard] loadDashboardData failed:', e);
       setLoadError('No pudimos actualizar el dashboard. Verifica tu conexión.');
     } finally {
@@ -173,8 +170,7 @@ export default function HomeScreen() {
         .eq('user_id', userId).eq('is_active', true).order('sort_order');
       setStaffMembers(data || []);
     } catch (e) {
-      // ⚡ FIX BUG-002: antes era catch vacío.
-      // No bloqueamos UX por esto (staff es opcional), pero registramos el error.
+      // ⚡ FIX BUG-002: staff es opcional, no bloqueamos UX. Solo log.
       logger.error('[Dashboard] loadStaffMembers failed:', e);
     }
   };
@@ -204,7 +200,17 @@ export default function HomeScreen() {
       invalidateCache('dashboard_stats');
     } catch (e: any) {
       logger.error('[Dashboard] markAsPaid failed:', e);
-      Alert.alert('Error', e?.message ?? 'No se pudo registrar el pago. Intenta de nuevo.');
+      // ⚡ FIX UX-003: usar translateError en lugar de mostrar e?.message
+      // genérico. Da contexto accionable al usuario (sin red, sin permiso, etc.)
+      const friendly = translateError(e);
+      Alert.alert(
+        friendly.title,
+        friendly.message,
+        buildErrorAlertButtons(friendly, {
+          onRetry: () => markAsPaid(apptId),
+          onContactSupport: () => router.push('/settings/support-chat'),
+        }) as any
+      );
     } finally { setMarkingPaidId(null); }
   };
 
@@ -295,8 +301,7 @@ export default function HomeScreen() {
           </TouchableOpacity>
         </View>
 
-        {/* ⚡ BANNER DE ERROR (BUG-002 fix) — Aparece si el dashboard falló al cargar.
-            Se auto-oculta después de 5 segundos y permite hacer pull-to-refresh para reintentar. */}
+        {/* ⚡ BANNER DE ERROR (BUG-002 fix) */}
         {loadError && (
           <TouchableOpacity
             style={[s.errorBanner, { backgroundColor: '#FEF2F2', borderColor: '#FCA5A5' }]}
@@ -312,7 +317,7 @@ export default function HomeScreen() {
           </TouchableOpacity>
         )}
 
-        {/* USAGE BANNER (Plan Básico/Gratuito) — Contador visual con barra de progreso */}
+        {/* USAGE BANNER (Plan Básico/Gratuito) */}
         {isGratuito && !usage.loading && (
           <TouchableOpacity
             style={[s.usageCard, { backgroundColor: isDark ? tc.surface : usageBgColor, borderColor: usageBorderColor }]}
@@ -330,7 +335,6 @@ export default function HomeScreen() {
               <MaterialIcons name="arrow-forward-ios" size={14} color={usageColor} />
             </View>
 
-            {/* Barra de progreso */}
             <View style={s.usageProgressWrap}>
               <View style={[s.usageProgressBg, { backgroundColor: tc.border + '60' }]}>
                 <View style={[s.usageProgressFill, { width: `${usage.percentage}%`, backgroundColor: usageColor }]} />
@@ -588,7 +592,7 @@ const s = StyleSheet.create({
   avatarFallback:  { width: 56, height: 56, borderRadius: 16, justifyContent: 'center', alignItems: 'center', borderWidth: 2, borderColor: colors.primary },
   avatarText:      { fontSize: 20, fontWeight: '900' },
 
-  // ⚡ Banner de error (BUG-002 fix) — discreto y no-bloqueante
+  // ⚡ Banner de error (BUG-002 fix)
   errorBanner:     { flexDirection: 'row', alignItems: 'center', gap: 10, borderRadius: 12, padding: 12, marginBottom: 16, borderWidth: 1 },
   errorBannerTitle:{ fontSize: 13, fontWeight: '700', color: '#DC2626' },
   errorBannerDesc: { fontSize: 11, color: '#991B1B', marginTop: 2 },
