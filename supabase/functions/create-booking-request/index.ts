@@ -94,6 +94,18 @@ serve(async (req) => {
     }
 
     // ── Verificar límite del plan Gratuito ──────────────────────────────
+    //
+    // ⚡ FIX BUG (May 19 2026): se eliminó el filtro
+    //    .not('status', 'in', '("Cancelada","No asistió","Rechazada")')
+    // para que TODAS las citas creadas en el mes cuenten para el límite,
+    // incluyendo las canceladas. Razones:
+    //   1. CONSISTENCIA con contexts/useGratuitoUsage.tsx (contador del
+    //      home) y utils/api.ts (backend de la app móvil).
+    //   2. ANTI-ABUSO: sin este cambio, un cliente externo (vía link
+    //      público) podría crear cita 11 si una previa fue cancelada.
+    //   3. ESTÁNDAR SaaS: los recursos creados consumen cuota, las
+    //      cancelaciones no devuelven crédito.
+    //
     const { data: sub } = await supabase
       .from('subscription_plans')
       .select('plan_type, status')
@@ -109,13 +121,13 @@ serve(async (req) => {
       const lastDay    = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate()
       const monthEnd   = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(lastDay).padStart(2, '0')}`
 
+      // NOTA: Sin filtro de status — TODAS las citas del mes cuentan
       const { count } = await supabase
         .from('appointments')
         .select('id', { count: 'exact', head: true })
         .eq('user_id', link.user_id)
         .gte('date', monthStart)
         .lte('date', monthEnd)
-        .not('status', 'in', '("Cancelada","No asistió","Rechazada")')
 
       if ((count ?? 0) >= GRATUITO_MONTHLY_LIMIT) {
         return json({
@@ -127,6 +139,8 @@ serve(async (req) => {
     // ────────────────────────────────────────────────────────────────────
 
     // ── Verificar disponibilidad del slot vs citas existentes ──
+    // NOTA: SÍ excluye canceladas — un slot cancelado SÍ libera el horario
+    // para volver a reservarse.
     let conflictQuery = supabase
       .from('appointments')
       .select('id')
