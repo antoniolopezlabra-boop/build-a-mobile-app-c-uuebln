@@ -8,6 +8,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import { invalidateCache } from '@/utils/cache';
 import { apiGet, apiPut } from '@/utils/api';
 import { supabase } from '@/lib/supabase';
+import { logger } from '@/utils/logger';
 import React, { useEffect, useState, useRef } from 'react';
 import { IconSymbol } from '@/components/IconSymbol';
 import { useRouter, useLocalSearchParams } from 'expo-router';
@@ -94,13 +95,28 @@ function calcAppointmentDuration(appt: Appointment): number {
 
 export default function RescheduleAppointmentScreen() {
   const router = useRouter();
-  const { id } = useLocalSearchParams();
+  // ⚡ FIX BUG (May 18 2026): aceptar params opcionales para cambio de servicio.
+  // Cuando el usuario cambia el servicio en la pantalla de detalle y la
+  // duración nueva es distinta a la actual, [id].tsx redirige aquí
+  // pasando estos 3 params en la URL.
+  const { id, service_name, service_cost, duration } = useLocalSearchParams<{
+    id: string;
+    service_name?: string;
+    service_cost?: string;
+    duration?: string;
+  }>();
   const { colors: tc, isDark } = useTheme();
   const { user } = useAuth();
   const insets = useSafeAreaInsets();
 
   // ⚡ Padding inferior dinámico para respetar zona de tolerancia (May 17 2026)
   const safeBottom = Math.max(insets.bottom, 16);
+
+  // Modo "reagendar + cambiar servicio" si llegaron params de servicio nuevo.
+  const newServiceName = service_name && service_name.trim() !== '' ? service_name : null;
+  const newServiceCost = service_cost && service_cost !== '' ? Number(service_cost) : null;
+  const newDurationMin = duration && duration !== '' ? Number(duration) : null;
+  const isServiceChangeMode = !!newServiceName && newDurationMin != null;
 
   const saveLockRef = useRef(false);
   const [loading, setLoading]   = useState(true);
@@ -145,9 +161,24 @@ export default function RescheduleAppointmentScreen() {
       const data = await apiGet<TimeBlockData[]>('/api/time-blocks');
       setTimeBlocks(data || []);
     } catch (e) {
-      console.warn('[reschedule] loadTimeBlocks error:', e);
+      // ⚡ SEC-003: console.warn → logger.warn (silenciado en producción).
+      logger.warn('[reschedule] loadTimeBlocks error:', e);
       setTimeBlocks([]);
     }
+  };
+
+  // ⚡ FIX BUG (May 18 2026): determinar la duración EFECTIVA a usar para
+  // calcular los slots disponibles. Si venimos de "cambiar servicio con
+  // duración distinta", usar la duración del nuevo servicio. Si no,
+  // usar la duración actual de la cita.
+  const getEffectiveDuration = (): number => {
+    if (isServiceChangeMode && newDurationMin && newDurationMin > 0) {
+      return newDurationMin;
+    }
+    if (appointment) {
+      return calcAppointmentDuration(appointment);
+    }
+    return 30;
   };
 
   const checkAvailability = async () => {
@@ -157,7 +188,7 @@ export default function RescheduleAppointmentScreen() {
       const dateString = toDateStr(date);
       const dayOfWeek  = date.getDay();
       const staffId    = appointment.staff_id || null;
-      const duration   = calcAppointmentDuration(appointment);
+      const duration   = getEffectiveDuration(); // ⚡ FIX BUG: usar duración efectiva
       const subBlocksNeeded = Math.ceil(duration / 30);
 
       const { data: appts } = await supabase
@@ -284,11 +315,20 @@ export default function RescheduleAppointmentScreen() {
     setSaving(true);
     try {
       const dateString = toDateStr(date);
-      await apiPut(`/api/appointments/${appointment.id}`, {
+      // ⚡ FIX BUG (May 18 2026): si venimos de "cambiar servicio con duración
+      // distinta", el PUT incluye TAMBIÉN service_name, service_cost y newDuration.
+      // El backend (apiPut, commit 7a17ae11) ya soporta estos campos.
+      const body: any = {
         date: dateString,
         time: time,
         status: 'Pendiente',
-      });
+      };
+      if (isServiceChangeMode) {
+        body.service_name = newServiceName;
+        body.service_cost = newServiceCost ?? 0;
+        body.newDuration  = newDurationMin;
+      }
+      await apiPut(`/api/appointments/${appointment.id}`, body);
       invalidateCache('appointments_list');
       invalidateCache('today_appointments');
       invalidateCache('week_appointments');
@@ -324,7 +364,8 @@ export default function RescheduleAppointmentScreen() {
   const formattedDate = date.toLocaleDateString('es-MX', { weekday:'long', year:'numeric', month:'long', day:'numeric' });
   const formattedTempDate = tempDate.toLocaleDateString('es-MX', { weekday:'long', year:'numeric', month:'long', day:'numeric' });
   const clientName = appointment.client?.name || appointment.clientNameTemp || 'Cliente';
-  const duration = calcAppointmentDuration(appointment);
+  // ⚡ FIX BUG: la duración mostrada es la efectiva (nueva si hay cambio de servicio).
+  const duration = getEffectiveDuration();
   const durationLabel = duration < 60
     ? `${duration} min`
     : duration === 60
@@ -339,7 +380,10 @@ export default function RescheduleAppointmentScreen() {
         <TouchableOpacity onPress={() => router.back()} style={s.backButton}>
           <IconSymbol ios_icon_name="chevron.left" android_material_icon_name="arrow-back" size={24} color={tc.text} />
         </TouchableOpacity>
-        <Text style={[s.title, { color: tc.text }]}>Reagendar Cita</Text>
+        <Text style={[s.title, { color: tc.text }]}>
+          {/* ⚡ FIX BUG: título dinámico según el modo */}
+          {isServiceChangeMode ? 'Cambiar servicio' : 'Reagendar Cita'}
+        </Text>
         <View style={s.placeholder} />
       </View>
 
@@ -348,10 +392,33 @@ export default function RescheduleAppointmentScreen() {
         contentContainerStyle={{ paddingBottom: safeBottom }}
         showsVerticalScrollIndicator={false}
       >
+        {/* ⚡ FIX BUG (May 18 2026): banner morado informativo cuando venimos
+            del modal "Cambiar servicio" con duración distinta. */}
+        {isServiceChangeMode && (
+          <View style={s.serviceChangeBanner}>
+            <MaterialIcons name="swap-horiz" size={18} color="#8B5CF6" />
+            <View style={{ flex: 1 }}>
+              <Text style={s.serviceChangeTitle}>Cambiando servicio</Text>
+              <Text style={s.serviceChangeSub}>
+                Nuevo: {newServiceName} · {durationLabel}{newServiceCost ? ` · $${newServiceCost.toLocaleString('es-MX')}` : ''}
+              </Text>
+              <Text style={s.serviceChangeHint}>
+                Elige un nuevo horario que se ajuste a la nueva duración.
+              </Text>
+            </View>
+          </View>
+        )}
+
         <View style={[s.infoCard, { backgroundColor: tc.surface, borderColor: tc.border }]}>
           <Text style={[s.infoTitle, { color: tc.textMuted }]}>Cita actual</Text>
           <Text style={[s.infoClient, { color: tc.text }]}>{clientName}</Text>
-          <Text style={[s.infoService, { color: tc.textMuted }]}>{appointment.service || 'Servicio'} · {durationLabel}</Text>
+          <Text style={[s.infoService, { color: tc.textMuted }]}>
+            {/* ⚡ FIX BUG: si hay cambio de servicio, mostrar el servicio ACTUAL
+                (no el nuevo) para que el usuario tenga claro qué tenía antes. */}
+            {appointment.service || 'Servicio'} · {isServiceChangeMode
+              ? `${calcAppointmentDuration(appointment)} min`
+              : durationLabel}
+          </Text>
           <Text style={[s.infoDateTime, { color: tc.textMuted }]}>
             {new Date(appointment.date+'T12:00:00').toLocaleDateString('es-MX')} · {appointment.time}
           </Text>
@@ -459,7 +526,10 @@ export default function RescheduleAppointmentScreen() {
         >
           {saving
             ? <ActivityIndicator color="#ffffff" />
-            : <Text style={s.saveButtonText}>Guardar Cambios</Text>
+            : <Text style={s.saveButtonText}>
+                {/* ⚡ FIX BUG: texto del botón refleja la acción real */}
+                {isServiceChangeMode ? 'Guardar nuevo servicio y horario' : 'Guardar Cambios'}
+              </Text>
           }
         </TouchableOpacity>
       </ScrollView>
@@ -508,6 +578,11 @@ const s = StyleSheet.create({
   title:              { fontSize: 20, fontWeight: '700' },
   placeholder:        { width: 32 },
   content:            { flex: 1, padding: 20 },
+  // ⚡ FIX BUG (May 18 2026): banner morado para modo "cambiar servicio".
+  serviceChangeBanner:{ flexDirection: 'row', alignItems: 'flex-start', gap: 10, backgroundColor: '#F3E8FF', borderRadius: 12, padding: 14, marginBottom: 16, borderWidth: 1, borderColor: '#C4B5FD' },
+  serviceChangeTitle: { fontSize: 13, fontWeight: '800', color: '#6D28D9' },
+  serviceChangeSub:   { fontSize: 13, fontWeight: '600', color: '#5B21B6', marginTop: 3 },
+  serviceChangeHint:  { fontSize: 11, color: '#7C3AED', marginTop: 4, fontStyle: 'italic' },
   infoCard:           { borderRadius: 14, padding: 18, marginBottom: 24, borderWidth: 1 },
   infoTitle:          { fontSize: 12, fontWeight: '700', letterSpacing: 0.5, marginBottom: 8 },
   infoClient:         { fontSize: 20, fontWeight: '700', marginBottom: 4 },
