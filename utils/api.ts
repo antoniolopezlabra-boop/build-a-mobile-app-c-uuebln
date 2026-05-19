@@ -3,12 +3,18 @@ import { supabase } from '@/lib/supabase';
 import { logger } from '@/utils/logger';
 
 // Estados que NO cuentan como "cita del día/semana/mes" (citas descartadas)
+// USO: validateNoTimeConflict (slot disponible si se canceló), KPIs de
+// Hoy/Esta semana en /api/stats/dashboard, endpoint /api/appointments/date/X.
+// NO se usa en enforceGratuitoMonthlyLimit — ahí TODAS las citas cuentan.
 const EXCLUDED_STATUSES = ['Cancelada', 'No asistió', 'Rechazada'];
 
 // Estados que SÍ cuentan como "ocupando el slot" (para availability check)
 const ACTIVE_STATUSES = ['Pendiente', 'Confirmada', 'Completada', 'Pagado', 'Reagendada', 'En espera', 'Solicitud'];
 
-// Límite mensual del plan Gratuito (debe coincidir con create-booking-request Edge Function)
+// Límite mensual del plan Gratuito.
+// IMPORTANTE: debe coincidir con GRATUITO_MONTHLY_LIMIT en:
+//   • contexts/useGratuitoUsage.tsx (contador del home)
+//   • supabase/functions/create-booking-request/index.ts (link público)
 const GRATUITO_MONTHLY_LIMIT = 10;
 
 export async function getCurrentUserId(): Promise<string> {
@@ -59,6 +65,16 @@ function extractIdFromPath(path: string): string {
 }
 
 // Valida si un usuario Gratuito ha alcanzado su límite mensual.
+//
+// ⚡ FIX BUG (May 19 2026): se eliminó el filtro .not('status', 'in', ...)
+// que excluía citas Canceladas/No asistió/Rechazada. Ahora TODAS las citas
+// creadas en el mes cuentan para el límite. Razones:
+//   1. CONSISTENCIA con el contador del home (useGratuitoUsage.tsx) y la
+//      Edge Function create-booking-request (link público).
+//   2. ANTI-ABUSO: sin este cambio, un usuario podría crear+cancelar
+//      infinitamente sin tocar la cuota mensual.
+//   3. ESTÁNDAR SaaS: la mayoría de SaaS cuentan recursos creados, no
+//      devuelven crédito por cancelaciones.
 async function enforceGratuitoMonthlyLimit(userId: string): Promise<void> {
   const { data: sub } = await supabase
     .from('subscription_plans')
@@ -73,13 +89,13 @@ async function enforceGratuitoMonthlyLimit(userId: string): Promise<void> {
   const monthStart = getMonthStartString(now.getFullYear(), now.getMonth());
   const monthEnd   = getMonthEndString(now.getFullYear(), now.getMonth());
 
+  // NOTA: Sin filtro de status — TODAS las citas del mes cuentan
   const { count } = await supabase
     .from('appointments')
     .select('id', { count: 'exact', head: true })
     .eq('user_id', userId)
     .gte('date', monthStart)
-    .lte('date', monthEnd)
-    .not('status', 'in', `("${EXCLUDED_STATUSES.join('","')}")`);
+    .lte('date', monthEnd);
 
   if ((count ?? 0) >= GRATUITO_MONTHLY_LIMIT) {
     const err: any = new Error(
@@ -132,6 +148,8 @@ async function validateOverlappingPermission(userId: string, isOverlapping: bool
 
 // ────────────────────────────────────────────────────────────────────
 // SEGURIDAD: Valida que NO haya conflicto de horario antes de crear/reagendar.
+// NOTA: SÍ excluye citas canceladas — un slot cancelado SÍ está libre
+// para volver a reservarse.
 // ────────────────────────────────────────────────────────────────────
 async function validateNoTimeConflict(
   userId: string,
