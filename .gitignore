@@ -41,3 +41,6 @@ package-lock.json
 supabase/.temp/
 
 *.jks
+
+# Backups automáticos de EAS
+*.backup
