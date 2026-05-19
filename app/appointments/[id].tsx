@@ -35,6 +35,14 @@ interface StaffMember {
   busy?: boolean;
 }
 
+// ⚡ FIX BUG (May 18 2026): interface de servicios para el modal de cambio.
+interface Service {
+  id: string;
+  name: string;
+  durationMinutes: number;
+  price: number;
+}
+
 interface Appointment {
   id: string;
   date: string;
@@ -42,6 +50,7 @@ interface Appointment {
   endTime?: string;
   end_time?: string;
   service: string;
+  service_cost?: number | null;
   status: 'Confirmada' | 'Pendiente' | 'Cancelada' | 'Completada' | 'No asistió' | 'Reagendada' | 'Pagado' | 'En espera' | 'Solicitud';
   notes?: string | null;
   client: Client | null;
@@ -58,6 +67,21 @@ function getReportsCacheKey() {
   const n = new Date();
   return `reports_stats_${n.getFullYear()}_${n.getMonth() + 1}`;
 }
+
+// ⚡ FIX BUG (May 18 2026): helpers para calcular duración de la cita actual.
+function timeToMin(t: string): number {
+  const [h, m] = t.split(':').map(Number);
+  return h * 60 + m;
+}
+function calcApptDuration(startTime: string, endTime: string | null | undefined): number {
+  if (!endTime) return 30;
+  const diff = timeToMin(endTime) - timeToMin(startTime);
+  return diff > 0 ? diff : 30;
+}
+
+// Estados de la cita en los que NO se permite cambiar de servicio.
+// (Cancelada/No asistió/Rechazada = cita "cerrada"; Pagado = afecta reportes financieros.)
+const STATUSES_LOCKED_FOR_SERVICE_CHANGE = ['Cancelada', 'No asistió', 'Rechazada', 'Pagado'];
 
 export default function AppointmentDetailScreen() {
   const router = useRouter();
@@ -81,12 +105,19 @@ export default function AppointmentDetailScreen() {
   const [assignStaffModal, setAssignStaffModal] = useState(false);
   const [assigningStaff, setAssigningStaff]     = useState(false);
 
+  // ⚡ FIX BUG (May 18 2026): estado para modal "Cambiar servicio".
+  const [services, setServices]                     = useState<Service[]>([]);
+  const [changeServiceModal, setChangeServiceModal] = useState(false);
+  const [changingService, setChangingService]       = useState(false);
+
   useEffect(() => { if (id) loadAll(); }, [id]);
 
   const loadAll = async () => {
     setLoading(true);
     try {
-      const [data, staffData] = await Promise.all([
+      // ⚡ FIX BUG (May 18 2026): cargar servicios junto con cita y staff
+      // para que el modal "Cambiar servicio" tenga la lista lista al abrirlo.
+      const [data, staffData, servicesData] = await Promise.all([
         apiGet<Appointment>(`/api/appointments/${id}`),
         supabase
           .from('staff_members')
@@ -95,6 +126,7 @@ export default function AppointmentDetailScreen() {
           .eq('is_active', true)
           .order('sort_order')
           .then(r => r.data || []),
+        apiGet<Service[]>('/api/services'),
       ]);
       if (data) {
         setAppointment(data);
@@ -105,6 +137,7 @@ export default function AppointmentDetailScreen() {
         router.back();
       }
       setStaffMembers(staffData as StaffMember[]);
+      setServices(servicesData || []);
     } catch (error) {
       logger.error('[AppointmentDetail] Error loading:', error);
       router.back();
@@ -185,6 +218,117 @@ export default function AppointmentDetailScreen() {
     } finally {
       setAssigningStaff(false);
     }
+  };
+
+  // ⚡ FIX BUG (May 18 2026): cambiar servicio de una cita ya creada.
+  //
+  // Reglas de negocio (acordadas con usuario el 18 may 2026):
+  //   1. Si el servicio nuevo tiene la MISMA duración que el actual:
+  //      → Patch directo. Validamos que el slot siga libre con la nueva
+  //        duración (debería estarlo porque es la misma, pero por seguridad
+  //        chequeamos contra otras citas del mismo día).
+  //      → Si hay conflicto (caso raro pero posible) → caemos al caso 2.
+  //
+  //   2. Si la duración cambia:
+  //      → Redirigimos a la pantalla de reschedule con el servicio nuevo
+  //        pre-seleccionado por URL params. Allí el usuario elige nuevo horario
+  //        y al guardar se aplican AMBOS cambios (servicio + fecha/hora).
+  const handleChangeService = async (svc: Service) => {
+    if (!appointment) return;
+
+    // No-op si seleccionó el mismo servicio ya asignado.
+    if (svc.name === appointment.service) {
+      setChangeServiceModal(false);
+      return;
+    }
+
+    const currentEnd = appointment.endTime || appointment.end_time;
+    const currentDuration = currentEnd ? calcApptDuration(appointment.time, currentEnd) : 30;
+    const sameDuration = svc.durationMinutes === currentDuration;
+
+    if (sameDuration) {
+      setChangingService(true);
+      try {
+        // Validar conflicto en el slot actual contra otras citas (excluyendo esta).
+        const startMin = timeToMin(appointment.time);
+        const endMin   = startMin + svc.durationMinutes;
+        const newEndTime = `${Math.floor(endMin/60).toString().padStart(2,'0')}:${(endMin%60).toString().padStart(2,'0')}`;
+
+        const { data: conflicts } = await supabase
+          .from('appointments')
+          .select('id')
+          .eq('user_id', user?.id)
+          .eq('date', appointment.date)
+          .neq('id', appointment.id)
+          .not('status', 'in', '("Cancelada","No asistió","Rechazada")')
+          .lt('start_time', newEndTime)
+          .gt('end_time', appointment.time)
+          .limit(1);
+
+        if (conflicts && conflicts.length > 0) {
+          // Conflicto detectado en mismo slot → redirigir a reagendar (Opción B).
+          setChangeServiceModal(false);
+          setChangingService(false);
+          Alert.alert(
+            'Conflicto en el horario',
+            `El servicio "${svc.name}" tiene la misma duración, pero el slot actual ya no está libre. Elige un nuevo horario.`,
+            [
+              { text: 'Cancelar', style: 'cancel' },
+              {
+                text: 'Elegir horario',
+                onPress: () => router.push({
+                  pathname: `/appointments/${appointment.id}/reschedule`,
+                  params: {
+                    service_name: svc.name,
+                    service_cost: String(svc.price),
+                    duration: String(svc.durationMinutes),
+                  },
+                }),
+              },
+            ]
+          );
+          return;
+        }
+
+        // Sin conflicto → patch directo.
+        await apiPatch(`/api/appointments/${appointment.id}`, {
+          service_name: svc.name,
+          service_cost: svc.price,
+          end_time: newEndTime,
+        });
+        invalidateCaches();
+        setChangeServiceModal(false);
+        await loadAll();
+        Alert.alert('✓ Servicio actualizado', `El servicio cambió a "${svc.name}".`);
+      } catch (error: any) {
+        logger.error('[AppointmentDetail] handleChangeService error:', error);
+        Alert.alert('Error', error?.message || 'No se pudo cambiar el servicio.');
+      } finally {
+        setChangingService(false);
+      }
+      return;
+    }
+
+    // Duración distinta → redirigir a reagendar con servicio pre-seleccionado.
+    setChangeServiceModal(false);
+    Alert.alert(
+      'El nuevo servicio dura distinto',
+      `"${svc.name}" dura ${svc.durationMinutes} min (la cita actual dura ${currentDuration} min). Necesitas elegir un nuevo horario.`,
+      [
+        { text: 'Cancelar', style: 'cancel' },
+        {
+          text: 'Elegir horario',
+          onPress: () => router.push({
+            pathname: `/appointments/${appointment.id}/reschedule`,
+            params: {
+              service_name: svc.name,
+              service_cost: String(svc.price),
+              duration: String(svc.durationMinutes),
+            },
+          }),
+        },
+      ]
+    );
   };
 
   const invalidateCaches = () => {
@@ -303,6 +447,11 @@ export default function AppointmentDetailScreen() {
   // atascado sin poder confirmar/cancelar/reagendar nuevamente la cita.
   const isPendingLike = appointment.status === 'Pendiente' || appointment.status === 'Reagendada';
 
+  // ⚡ FIX BUG (May 18 2026): determinar si se permite cambiar el servicio.
+  // Bloqueamos solo en estados "cerrados" o de impacto financiero (Pagado).
+  const canChangeService = !STATUSES_LOCKED_FOR_SERVICE_CHANGE.includes(appointment.status) && services.length > 0;
+  const currentDuration = calcApptDuration(appointment.time, appointment.endTime || appointment.end_time);
+
   return (
     <SafeAreaView style={[styles.container, { backgroundColor: tc.bg }]} edges={['top']}>
 
@@ -356,8 +505,25 @@ export default function AppointmentDetailScreen() {
           <View style={styles.infoRow}>
             <IconSymbol ios_icon_name="scissors" android_material_icon_name="content-cut" size={22} color={colors.primary} />
             <View style={styles.infoContent}>
-              <Text style={[styles.infoLabel, { color: tc.textMuted }]}>Servicio</Text>
+              <View style={styles.serviceLabelRow}>
+                <Text style={[styles.infoLabel, { color: tc.textMuted }]}>Servicio</Text>
+                {/* ⚡ FIX BUG (May 18 2026): botón "Cambiar" para cambiar servicio
+                    de una cita ya creada. Solo visible si el estado lo permite. */}
+                {canChangeService && (
+                  <TouchableOpacity
+                    style={styles.changeServiceBtn}
+                    onPress={() => setChangeServiceModal(true)}
+                    activeOpacity={0.7}
+                  >
+                    <MaterialIcons name="swap-horiz" size={14} color="#fff" />
+                    <Text style={styles.changeServiceBtnText}>Cambiar</Text>
+                  </TouchableOpacity>
+                )}
+              </View>
               <Text style={[styles.infoValue, { color: tc.text }]}>{appointment.service || 'Servicio'}</Text>
+              <Text style={[styles.serviceMeta, { color: tc.textMuted }]}>
+                {currentDuration} min{appointment.service_cost ? ` · $${Number(appointment.service_cost).toLocaleString('es-MX')}` : ''}
+              </Text>
             </View>
           </View>
           {appointment.notes && (
@@ -625,6 +791,77 @@ export default function AppointmentDetailScreen() {
         </KeyboardAvoidingView>
       </Modal>
 
+      {/* ⚡ FIX BUG (May 18 2026): Modal "Cambiar servicio".
+          Lista los servicios activos del negocio. Muestra duración + precio.
+          Marca el servicio actual con check. Tap = handleChangeService. */}
+      <Modal visible={changeServiceModal} transparent animationType="slide" onRequestClose={() => setChangeServiceModal(false)}>
+        <KeyboardAvoidingView style={styles.modalOverlay} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
+          <TouchableOpacity style={styles.modalBackdrop} activeOpacity={1} onPress={() => setChangeServiceModal(false)} />
+          <View style={[styles.modalBox, { backgroundColor: tc.surface }]}>
+            <View style={styles.modalHandle} />
+            <View style={styles.modalHeader}>
+              <Text style={[styles.modalTitle, { color: tc.text }]}>Cambiar servicio</Text>
+              <TouchableOpacity onPress={() => setChangeServiceModal(false)}>
+                <MaterialIcons name="close" size={22} color={tc.textMuted} />
+              </TouchableOpacity>
+            </View>
+            <Text style={[styles.modalSub, { color: tc.textMuted }]}>
+              Si el nuevo servicio dura distinto, te llevaremos a elegir un nuevo horario.
+            </Text>
+            <ScrollView showsVerticalScrollIndicator={false}>
+              {services.length === 0 ? (
+                <View style={styles.emptyServicesWrap}>
+                  <MaterialIcons name="content-cut" size={32} color={tc.border} />
+                  <Text style={[styles.emptyServicesText, { color: tc.textMuted }]}>
+                    No tienes servicios activos. Configúralos en Ajustes &gt; Servicios.
+                  </Text>
+                </View>
+              ) : services.map(svc => {
+                const isCurrent = svc.name === appointment.service;
+                const sameDuration = svc.durationMinutes === currentDuration;
+                return (
+                  <TouchableOpacity
+                    key={svc.id}
+                    style={[
+                      styles.serviceOption,
+                      { backgroundColor: tc.bg, borderColor: tc.border },
+                      isCurrent && { borderColor: colors.primary, backgroundColor: colors.primary + '10' },
+                    ]}
+                    onPress={() => handleChangeService(svc)}
+                    disabled={changingService || isCurrent}
+                    activeOpacity={0.7}
+                  >
+                    <View style={[styles.serviceOptionIcon, { backgroundColor: colors.primary + '18' }]}>
+                      <MaterialIcons name="content-cut" size={20} color={colors.primary} />
+                    </View>
+                    <View style={{ flex: 1 }}>
+                      <Text style={[styles.serviceOptionName, { color: tc.text }]} numberOfLines={1}>{svc.name}</Text>
+                      <View style={styles.serviceOptionMeta}>
+                        <Text style={[styles.serviceOptionDur, { color: tc.textMuted }]}>
+                          {svc.durationMinutes} min
+                        </Text>
+                        <Text style={[styles.serviceOptionDur, { color: tc.textMuted }]}>·</Text>
+                        <Text style={[styles.serviceOptionDur, { color: tc.textMuted }]}>
+                          ${Number(svc.price).toLocaleString('es-MX')}
+                        </Text>
+                        {!isCurrent && !sameDuration && (
+                          <View style={styles.diffDurationPill}>
+                            <Text style={styles.diffDurationText}>requiere nuevo horario</Text>
+                          </View>
+                        )}
+                      </View>
+                    </View>
+                    {isCurrent && <MaterialIcons name="check-circle" size={20} color={colors.primary} />}
+                    {changingService && !isCurrent && <ActivityIndicator size="small" color={colors.primary} />}
+                  </TouchableOpacity>
+                );
+              })}
+              <View style={{ height: 30 }} />
+            </ScrollView>
+          </View>
+        </KeyboardAvoidingView>
+      </Modal>
+
       <Modal visible={saveClientModal} transparent animationType="slide" onRequestClose={() => setSaveClientModal(false)}>
         <KeyboardAvoidingView style={styles.modalOverlay} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
           <TouchableOpacity style={styles.modalBackdrop} activeOpacity={1} onPress={() => setSaveClientModal(false)} />
@@ -706,6 +943,11 @@ const styles = StyleSheet.create({
   infoContent:          { flex: 1 },
   infoLabel:            { fontSize: 12, marginBottom: 3 },
   infoValue:            { fontSize: 16, fontWeight: '500' },
+  // ⚡ FIX BUG (May 18 2026): estilos para el botón "Cambiar" de servicio.
+  serviceLabelRow:      { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 3 },
+  serviceMeta:          { fontSize: 12, marginTop: 4 },
+  changeServiceBtn:     { flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: '#8B5CF6', paddingHorizontal: 10, paddingVertical: 5, borderRadius: 8 },
+  changeServiceBtnText: { fontSize: 11, fontWeight: '700', color: '#fff' },
   staffSectionHeader:   { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14 },
   assignBtn:            { flexDirection: 'row', alignItems: 'center', gap: 5, backgroundColor: '#8B5CF6', paddingHorizontal: 12, paddingVertical: 7, borderRadius: 10 },
   assignBtnText:        { fontSize: 12, fontWeight: '700', color: '#fff' },
@@ -764,4 +1006,14 @@ const styles = StyleSheet.create({
   fieldTextarea:        { height: 70, textAlignVertical: 'top' },
   modalSaveBtn:         { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, backgroundColor: '#10B981', borderRadius: 14, padding: 16, marginTop: 16, marginBottom: 8 },
   modalSaveBtnText:     { color: '#fff', fontWeight: '800', fontSize: 15 },
+  // ⚡ FIX BUG (May 18 2026): estilos del modal "Cambiar servicio".
+  serviceOption:        { flexDirection: 'row', alignItems: 'center', gap: 12, padding: 14, borderRadius: 14, borderWidth: 1.5, marginBottom: 8 },
+  serviceOptionIcon:    { width: 40, height: 40, borderRadius: 10, justifyContent: 'center', alignItems: 'center' },
+  serviceOptionName:    { fontSize: 15, fontWeight: '700' },
+  serviceOptionMeta:    { flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 3, flexWrap: 'wrap' },
+  serviceOptionDur:     { fontSize: 12 },
+  diffDurationPill:     { backgroundColor: '#FEF3C7', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4, marginLeft: 4 },
+  diffDurationText:     { fontSize: 10, color: '#92400E', fontWeight: '700' },
+  emptyServicesWrap:    { alignItems: 'center', padding: 24, gap: 12 },
+  emptyServicesText:    { fontSize: 13, textAlign: 'center' },
 });
