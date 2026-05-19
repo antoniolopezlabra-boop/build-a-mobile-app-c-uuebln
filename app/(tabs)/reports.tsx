@@ -26,6 +26,8 @@ import InsightsCard, { Insight } from '@/components/reports/InsightsCard';
 //   • headerTitle 22 → 28px (igual que clients)
 //   • greeting 15 → 18px (más prominente)
 //   • todos los textos secundarios subidos 1-2px para consistencia
+// ⚡ FIX (May 19 2026): tarjeta "Por cobrar" siempre visible con estado
+//   semántico — verde con $0, amarillo con adeudo.
 // ══════════════════════════════════════════════════════════════════════
 
 interface Stats {
@@ -645,6 +647,23 @@ export default function ReportsScreen() {
     ? Math.round(((stats.clientsThisMonth - stats.clientsLastMonth) / stats.clientsLastMonth) * 100)
     : null;
 
+  // ⚡ FIX (May 19 2026): variables para la tarjeta "Por cobrar" siempre visible.
+  // hasPending=true → amarillo + tappable (lleva al detalle)
+  // hasPending=false → verde + no tappable (estado "al día")
+  const pendingAmount = stats?.pendingRevenue || 0;
+  const hasPending = pendingAmount > 0;
+  const pendingCardBg     = hasPending
+    ? (isDark ? '#431407' : '#FFFBEB')
+    : (isDark ? '#0F2D1A' : '#ECFDF5');
+  const pendingCardBorder = hasPending ? '#F59E0B' : '#10B981';
+  const pendingAccent     = hasPending ? '#F59E0B' : '#10B981';
+  const pendingLabelColor = hasPending
+    ? (isDark ? '#FED7AA' : '#92400E')
+    : (isDark ? '#6EE7B7' : '#065F46');
+  const pendingIconBgRgba = hasPending
+    ? 'rgba(245,158,11,0.18)'
+    : 'rgba(16,185,129,0.18)';
+
   return (
     <SafeAreaView style={[s.container, { backgroundColor: tc.bg }]}>
       <ScrollView
@@ -787,27 +806,44 @@ export default function ReportsScreen() {
               </View>
             </View>
 
-            {stats && stats.pendingRevenue > 0 && (
-              <TouchableOpacity
-                style={[s.pendingCard, {
-                  backgroundColor: isDark ? '#431407' : '#FFFBEB',
-                  borderColor: '#F59E0B',
-                }]}
-                onPress={() => router.push('/reports/pending-payments')}
-                activeOpacity={0.85}
-              >
-                <View style={s.pendingIconWrap}>
-                  <MaterialIcons name="schedule" size={22} color="#F59E0B" />
-                </View>
-                <View style={{ flex: 1 }}>
-                  <Text style={[s.pendingLabel, { color: isDark ? '#FED7AA' : '#92400E' }]}>POR COBRAR</Text>
-                  <Text style={[s.pendingValue, { color: '#F59E0B' }]}>
-                    ${stats.pendingRevenue.toLocaleString('es-MX')}
+            {/* ⚡ FIX (May 19 2026): tarjeta "Por cobrar" SIEMPRE visible.
+                - hasPending=true → amarillo, tappable, navega a detalle
+                - hasPending=false → verde, no tappable, "Al día / ¡Todo cobrado!" */}
+            <TouchableOpacity
+              style={[s.pendingCard, {
+                backgroundColor: pendingCardBg,
+                borderColor: pendingCardBorder,
+              }]}
+              onPress={() => {
+                if (hasPending) router.push('/reports/pending-payments');
+              }}
+              activeOpacity={hasPending ? 0.85 : 1}
+              disabled={!hasPending}
+            >
+              <View style={[s.pendingIconWrap, { backgroundColor: pendingIconBgRgba }]}>
+                <MaterialIcons
+                  name={hasPending ? 'schedule' : 'check-circle'}
+                  size={22}
+                  color={pendingAccent}
+                />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={[s.pendingLabel, { color: pendingLabelColor }]}>
+                  {hasPending ? 'POR COBRAR' : 'AL DÍA'}
+                </Text>
+                <Text style={[s.pendingValue, { color: pendingAccent }]}>
+                  ${pendingAmount.toLocaleString('es-MX')}
+                </Text>
+                {!hasPending && (
+                  <Text style={[s.pendingSub, { color: pendingLabelColor }]}>
+                    ¡Todo cobrado este mes!
                   </Text>
-                </View>
-                <MaterialIcons name="chevron-right" size={22} color="#F59E0B" />
-              </TouchableOpacity>
-            )}
+                )}
+              </View>
+              {hasPending && (
+                <MaterialIcons name="chevron-right" size={22} color={pendingAccent} />
+              )}
+            </TouchableOpacity>
 
             <LineChartCard
               title="Ingresos"
@@ -1117,9 +1153,11 @@ const s = StyleSheet.create({
   kpiRow:            { flexDirection: 'row' },
 
   pendingCard:       { flexDirection: 'row', alignItems: 'center', gap: 12, borderRadius: 14, padding: 16, borderWidth: 1 },
-  pendingIconWrap:   { width: 44, height: 44, borderRadius: 11, backgroundColor: 'rgba(245,158,11,0.18)', justifyContent: 'center', alignItems: 'center' },
+  pendingIconWrap:   { width: 44, height: 44, borderRadius: 11, justifyContent: 'center', alignItems: 'center' },
   pendingLabel:      { fontSize: 11, fontWeight: '800', letterSpacing: 1 },
   pendingValue:      { fontSize: 24, fontWeight: '800', letterSpacing: -0.5, marginTop: 2 },
+  // ⚡ FIX (May 19 2026): nuevo sublabel para estado "al día" ($0).
+  pendingSub:        { fontSize: 12, fontWeight: '600', marginTop: 4 },
 
   secondaryRow:      { flexDirection: 'row' },
   secondaryCard:     { flex: 1, flexDirection: 'row', alignItems: 'center', gap: 12, borderRadius: 12, padding: 14, borderWidth: 0.5 },
