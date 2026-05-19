@@ -99,12 +99,19 @@ export default function RescheduleAppointmentScreen() {
   // Cuando el usuario cambia el servicio en la pantalla de detalle y la
   // duración nueva es distinta a la actual, [id].tsx redirige aquí
   // pasando estos 3 params en la URL.
-  const { id, service_name, service_cost, duration } = useLocalSearchParams<{
+  //
+  // NOTA: el param se llama `durationParam` (no `duration`) para evitar
+  // shadowing con la variable `duration` interna de checkAvailability().
+  const params = useLocalSearchParams<{
     id: string;
     service_name?: string;
     service_cost?: string;
     duration?: string;
   }>();
+  const { id } = params;
+  const service_name = params.service_name;
+  const service_cost = params.service_cost;
+  const durationParam = params.duration; // renombrado para evitar colisión
   const { colors: tc, isDark } = useTheme();
   const { user } = useAuth();
   const insets = useSafeAreaInsets();
@@ -115,7 +122,7 @@ export default function RescheduleAppointmentScreen() {
   // Modo "reagendar + cambiar servicio" si llegaron params de servicio nuevo.
   const newServiceName = service_name && service_name.trim() !== '' ? service_name : null;
   const newServiceCost = service_cost && service_cost !== '' ? Number(service_cost) : null;
-  const newDurationMin = duration && duration !== '' ? Number(duration) : null;
+  const newDurationMin = durationParam && durationParam !== '' ? Number(durationParam) : null;
   const isServiceChangeMode = !!newServiceName && newDurationMin != null;
 
   const saveLockRef = useRef(false);
@@ -188,8 +195,8 @@ export default function RescheduleAppointmentScreen() {
       const dateString = toDateStr(date);
       const dayOfWeek  = date.getDay();
       const staffId    = appointment.staff_id || null;
-      const duration   = getEffectiveDuration(); // ⚡ FIX BUG: usar duración efectiva
-      const subBlocksNeeded = Math.ceil(duration / 30);
+      const effDuration = getEffectiveDuration(); // ⚡ FIX BUG: usar duración efectiva
+      const subBlocksNeeded = Math.ceil(effDuration / 30);
 
       const { data: appts } = await supabase
         .from('appointments')
@@ -365,12 +372,13 @@ export default function RescheduleAppointmentScreen() {
   const formattedTempDate = tempDate.toLocaleDateString('es-MX', { weekday:'long', year:'numeric', month:'long', day:'numeric' });
   const clientName = appointment.client?.name || appointment.clientNameTemp || 'Cliente';
   // ⚡ FIX BUG: la duración mostrada es la efectiva (nueva si hay cambio de servicio).
-  const duration = getEffectiveDuration();
-  const durationLabel = duration < 60
-    ? `${duration} min`
-    : duration === 60
+  // Variable renombrada a `displayDuration` para evitar colisión con `durationParam`.
+  const displayDuration = getEffectiveDuration();
+  const durationLabel = displayDuration < 60
+    ? `${displayDuration} min`
+    : displayDuration === 60
       ? '1 hora'
-      : `${Math.floor(duration/60)}h${duration%60>0?` ${duration%60}min`:''}`;
+      : `${Math.floor(displayDuration/60)}h${displayDuration%60>0?` ${displayDuration%60}min`:''}`;
   const hasInvalidByDuration = timeSlots.some(s => s.unavailableReason);
   const hasBlockedSlots = timeSlots.some(s => s.isBlocked);
 
