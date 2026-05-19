@@ -7,6 +7,29 @@ const config = getDefaultConfig(__dirname);
 
 config.resolver.unstable_enablePackageExports = true;
 
+// ══════════════════════════════════════════════════════════════════════
+// Fix para builds production (May 19 2026):
+//
+// @supabase/supabase-js (v2.x) importa @opentelemetry/api de forma
+// opcional usando `import(/* webpackIgnore: true */ ...)`. Esa sintaxis
+// rompe Hermes (compilador JS de React Native) durante el build de
+// producción con error:
+//   "error: Invalid expression encountered ... otelModulePromise"
+//
+// SOLUCIÓN: redirigir cualquier import de @opentelemetry/* a un módulo
+// vacío. Supabase funciona perfectamente sin telemetría (es opcional).
+// ══════════════════════════════════════════════════════════════════════
+config.resolver.resolveRequest = (context, moduleName, platform) => {
+  // Bloquear OpenTelemetry — Supabase lo usa opcionalmente y rompe Hermes
+  if (moduleName.startsWith('@opentelemetry/')) {
+    return {
+      type: 'empty',
+    };
+  }
+  // Fallback al resolver por defecto de Metro
+  return context.resolveRequest(context, moduleName, platform);
+};
+
 // Use turborepo to restore the cache when possible
 config.cacheStores = [
     new FileStore({ root: path.join(__dirname, 'node_modules', '.cache', 'metro') }),
