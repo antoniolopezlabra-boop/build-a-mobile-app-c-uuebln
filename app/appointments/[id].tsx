@@ -11,9 +11,9 @@ import { apiGet, apiPatch, apiDelete, apiPost } from '@/utils/api';
 import { getStatusColor } from '@/utils/appointmentUtils';
 import { formatDisplayDate } from '@/utils/dateUtils';
 import { logger } from '@/utils/logger';
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useCallback } from 'react';
 import { IconSymbol } from '@/components/IconSymbol';
-import { useRouter, useLocalSearchParams } from 'expo-router';
+import { useRouter, useLocalSearchParams, useFocusEffect } from 'expo-router';
 import { ConfirmModal } from '@/components/button';
 import { useTheme } from '@/contexts/ThemeContext';
 import { useAuth } from '@/contexts/AuthContext';
@@ -110,7 +110,19 @@ export default function AppointmentDetailScreen() {
   const [changeServiceModal, setChangeServiceModal] = useState(false);
   const [changingService, setChangingService]       = useState(false);
 
-  useEffect(() => { if (id) loadAll(); }, [id]);
+  // ⚡ FIX BUG (May 19 2026): useFocusEffect reemplaza al useEffect anterior.
+  // Antes: useEffect(() => { if (id) loadAll(); }, [id])
+  // Problema: al volver de reschedule.tsx con router.back(), el `id` no cambiaba,
+  //           así que el componente seguía mostrando los datos viejos en cache.
+  //           El usuario tenía que salir y volver a entrar para ver los cambios.
+  // Ahora: useFocusEffect dispara loadAll() cada vez que la pantalla recibe foco,
+  //        incluyendo cuando volvemos a ella desde otra pantalla. Patrón estándar
+  //        de Expo Router para pantallas que muestran datos editables externamente.
+  useFocusEffect(
+    useCallback(() => {
+      if (id) loadAll();
+    }, [id])
+  );
 
   const loadAll = async () => {
     setLoading(true);
