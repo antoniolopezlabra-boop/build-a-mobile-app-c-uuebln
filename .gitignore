@@ -39,3 +39,5 @@ package-lock.json
 
 # Supabase CLI archivos temporales (no se versionan)
 supabase/.temp/
+
+*.jks
