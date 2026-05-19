@@ -550,8 +550,17 @@ export async function apiPatch<T>(path: string, body: any): Promise<T> {
   if (path.startsWith('/api/appointments/')) {
     const id = extractIdFromPath(path);
     const updateFields: any = { updated_at: new Date().toISOString() };
-    if (body.status !== undefined)   updateFields.status   = body.status;
-    if (body.staff_id !== undefined) updateFields.staff_id = body.staff_id;
+    if (body.status !== undefined)       updateFields.status        = body.status;
+    if (body.staff_id !== undefined)     updateFields.staff_id      = body.staff_id;
+    // ⚡ FIX BUG (May 18 2026): permitir cambiar servicio de una cita ya creada.
+    // Antes el usuario tenía que ELIMINAR la cita y crear una nueva si quería
+    // cambiar de servicio (mala UX + perdía cuota del plan Gratuito).
+    // service_name = nombre del servicio que se muestra al cliente.
+    // service_cost = precio asociado (afecta cobros pendientes y reportes).
+    // end_time     = nueva hora de fin si la duración del servicio nuevo cambió.
+    if (body.service_name !== undefined) updateFields.service_name  = body.service_name;
+    if (body.service_cost !== undefined) updateFields.service_cost  = body.service_cost;
+    if (body.end_time !== undefined)     updateFields.end_time      = body.end_time;
     const { data, error } = await supabase.from('appointments').update(updateFields).eq('id', id).eq('user_id', userId).select().single();
     if (error) throw error;
     return data as T;
@@ -635,13 +644,16 @@ export async function apiPut<T>(path: string, body: any): Promise<T> {
     const id = extractIdFromPath(path);
     const { data: existing, error: fetchErr } = await supabase
       .from('appointments')
-      .select('start_time, end_time, status, staff_id')
+      .select('start_time, end_time, status, staff_id, service_name, service_cost')
       .eq('id', id)
       .eq('user_id', userId)
       .single();
     if (fetchErr) throw fetchErr;
 
-    const duration = calcDurationMinutes(existing.start_time, existing.end_time, 30);
+    // ⚡ FIX BUG (May 18 2026): si el body trae newDuration (porque viene de
+    // un cambio de servicio que requirió reagendar), usar esa duración nueva.
+    // Si no, mantener la duración original de la cita.
+    const duration = body.newDuration ?? calcDurationMinutes(existing.start_time, existing.end_time, 30);
     const newStartTime = body.time;
     const newEndTime  = newStartTime ? calcEndTime(newStartTime, duration) : existing.end_time;
 
@@ -674,6 +686,10 @@ export async function apiPut<T>(path: string, body: any): Promise<T> {
       end_time: newEndTime,
       updated_at: new Date().toISOString(),
     };
+    // ⚡ FIX BUG (May 18 2026): si el body trae service_name/service_cost
+    // (reagendamiento con cambio de servicio incluido), actualizar ambos.
+    if (body.service_name !== undefined) updateFields.service_name = body.service_name;
+    if (body.service_cost !== undefined) updateFields.service_cost = body.service_cost;
     if (['Pendiente', 'Confirmada', 'En espera', 'Solicitud'].includes(existing.status)) {
       updateFields.status = 'Reagendada';
     }
