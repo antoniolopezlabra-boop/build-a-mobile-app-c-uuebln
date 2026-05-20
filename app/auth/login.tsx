@@ -11,6 +11,7 @@ import {
 import { useRouter } from 'expo-router';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { Eye, EyeOff } from 'lucide-react-native';
 import { colors } from '@/styles/commonStyles';
 import { ConfirmModal } from '@/components/button';
 import { useAuth } from '@/contexts/AuthContext';
@@ -21,6 +22,10 @@ export default function LoginScreen() {
   const { login, authLoading } = useAuth();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  // ⚡ FIX UX (May 19 2026): toggle para mostrar/ocultar contraseña.
+  // Usuarios reportaron que no podían ver si escribían mal su password.
+  // Patrón estándar: ojito al lado derecho del input. Por defecto oculto.
+  const [showPassword, setShowPassword] = useState(false);
   const [errorModal, setErrorModal] = useState<{ visible: boolean; message: string }>({
     visible: false,
     message: '',
@@ -99,15 +104,37 @@ export default function LoginScreen() {
 
           <View style={styles.inputContainer}>
             <Text style={styles.label}>Contraseña</Text>
-            <TextInput
-              style={styles.input}
-              value={password}
-              onChangeText={setPassword}
-              placeholder="Tu contraseña"
-              placeholderTextColor={colors.textSecondary}
-              secureTextEntry
-              editable={!authLoading}
-            />
+            {/* ⚡ FIX UX (May 19 2026): TextInput envuelto en wrapper con
+                ícono Eye/EyeOff al lado derecho. paddingRight extra al
+                input asegura que el texto no quede tapado por el ícono. */}
+            <View style={styles.passwordWrapper}>
+              <TextInput
+                style={[styles.input, styles.passwordInput]}
+                value={password}
+                onChangeText={setPassword}
+                placeholder="Tu contraseña"
+                placeholderTextColor={colors.textSecondary}
+                secureTextEntry={!showPassword}
+                editable={!authLoading}
+              />
+              <TouchableOpacity
+                style={styles.eyeButton}
+                onPress={() => setShowPassword(s => !s)}
+                disabled={authLoading}
+                // hitSlop genera un área de toque mayor que el ícono visible.
+                // Sin esto, el botón se sentiría "duro de presionar" porque
+                // los íconos de 20px son blanco fácil de fallar.
+                hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
+                accessibilityLabel={showPassword ? 'Ocultar contraseña' : 'Mostrar contraseña'}
+                accessibilityRole="button"
+              >
+                {showPassword ? (
+                  <EyeOff size={20} color={colors.textSecondary} />
+                ) : (
+                  <Eye size={20} color={colors.textSecondary} />
+                )}
+              </TouchableOpacity>
+            </View>
           </View>
 
           <TouchableOpacity
@@ -203,6 +230,24 @@ const styles = StyleSheet.create({
     color: colors.text,
     borderWidth: 1,
     borderColor: colors.border,
+  },
+  // ⚡ FIX UX (May 19 2026): estilos para el toggle de mostrar/ocultar contraseña.
+  passwordWrapper: {
+    position: 'relative',
+    justifyContent: 'center',
+  },
+  passwordInput: {
+    // paddingRight extra para que el texto del password no quede tapado
+    // por el ícono del ojito (16 base + 32 espacio del ícono = 48).
+    paddingRight: 48,
+  },
+  eyeButton: {
+    position: 'absolute',
+    right: 14,
+    height: 28,
+    width: 28,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   forgotButton: {
     alignSelf: 'flex-end',
