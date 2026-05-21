@@ -15,6 +15,12 @@ import { useTheme } from '@/contexts/ThemeContext';
 import { Calendar } from 'react-native-calendars';
 import MaterialIcons from '@expo/vector-icons/MaterialIcons';
 import { getTodayString } from '@/utils/dateUtils';
+// ⚡ FIX UX (May 19 2026): refetch automático al volver de background.
+// Necesario porque useFocusEffect NO se dispara cuando el usuario está
+// EN esta pantalla y minimiza/vuelve la app (la pantalla nunca pierde
+// foco). Sin este hook, los datos quedan viejos hasta que el usuario
+// navegue a otra tab y regrese.
+import { useAppRefreshListener } from '@/hooks/useAppRefreshListener';
 
 interface ApiAppointment {
   id: string;
@@ -83,6 +89,17 @@ export default function AppointmentsScreen() {
       }
     }, [])
   );
+
+  // ⚡ FIX UX (May 19 2026): refetch silencioso cuando vuelve la app de background.
+  // - silent=true → no se muestra error si falla (la pantalla sigue mostrando
+  //   los datos viejos que ya tenía, que es mejor que un error súbito)
+  // - showLoading=false → no se muestra el spinner grande (el splash de
+  //   reconexión ya cubrió la UI durante el refresh)
+  // - El cache ya fue invalidado por AppStateContext, así que loadAll va a
+  //   pegar a la red y traer datos frescos.
+  useAppRefreshListener(() => {
+    loadAll(false, true);
+  });
 
   const loadAll = async (showLoading = true, silent = false) => {
     if (showLoading && !silent) setLoading(true);
