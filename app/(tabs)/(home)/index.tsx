@@ -17,6 +17,10 @@ import { getStatusColor } from '@/utils/appointmentUtils';
 import { supabase } from '@/lib/supabase';
 import { logger } from '@/utils/logger';
 import { translateError, buildErrorAlertButtons } from '@/utils/errorMessages';
+// ⚡ FIX UX (May 19 2026): hook que ejecuta callback cuando el usuario
+// vuelve de background después de >5 min. Coordinado con AppStateContext
+// para que las pantallas refetcheen datos frescos automáticamente.
+import { useAppRefreshListener } from '@/hooks/useAppRefreshListener';
 
 function getReportsCacheKey() {
   const n = new Date();
@@ -75,6 +79,18 @@ export default function HomeScreen() {
 
   useEffect(() => { userIdRef.current = user?.id; }, [user?.id]);
   useEffect(() => { if (user?.id) loadDashboardData(user.id); }, [user?.id]);
+
+  // ⚡ FIX UX (May 19 2026): refetch automático cuando vuelve la app de background.
+  // El AppStateContext emite un evento cuando el usuario regresa después de >5min;
+  // este hook lo escucha y fuerza un refetch sin cache.
+  // forceRefresh=true → ignora el cache (que también fue invalidado por AppStateContext).
+  // NO pasamos isPullRefresh=true para evitar mostrar el spinner del pull-to-refresh
+  // (el splash de "Reconectando..." ya cubrió la UI durante el refresh).
+  useAppRefreshListener(() => {
+    if (userIdRef.current) {
+      loadDashboardData(userIdRef.current, true);
+    }
+  });
 
   // Auto-ocultar el banner de error después de 5 segundos.
   useEffect(() => {
