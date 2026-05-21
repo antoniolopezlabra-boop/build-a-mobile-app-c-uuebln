@@ -5,6 +5,7 @@ import { checkRateLimits, getClientIp } from '../_shared/rate-limit.ts'
 
 const SUPABASE_URL         = Deno.env.get('SUPABASE_URL') ?? ''
 const SUPABASE_SERVICE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
+const VYLTA_INTERNAL_KEY   = Deno.env.get('VYLTA_INTERNAL_KEY') ?? ''
 
 const GRATUITO_MONTHLY_LIMIT = 10
 
@@ -15,6 +16,68 @@ function timeToMin(t: string): number {
 }
 function rangesOverlap(aS: number, aE: number, bS: number, bE: number): boolean {
   return aS < bE && aE > bS
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// sendPushNotification — Fire-and-forget call a send-push-notification.
+//
+// ⚡ FEATURE (May 19 2026): cuando se crea una cita desde el link público,
+// notificamos al dueño del negocio con push notification.
+//
+// IMPORTANTE: esta función es fire-and-forget. Si la push falla:
+//   • La cita YA fue creada con éxito en la BD (es lo único que importa)
+//   • El cliente externo ya recibió "success" como respuesta
+//   • Solo registramos el error en logs, no bloqueamos el flujo
+// ═══════════════════════════════════════════════════════════════════════
+async function sendPushNotification(params: {
+  userId: string
+  appointmentId: string
+  clientName: string
+  serviceName: string
+  startTime: string
+  date: string
+}): Promise<void> {
+  if (!VYLTA_INTERNAL_KEY) {
+    console.warn('[create-booking-request] VYLTA_INTERNAL_KEY no configurado, no se envía push')
+    return
+  }
+
+  try {
+    // Formato amigable: HH:MM (sin segundos) y fecha relativa
+    const timeStr = params.startTime.slice(0, 5)
+
+    // Construir mensaje
+    const title = '📅 Nueva cita reservada'
+    const body  = `${params.clientName} - ${params.serviceName} a las ${timeStr}`
+
+    const pushUrl = `${SUPABASE_URL}/functions/v1/send-push-notification`
+
+    const res = await fetch(pushUrl, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-vylta-internal-key': VYLTA_INTERNAL_KEY,
+      },
+      body: JSON.stringify({
+        userId: params.userId,
+        title,
+        body,
+        data: {
+          appointmentId: params.appointmentId,
+          type: 'new_appointment',
+        },
+      }),
+    })
+
+    if (!res.ok) {
+      const errText = await res.text()
+      console.warn(`[create-booking-request] Push notification falló (${res.status}):`, errText)
+    } else {
+      console.log('[create-booking-request] Push enviado correctamente a userId:', params.userId)
+    }
+  } catch (e) {
+    console.warn('[create-booking-request] Error enviando push notification:', e)
+  }
 }
 
 serve(async (req) => {
@@ -255,6 +318,31 @@ serve(async (req) => {
         }, 409)
       }
       return json({ error: aptError.message }, 500)
+    }
+
+    // ⚡ FEATURE (May 19 2026): notificar al dueño con push notification.
+    // Fire-and-forget: NO esperamos a que termine porque:
+    //   1. El cliente externo ya recibió "success" (no debe esperar más)
+    //   2. Si la push falla, no es razón para fallar la creación de cita
+    //   3. EdgeRuntime.waitUntil() permite que la promesa termine en background
+    //      sin bloquear el return de la respuesta HTTP.
+    //
+    // Nota: si EdgeRuntime.waitUntil no está disponible (entorno local),
+    // simplemente no esperamos. La promesa queda colgando pero el Edge
+    // function de producción la procesará igualmente antes de terminar.
+    const pushPromise = sendPushNotification({
+      userId:        link.user_id,
+      appointmentId: appointment.id,
+      clientName:    clientName.trim(),
+      serviceName,
+      startTime,
+      date,
+    })
+
+    // @ts-ignore: EdgeRuntime es global en Supabase Edge Functions
+    if (typeof EdgeRuntime !== 'undefined' && EdgeRuntime?.waitUntil) {
+      // @ts-ignore
+      EdgeRuntime.waitUntil(pushPromise)
     }
 
     return json({
