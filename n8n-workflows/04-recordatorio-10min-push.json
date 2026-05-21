@@ -1,0 +1,229 @@
+{
+  "name": "VYLTA - Recordatorio 10 min antes (Push Notification)",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "minutes",
+              "minutesInterval": 1
+            }
+          ]
+        }
+      },
+      "id": "trigger-schedule",
+      "name": "Cada 1 minuto",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [240, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Calcular ventana de tiempo: citas que empiezan entre 9 y 11 minutos en el futuro.\n// Margen de 2 minutos para evitar perder citas si el workflow se atrasa un poco.\n//\n// Usamos hora de México (UTC-6, sin DST en la mayoría del país).\n// Si quisieras manejar timezone por business_profile, habría que pasarlo al filtro.\n\nconst now = new Date();\n\n// Convertir a hora local de México (UTC-6)\nconst mxOffsetMin = -6 * 60;\nconst nowMx = new Date(now.getTime() + (mxOffsetMin - now.getTimezoneOffset()) * 60000);\n\n// Ventana de 9 a 11 minutos en el futuro\nconst windowStart = new Date(nowMx.getTime() + 9 * 60000);\nconst windowEnd   = new Date(nowMx.getTime() + 11 * 60000);\n\n// Formato HH:MM:SS para Supabase\nconst toTime = (d) => {\n  const h = String(d.getHours()).padStart(2, '0');\n  const m = String(d.getMinutes()).padStart(2, '0');\n  return `${h}:${m}:00`;\n};\n\nconst todayMx = nowMx.toISOString().slice(0, 10);\n\nreturn [{\n  json: {\n    date: todayMx,\n    timeFrom: toTime(windowStart),\n    timeTo:   toTime(windowEnd),\n  }\n}];"
+      },
+      "id": "compute-window",
+      "name": "Calcular ventana 10min",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [460, 300]
+    },
+    {
+      "parameters": {
+        "operation": "getAll",
+        "tableId": "appointments",
+        "returnAll": true,
+        "filterType": "manual",
+        "matchType": "allFilters",
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "date",
+              "condition": "eq",
+              "keyValue": "={{ $json.date }}"
+            },
+            {
+              "keyName": "start_time",
+              "condition": "gte",
+              "keyValue": "={{ $json.timeFrom }}"
+            },
+            {
+              "keyName": "start_time",
+              "condition": "lte",
+              "keyValue": "={{ $json.timeTo }}"
+            },
+            {
+              "keyName": "status",
+              "condition": "in",
+              "keyValue": "(Pendiente,Confirmada)"
+            },
+            {
+              "keyName": "reminder_10min_sent",
+              "condition": "eq",
+              "keyValue": "false"
+            }
+          ]
+        }
+      },
+      "id": "query-appointments",
+      "name": "Buscar citas próximas",
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [680, 300],
+      "credentials": {
+        "supabaseApi": {
+          "id": "vAyoHByapFR2KN7y",
+          "name": "VYLTA Supabase"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Para cada cita encontrada, construir el payload para la Edge Function\n// send-push-notification.\n\nconst items = $input.all();\nconst output = [];\n\nfor (const item of items) {\n  const apt = item.json;\n\n  // Obtener nombre del cliente: si está vinculado al sistema, usar ese; si no, el temp.\n  // (Si necesitamos el nombre del cliente vinculado, habría que hacer un join.\n  // Por simplicidad, usamos client_name_temp que está en la misma tabla.)\n  const clientName = apt.client_name_temp || 'Cliente';\n  const serviceName = apt.service_name || 'tu cita';\n  const timeStr = (apt.start_time || '').slice(0, 5);\n\n  output.push({\n    json: {\n      appointmentId: apt.id,\n      userId: apt.user_id,\n      title: '⏰ Tienes cita en 10 minutos',\n      body: `${clientName} - ${serviceName} a las ${timeStr}`,\n      data: {\n        appointmentId: apt.id,\n        type: 'reminder',\n      }\n    }\n  });\n}\n\nreturn output;"
+      },
+      "id": "build-payloads",
+      "name": "Construir payloads",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [900, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://nhjmwmkaduiaifgztymi.supabase.co/functions/v1/send-push-notification",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ userId: $json.userId, title: $json.title, body: $json.body, data: $json.data }) }}",
+        "options": {
+          "response": {
+            "response": {
+              "neverError": true
+            }
+          }
+        }
+      },
+      "id": "send-push",
+      "name": "Enviar push notification",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1120, 300],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "REEMPLAZAR_AL_IMPORTAR",
+          "name": "VYLTA Internal Key"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "tableId": "appointments",
+        "filterType": "manual",
+        "matchType": "allFilters",
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "id",
+              "condition": "eq",
+              "keyValue": "={{ $json.appointmentId }}"
+            }
+          ]
+        },
+        "fieldsUi": {
+          "fieldValues": [
+            {
+              "fieldId": "reminder_10min_sent",
+              "fieldValue": "true"
+            }
+          ]
+        }
+      },
+      "id": "mark-sent",
+      "name": "Marcar reminder_sent = true",
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [1340, 300],
+      "credentials": {
+        "supabaseApi": {
+          "id": "vAyoHByapFR2KN7y",
+          "name": "VYLTA Supabase"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Cada 1 minuto": {
+      "main": [
+        [
+          {
+            "node": "Calcular ventana 10min",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Calcular ventana 10min": {
+      "main": [
+        [
+          {
+            "node": "Buscar citas próximas",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Buscar citas próximas": {
+      "main": [
+        [
+          {
+            "node": "Construir payloads",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Construir payloads": {
+      "main": [
+        [
+          {
+            "node": "Enviar push notification",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Enviar push notification": {
+      "main": [
+        [
+          {
+            "node": "Marcar reminder_sent = true",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "saveExecutionProgress": false,
+    "saveManualExecutions": true,
+    "saveDataErrorExecution": "all",
+    "saveDataSuccessExecution": "all"
+  }
+}
