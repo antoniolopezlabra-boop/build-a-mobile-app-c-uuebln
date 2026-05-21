@@ -15,6 +15,11 @@ import KPICard from '@/components/reports/KPICard';
 import LineChartCard from '@/components/reports/LineChartCard';
 import DonutChartCard, { ServiceSlice } from '@/components/reports/DonutChartCard';
 import InsightsCard, { Insight } from '@/components/reports/InsightsCard';
+// ⚡ FIX UX (May 19 2026): refetch automático al volver de background.
+// useFocusEffect NO se dispara si el usuario está EN Reportes cuando
+// minimiza/vuelve la app. Este hook lo soluciona refetchando tanto
+// los datos generales como los del tab "equipo" si está activo.
+import { useAppRefreshListener } from '@/hooks/useAppRefreshListener';
 
 // ══════════════════════════════════════════════════════════════════════
 // VYLTA — Reportes Ejecutivos (rediseño Mayo 2026)
@@ -28,6 +33,8 @@ import InsightsCard, { Insight } from '@/components/reports/InsightsCard';
 //   • todos los textos secundarios subidos 1-2px para consistencia
 // ⚡ FIX (May 19 2026): tarjeta "Por cobrar" siempre visible con estado
 //   semántico — verde con $0, amarillo con adeudo.
+// ⚡ FIX UX (May 19 2026): refetch automático al volver de background
+//   (4to commit del feature de splash de reconexión).
 // ══════════════════════════════════════════════════════════════════════
 
 interface Stats {
@@ -266,6 +273,35 @@ export default function ReportsScreen() {
       // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [])
   );
+
+  // ⚡ FIX UX (May 19 2026): refetch silencioso cuando vuelve la app de background.
+  //
+  // Esta pantalla es especial porque tiene 2 fuentes de datos:
+  //   1. loadData() — KPIs, gráficas, insights (siempre se refresca)
+  //   2. loadStaffStats() — sólo si el usuario está viendo el tab "equipo"
+  //
+  // Parámetros del callback:
+  //   • loadData(true, false, true)
+  //     - forceRefresh=true → ignora el cache (que también fue invalidado
+  //       por AppStateContext)
+  //     - isPullRefresh=false → no muestra el spinner del pull-to-refresh
+  //     - silent=true → no muestra el spinner grande de carga inicial
+  //       (el splash de reconexión ya cubrió la UI)
+  //
+  //   • Si reportTab === 'equipo' e isPremium, también refrescamos los
+  //     stats del equipo para que no queden viejos.
+  //
+  // NO causa loop infinito: el callback usa los valores ACTUALES de
+  // selectedYear, selectedMonth, reportTab, staffRange — no los captura
+  // como closure obsoleto porque el hook useAppRefreshListener internamente
+  // usa una ref para acceder a la versión más reciente del callback.
+  useAppRefreshListener(() => {
+    loadData(true, false, true);
+    if (reportTab === 'equipo' && isPremium) {
+      getCurrentUserId().then(userId => loadStaffStats(userId, staffRange))
+        .catch(e => console.warn('[Reports] staff refresh on app return failed:', e));
+    }
+  });
 
   const goToPrevMonth = () => {
     if (isEarliestMonth) return;
