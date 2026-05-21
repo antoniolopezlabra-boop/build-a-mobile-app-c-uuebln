@@ -15,6 +15,8 @@ import { ThemeProvider, useTheme } from '@/contexts/ThemeContext';
 import { NetworkProvider } from '@/contexts/NetworkContext';
 import { AppStateProvider } from '@/contexts/AppStateContext';
 import { OfflineBanner } from '@/components/OfflineBanner';
+import { usePushToken } from '@/hooks/usePushToken';
+import { useNotificationHandler } from '@/hooks/useNotificationHandler';
 import React from 'react';
 
 // Puente: una vez dentro de AuthProvider, sincroniza el userId con ThemeContext
@@ -26,6 +28,36 @@ function ThemeUserSync() {
     loadThemeForUser(user?.id ?? null);
   }, [user?.id]);
 
+  return null;
+}
+
+// ───────────────────────────────────────────────────────────────────────────────
+// NotificationBridge — Activa push notifications cuando hay usuario logueado.
+// ⚡ FEATURE (May 19 2026): registro de Expo Push Token + manejo de taps.
+//
+// FLUJO COMPLETO:
+//   1. usePushToken() detecta cambios en user.id:
+//      • Si hay usuario → pide permiso, obtiene token, lo guarda en
+//        notification_tokens de Supabase.
+//      • Si NO hay usuario → no hace nada.
+//   2. useNotificationHandler() escucha eventos de notificaciones:
+//      • Al recibir → log foreground.
+//      • Al tapear → si tiene appointmentId, navega a esa cita.
+//
+// ¿POR QUÉ DENTRO DE AuthProvider Y NavigationGuard SEPARADO?
+//   Necesita acceso al hook useAuth() para saber qué user.id está activo,
+//   por eso debe estar DENTRO del provider. Pero NO debe interferir con la
+//   navegación inicial (NavigationGuard) ni con el splash, por eso lo
+//   ponemos como componente hermano que solo activa los listeners.
+//
+// PLATAFORMAS:
+//   El registro funciona en Android (FCM). En iOS también, pero requiere
+//   certificados APNS que se configuran al subir a TestFlight.
+//   En Expo Go NO funciona (Device.isDevice retorna false en simulador).
+// ───────────────────────────────────────────────────────────────────────────────
+function NotificationBridge() {
+  usePushToken();
+  useNotificationHandler();
   return null;
 }
 
@@ -203,6 +235,7 @@ function AppShell() {
   return (
     <>
       <ThemeUserSync />
+      <NotificationBridge />
       <NavigationGuard onReady={() => setAppReady(true)} />
       <Stack screenOptions={{ headerShown: false }} />
       <OfflineBanner />
