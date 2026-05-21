@@ -30,7 +30,7 @@
       },
       "edgeToEdgeEnabled": true,
       "package": "lat.vylta.app",
-      "versionCode": 16,
+      "versionCode": 18,
       "permissions": [
         "android.permission.INTERNET",
         "android.permission.READ_EXTERNAL_STORAGE",
