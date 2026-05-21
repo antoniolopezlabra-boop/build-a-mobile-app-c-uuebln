@@ -4,7 +4,8 @@
 //
 // Hay 3 tipos de "callers" en VYLTA:
 //
-//   1. Web pública  → book.vylta.lat (booking page) y vylta.lat (landing)
+//   1. Web pública  → book.vylta.lat (booking page), vylta.lat (landing)
+//                     y app.vylta.lat (CRM Web Next.js).
 //                     Envían header `Origin` desde el navegador.
 //                     → usar corsForWeb()
 //
@@ -22,14 +23,21 @@
 //     Allow-Origin, y el navegador bloquea la petición automáticamente.
 //   - El backend igual puede procesar la petición; CORS solo lo aplica el
 //     navegador. Para protección real, usar JWT/service role + RLS.
+//
+// ── HISTORIAL ──────────────────────────────────────────────────────────
+// May 21 2026: agregado https://app.vylta.lat al whitelist porque el CRM
+//   Web ahora consume Edge Functions (Chat IA, send-campaign). Sin esto,
+//   el navegador bloquea las respuestas y aparece error "No se pudo
+//   conectar con el asistente" en el cliente.
+// ──────────────────────────────────────────────────────────────────────
 
 // ── Whitelists por tipo ──────────────────────────────────────────────
 
 const WEB_ALLOWED_ORIGINS = [
   'https://book.vylta.lat',
   'https://vylta.lat',
-  // Localhost para desarrollo local del booking page (opcional, dejarlo
-  // explícito para auditoría):
+  'https://app.vylta.lat',   // CRM Web (Next.js) — agregado May 21 2026
+  // Localhost para desarrollo local (booking, CRM, landing):
   'http://localhost:3000',
   'http://localhost:5173',
   'http://127.0.0.1:3000',
@@ -43,7 +51,7 @@ const COMMON_ALLOWED_HEADERS = 'authorization, x-client-info, apikey, content-ty
 // ── Helpers públicos ─────────────────────────────────────────────────
 
 /**
- * CORS para Edge Functions llamadas desde web (booking page, landing).
+ * CORS para Edge Functions llamadas desde web (booking page, landing, CRM).
  *
  * Si el origin del request está en la whitelist, devuelve los headers
  * con ese origin específico. Si no, devuelve headers sin Allow-Origin
@@ -73,12 +81,15 @@ export function corsForWeb(req: Request): Record<string, string> {
 }
 
 /**
- * CORS para Edge Functions llamadas SOLO desde la app móvil nativa.
+ * CORS para Edge Functions llamadas desde app móvil nativa Y desde web
+ * autorizada (CRM, booking, landing).
  *
  * Las apps nativas (React Native) no envían header Origin, así que no
  * disparan CORS preflight. Esta función:
  *   - Permite explícitamente requests sin Origin (app nativa).
- *   - Bloquea requests con Origin de cualquier sitio web no autorizado.
+ *   - Permite requests con Origin de cualquier sitio web autorizado en
+ *     la whitelist WEB_ALLOWED_ORIGINS (CRM Web, booking, landing).
+ *   - Bloquea requests con Origin de cualquier otro sitio web.
  *
  * Esto previene que un sitio web malicioso abierto en el navegador del
  * usuario llame a estos endpoints abusando del JWT del usuario.
@@ -98,8 +109,8 @@ export function corsForApp(req: Request): Record<string, string> {
   // Si no hay Origin (app nativa), permitir devolviendo Allow-Origin: null.
   // Algunos navegadores rechazan 'null', pero las apps nativas no validan
   // este header, así que sirve solo para que la respuesta tenga forma.
-  // Si hay Origin y está en la whitelist web, también permitir (por si en
-  // el futuro la landing necesita llamar estas funciones).
+  // Si hay Origin y está en la whitelist web (CRM, booking, landing),
+  // también permitir.
   if (!origin) {
     // App nativa: no añadir Allow-Origin específico.
     // El navegador no está involucrado.
