@@ -11,7 +11,7 @@ import {
 import { useRouter } from 'expo-router';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { Eye, EyeOff } from 'lucide-react-native';
+import MaterialIcons from '@expo/vector-icons/MaterialIcons';
 import { colors } from '@/styles/commonStyles';
 import { ConfirmModal } from '@/components/button';
 import { useAuth } from '@/contexts/AuthContext';
@@ -105,8 +105,12 @@ export default function LoginScreen() {
           <View style={styles.inputContainer}>
             <Text style={styles.label}>Contraseña</Text>
             {/* ⚡ FIX UX (May 19 2026): TextInput envuelto en wrapper con
-                ícono Eye/EyeOff al lado derecho. paddingRight extra al
-                input asegura que el texto no quede tapado por el ícono. */}
+                ícono visibility/visibility-off al lado derecho.
+                paddingRight extra al input asegura que el texto no quede
+                tapado por el ícono.
+                Usamos @expo/vector-icons/MaterialIcons porque ya está
+                instalado en el proyecto (vs lucide-react-native que NO
+                está disponible en la app móvil). */}
             <View style={styles.passwordWrapper}>
               <TextInput
                 style={[styles.input, styles.passwordInput]}
@@ -123,16 +127,16 @@ export default function LoginScreen() {
                 disabled={authLoading}
                 // hitSlop genera un área de toque mayor que el ícono visible.
                 // Sin esto, el botón se sentiría "duro de presionar" porque
-                // los íconos de 20px son blanco fácil de fallar.
+                // los íconos de 22px son blanco fácil de fallar.
                 hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
                 accessibilityLabel={showPassword ? 'Ocultar contraseña' : 'Mostrar contraseña'}
                 accessibilityRole="button"
               >
-                {showPassword ? (
-                  <EyeOff size={20} color={colors.textSecondary} />
-                ) : (
-                  <Eye size={20} color={colors.textSecondary} />
-                )}
+                <MaterialIcons
+                  name={showPassword ? 'visibility-off' : 'visibility'}
+                  size={22}
+                  color={colors.textSecondary}
+                />
               </TouchableOpacity>
             </View>
           </View>
