@@ -12,6 +12,10 @@ import { getCached, setCached, invalidateCache, CACHE_TTL } from '@/utils/cache'
 import { apiGet } from '@/utils/api';
 import { useTheme } from '@/contexts/ThemeContext';
 import MaterialIcons from '@expo/vector-icons/MaterialIcons';
+// ⚡ FIX UX (May 19 2026): refetch automático al volver de background.
+// useFocusEffect NO se dispara si el usuario está EN Clientes cuando
+// minimiza/vuelve la app. Este hook lo soluciona.
+import { useAppRefreshListener } from '@/hooks/useAppRefreshListener';
 
 interface Client {
   id: string;
@@ -90,6 +94,15 @@ export default function ClientsScreen() {
       }
     }, [])
   );
+
+  // ⚡ FIX UX (May 19 2026): refetch silencioso cuando vuelve la app de background.
+  // - silent=true → no se muestra spinner ni modal de error si falla.
+  //   La pantalla sigue mostrando los datos que tenía (mejor UX).
+  // - El cache de 'clients_list' ya fue invalidado por AppStateContext,
+  //   así que loadClients pega a la red y trae datos frescos.
+  useAppRefreshListener(() => {
+    loadClients(true);
+  });
 
   const loadClients = async (silent = false) => {
     if (!silent) setLoading(true);
