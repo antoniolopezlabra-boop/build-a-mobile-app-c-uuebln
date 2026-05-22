@@ -44,3 +44,7 @@ supabase/.temp/
 
 # Backups automáticos de EAS
 *.backup
+
+# Firebase config (NUNCA subir al repo - contiene IDs sensibles del proyecto)
+google-services.json
+GoogleService-Info.plist
