@@ -42,45 +42,98 @@ export default function TabLayout() {
   // ⚡ FIX UX (May 19 2026): botón atrás de Android lleva a Inicio
   // desde cualquier tab que NO sea Inicio.
   //
-  // PROBLEMA REPORTADO:
+  // PROBLEMA REPORTADO ORIGINAL:
   //   El comportamiento era inconsistente — desde Citas y Clientes el
   //   back button sacaba al usuario de la app, pero desde Reportes y
   //   Ajustes lo llevaba a Inicio. Mala UX y comportamiento impredecible.
   //
-  // SOLUCIÓN:
-  //   Listener global en el layout de tabs que intercepta el back button
-  //   de Android. Detecta la pantalla actual via pathname:
-  //     • Si estás en Inicio → comportamiento default (sale de la app)
-  //     • Si estás en cualquier otra tab → ir a Inicio
+  // ⚡⚡⚡ FIX CRÍTICO (May 22 2026) — PANTALLA NEGRA AL REGRESAR ⚡⚡⚡
   //
-  // POR QUÉ EN EL LAYOUT (no en cada pantalla):
-  //   Centralizar el listener evita duplicación en 4 archivos diferentes
-  //   y garantiza comportamiento uniforme. Si en el futuro agregamos
-  //   una tab nueva, hereda el fix automáticamente.
+  // BUG REPORTADO:
+  //   Al estar en cualquier pantalla pushada (Nueva Cita, Detalle de Cita,
+  //   Nuevo Cliente, Clientes Inactivos, etc) y presionar el botón físico
+  //   de regresar de Android → pantalla negra total, app inservible hasta
+  //   force stop. Con el botón digital de la app (← en header) funcionaba
+  //   correctamente.
+  //
+  // CAUSA RAÍZ:
+  //   La lógica de `isOnHome` solo distinguía entre "estás en home" vs
+  //   "estás en otra tab". NO consideraba el caso "estás en una pantalla
+  //   pushada encima del stack" (ej: /appointments/new).
+  //
+  //   En esa situación:
+  //     1. Usuario en /appointments/new presiona back físico
+  //     2. pathname.includes('appointments') === true → isOnHome = false
+  //     3. Handler ejecuta router.replace('/(tabs)/(home)') retornando true
+  //     4. Stack ya no tiene contexto válido para la pantalla pushada → 💀
+  //     5. Resultado: pantalla negra, app muerta
+  //
+  // SOLUCIÓN:
+  //   El handler SOLO debe interceptar cuando el usuario está EN una
+  //   pestaña real, NO cuando está en una pantalla pushada encima.
+  //
+  //   Las pestañas reales tienen pathnames específicos sin slash adicional:
+  //     ✅ '/'              = Inicio (raíz)
+  //     ✅ '/appointments'  = tab Citas
+  //     ✅ '/clients'       = tab Clientes
+  //     ✅ '/reports'       = tab Reportes
+  //     ✅ '/settings'      = tab Ajustes
+  //
+  //   Las pantallas pushadas tienen pathnames más largos:
+  //     ❌ '/appointments/new'      = pantalla pushada
+  //     ❌ '/appointments/abc-123'  = detalle de cita
+  //     ❌ '/clients/new'           = nuevo cliente
+  //     ❌ '/clients/inactive'      = clientes inactivos
+  //     ❌ '/settings/profile'      = subpantalla de settings
+  //
+  //   La diferencia visible: pestañas son strings SIMPLES, pushadas tienen
+  //   slash ADICIONAL después del nombre de la tab.
+  //
+  //   Nueva lógica: si pathname NO es exactamente una de las pestañas
+  //   reales, NO interceptamos el back. Dejamos que Expo Router maneje el
+  //   back nativamente (lo que sí funciona correctamente).
   //
   // CLEANUP:
   //   El listener se remueve al desmontar el layout (logout, etc).
-  //   Mientras el TabLayout esté montado, el listener está activo.
   const router = useRouter();
   const pathname = usePathname();
 
   useEffect(() => {
     if (Platform.OS !== 'android') return;
 
-    const isOnHome =
-      pathname === '/' ||
-      pathname === '/index' ||
-      pathname.includes('(home)') ||
-      // Fallback: si ninguna otra tab está activa, asumimos que es Home
-      (!pathname.includes('appointments') &&
-       !pathname.includes('clients') &&
-       !pathname.includes('reports') &&
-       !pathname.includes('settings') &&
-       !pathname.includes('profile'));
+    // Lista EXACTA de pathnames de pestañas reales (no pantallas pushadas).
+    // Expo Router puede devolver el pathname con o sin slash final, por eso
+    // contemplamos ambas variantes.
+    const TAB_PATHS = new Set([
+      '/',
+      '/index',
+      '/appointments',
+      '/appointments/',
+      '/clients',
+      '/clients/',
+      '/reports',
+      '/reports/',
+      '/settings',
+      '/settings/',
+    ]);
+
+    // ¿El pathname actual es EXACTAMENTE una pestaña?
+    // Si NO está en la lista, es una pantalla pushada (Nueva Cita, Detalle,
+    // Nuevo Cliente, etc) y debemos DEJAR que el back nativo de Expo Router
+    // funcione (que sí maneja correctamente el pop del stack).
+    const isOnTabRoot = TAB_PATHS.has(pathname);
+
+    // Si NO estamos en una pestaña, NO interceptamos el back.
+    if (!isOnTabRoot) {
+      return;
+    }
+
+    // ¿Estamos específicamente en Inicio?
+    const isOnHome = pathname === '/' || pathname === '/index';
 
     const onBackPress = (): boolean => {
-      // Si está en Inicio → false: dejamos que Android ejecute su acción default (salir).
-      // Si está en otra tab → true: manejamos el evento navegando a Inicio.
+      // En Inicio → false: Android ejecuta su acción default (salir de la app).
+      // En otra pestaña → true: manejamos navegando a Inicio.
       if (isOnHome) return false;
 
       router.replace('/(tabs)/(home)' as any);
