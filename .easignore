@@ -1,0 +1,51 @@
+node_modules/
+
+.git/
+.expo/
+
+dist/
+web-build/
+expo-env.d.ts
+
+*.orig.*
+*.jks
+*.p8
+*.p12
+*.key
+*.mobileprovision
+
+.metro-health-check*
+
+npm-debug.*
+yarn-debug.*
+yarn-error.*
+
+.DS_Store
+*.pem
+
+.env*.local
+
+*.tsbuildinfo
+
+.natively/
+
+android/
+ios/
+
+pnpm-lock.yaml
+package-lock.json
+
+.env
+
+# Supabase CLI archivos temporales (no se versionan)
+supabase/.temp/
+
+*.jks
+
+# Backups automáticos de EAS
+*.backup
+
+# IMPORTANTE: NO incluir google-services.json aquí.
+# Aunque está en .gitignore (para no subirlo a GitHub), EAS Build
+# necesita este archivo para compilar el AAB con Firebase inicializado.
+# Por eso .easignore (que EAS prioriza) NO lo lista.
