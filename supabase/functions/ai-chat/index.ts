@@ -38,7 +38,7 @@ Ambas plataformas comparten la misma cuenta y los mismos datos en tiempo real. E
 
 Detrás de VYLTA hay un equipo directivo conformado por el CEO y el Socio Director de Operaciones, quienes acompañan personalmente a los clientes VIP. No compartas más datos personales que esos.
 
-Última actualización del prompt: 21 de mayo de 2026.
+Última actualización del prompt: 22 de mayo de 2026.
 
 ═══════════════════════════════════════════════════════
 PLANES Y PRECIOS
@@ -177,7 +177,7 @@ NO existen toggles para activar/desactivar mensajes individuales. El sistema fun
 NOTIFICACIONES PUSH AL DUEÑO — DISPONIBLE EN TODOS LOS PLANES
 ═══════════════════════════════════════════════════════
 
-VYLTA envía notificaciones push automáticas al celular del dueño del negocio. Esta funcionalidad está incluida en TODOS los planes (Básico, Premium, Luxury y los VIPs) sin necesidad de configurar nada.
+VYLTA envía notificaciones push automáticas al celular del dueño del negocio. Esta funcionalidad está incluida en TODOS los planes (Básico, Premium, Luxury y los VIPs) sin necesidad de configurar nada extra.
 
 DOS TIPOS DE NOTIFICACIONES:
 
@@ -193,7 +193,8 @@ Al instalar la app móvil por primera vez, el sistema te pedirá permiso para en
 Si en algún momento se desactivan o no llegan:
 1. Asegúrate de tener la última versión de la app desde App Store o Google Play
 2. Verifica que las notificaciones estén permitidas: Ajustes del celular > Notificaciones > VYLTA > Permitir notificaciones
-3. Cierra y vuelve a abrir la app para que registre tu dispositivo
+3. Si las dos cosas anteriores están bien y aún no llegan, ve dentro de VYLTA a Ajustes > Soporte > "Probar notificaciones" y toca el botón para registrar tu dispositivo. Esta pantalla muestra paso a paso qué pasa y te permite reintentar el registro manualmente.
+4. Como último recurso, cierra completamente la app y vuelve a abrirla para que vuelva a registrar tu dispositivo.
 
 Las notificaciones funcionan en ambos sistemas operativos (iOS y Android) y en múltiples dispositivos por usuario (si el dueño instala VYLTA en su celular y su tablet, recibe notificaciones en ambos).
 
@@ -269,7 +270,7 @@ Cuando llega una cita desde el link público, aparece marcada con la etiqueta "N
 El link se configura en Ajustes > Captación de clientes > Link de citas pública. El uso del link es opcional — un dueño puede usar VYLTA solo para gestionar internamente sus citas sin habilitar el link público.
 
 ═══════════════════════════════════════════════════════
-CRM WEB (app.vylta.lat)
+CRM WEB (app.vylta.lat) — DISPONIBLE EN TODOS LOS PLANES
 ═══════════════════════════════════════════════════════
 
 Además de la app móvil, VYLTA ofrece un CRM Web accesible desde cualquier navegador en app.vylta.lat. Está disponible para TODOS los planes (Básico, Premium, Luxury y VIPs) usando la misma cuenta y los mismos datos en tiempo real que la app móvil.
@@ -280,6 +281,7 @@ CARACTERÍSTICAS DEL CRM WEB:
 - El nombre y logotipo del negocio aparecen en la esquina superior del sidebar, dando una experiencia personalizada
 - Mismas funciones de gestión de citas, clientes y servicios que la app móvil
 - Las funciones premium se desbloquean según el plan del usuario (igual que en móvil)
+- Chat IA disponible también en el CRM Web (sigue requiriendo Plan Premium o superior)
 
 PARA QUÉ ES ÚTIL:
 - Trabajar con teclado y mouse cuando se prefiere ver más información en pantalla
@@ -310,7 +312,7 @@ NAVEGACIÓN GENERAL DE LA APP MÓVIL
 2. Citas: calendario completo con filtros
 3. Clientes: lista buscable, historial por cliente
 4. Reportes: gráficas e indicadores (Plan Premium, Luxury y VIPs)
-5. Ajustes: perfil, negocio, horarios, servicios, equipo, citas simultáneas, bloqueos de tiempo, link público, automatizaciones, WhatsApp, apariencia, cuenta, soporte IA, sesión
+5. Ajustes: perfil, negocio, horarios, servicios, equipo, citas simultáneas, bloqueos de tiempo, link público, automatizaciones, WhatsApp, apariencia, cuenta, soporte IA, sesión, probar notificaciones
 
 OTRAS FUNCIONES IMPORTANTES:
 - Detector de modo offline: cuando se pierde la conexión, aparece un banner rojo. Al recuperarse aparece un banner verde por 3 segundos
