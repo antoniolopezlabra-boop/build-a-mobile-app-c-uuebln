@@ -145,7 +145,6 @@ export default function SettingsScreen() {
         .from('staff_members').select('id', { count: 'exact', head: true })
         .eq('user_id', user?.id).eq('is_active', true);
       setStaffCount(count || 0);
-      // Cargar conteo de bloqueos de tiempo activos para mostrar en sublabel
       const { count: tbCount } = await supabase
         .from('time_blocks').select('id', { count: 'exact', head: true })
         .eq('user_id', user?.id).eq('is_active', true);
@@ -245,7 +244,6 @@ export default function SettingsScreen() {
           <SettingRow iconName="content-cut" iconColor="#F59E0B" iconBg="#FFFBEB" label="Catálogo de servicios" sublabel="Gestiona tus servicios y precios" onPress={() => router.push('/settings/services')} />
           <SettingRow iconName="group" iconColor={canUseCollaborators ? '#8B5CF6' : '#CBD5E1'} iconBg={canUseCollaborators ? '#F5F3FF' : '#F8FAFC'} label="Mi equipo" sublabel={staffSublabel} badge={!canUseCollaborators ? <View style={s.luxuryChip}><Text style={s.luxuryChipText}>LUXURY</Text></View> : undefined} disabled={!canUseCollaborators} onPress={() => { if (!canUseCollaborators) { router.push('/settings/subscription'); return; } router.push('/settings/staff' as any); }} />
           <SettingRow iconName="event-available" iconColor={canOverlap ? '#06B6D4' : '#CBD5E1'} iconBg={canOverlap ? '#ECFEFF' : '#F8FAFC'} label="Citas simultáneas" sublabel={canOverlap ? 'Permite atender más de una cita al mismo tiempo' : 'Solo disponible en Plan Luxury'} badge={!canOverlap ? <View style={s.luxuryChip}><Text style={s.luxuryChipText}>LUXURY</Text></View> : undefined} disabled={!canOverlap} right={<Switch value={allowOverlapping} onValueChange={canOverlap ? handleOverlappingToggle : () => router.push('/settings/subscription')} trackColor={{ false: '#E2E8F0', true: '#10B981' }} thumbColor="#fff" disabled={savingOverlap || !canOverlap} />} />
-          {/* Nuevo: bloqueos de tiempo (horario de comida, descansos, etc.) */}
           <SettingRow iconName="lunch-dining" iconColor="#F59E0B" iconBg="#FFFBEB" label="Bloqueos de tiempo" sublabel={timeBlocksSublabel} onPress={() => router.push('/settings/time-blocks' as any)} />
         </SettingGroup>
 
@@ -254,7 +252,7 @@ export default function SettingsScreen() {
         </SettingGroup>
 
         <SettingGroup title="AUTOMATIZACIONES">
-          <SettingRow iconName="cake" iconColor="#EC4899" iconBg="#FDF2F8" label="Cumpleaños automáticos" sublabel={birthdayEnabled ? 'Activado — envía WhatsApp el día del cumpleaños' : 'Desactivado'} badge={!isPremium ? <View style={s.luxuryChip}><Text style={s.luxuryChipText}>LUXURY</Text></View> : undefined} right={<View style={s.statusRight}>{birthdayEnabled && <View style={[s.statusDot, { backgroundColor: '#EC4899' }]} />}<MaterialIcons name="arrow-forward-ios" size={16} color={tc.border} /></View>} onPress={() => isPremium ? router.push('/settings/birthday') : router.push('/settings/subscription')} />
+          <SettingRow iconName="cake" iconColor="#EC4899" iconBg="#FDF2F8" label="Cumpleaños automáticos" sublabel={birthdayEnabled ? 'Activado — envía emails el día del cumpleaños' : 'Desactivado'} badge={!isPremium ? <View style={s.luxuryChip}><Text style={s.luxuryChipText}>LUXURY</Text></View> : undefined} right={<View style={s.statusRight}>{birthdayEnabled && <View style={[s.statusDot, { backgroundColor: '#EC4899' }]} />}<MaterialIcons name="arrow-forward-ios" size={16} color={tc.border} /></View>} onPress={() => isPremium ? router.push('/settings/birthday') : router.push('/settings/subscription')} />
           <SettingRow iconName="email" iconColor="#6366F1" iconBg="#EEF2FF" label="Email Marketing" sublabel="Envía campañas y promociones a tus clientes" badge={!isPremium ? <View style={s.luxuryChip}><Text style={s.luxuryChipText}>LUXURY</Text></View> : undefined} onPress={() => isPremium ? router.push('/marketing') : router.push('/settings/subscription')} />
           <SettingRow iconName="person-search" iconColor="#F59E0B" iconBg="#FFFBEB" label="Recuperar clientes inactivos" sublabel="Detecta y reactiva clientes sin visita reciente" badge={!isPremium ? <View style={s.luxuryChip}><Text style={s.luxuryChipText}>LUXURY</Text></View> : undefined} onPress={() => isPremium ? router.push('/clients/inactive') : router.push('/settings/subscription')} />
         </SettingGroup>
@@ -292,6 +290,7 @@ export default function SettingsScreen() {
 
         <SettingGroup title="SOPORTE">
           <SettingRow iconName="support-agent" iconColor={canUseAISupport ? '#10B981' : '#CBD5E1'} iconBg={canUseAISupport ? '#ECFDF5' : '#F8FAFC'} label="Chat con IA · Soporte" sublabel={canUseAISupport ? 'Pregunta lo que quieras sobre VYLTA' : 'Disponible en Plan Premium y Luxury'} badge={!canUseAISupport ? <View style={s.premiumChip}><Text style={s.premiumChipText}>PREMIUM</Text></View> : undefined} right={canUseAISupport ? (<View style={s.aiChip}><MaterialIcons name="auto-awesome" size={12} color="#10B981" /><Text style={s.aiChipText}>IA</Text></View>) : undefined} onPress={() => canUseAISupport ? router.push('/settings/support-chat') : router.push('/settings/subscription')} />
+          <SettingRow iconName="notifications-active" iconColor="#10B981" iconBg="#ECFDF5" label="Probar notificaciones" sublabel="Diagnóstico paso a paso si no te llegan las alertas" onPress={() => router.push('/settings/test-push' as any)} />
         </SettingGroup>
 
         <SettingGroup title="SESIÓN">
