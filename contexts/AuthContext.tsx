@@ -28,6 +28,14 @@ interface BusinessProfile {
   alternativePhone?: string | null;
   logoUrl?: string | null;
   weeklySchedule?: Record<string, any>;
+  // ⚡ FIX (May 23 2026): Campos de ubicación detallada agregados a la BD
+  // en commit 9ea25f6c. Sin estos en la interface, el form de Ajustes y
+  // el wizard de onboarding no podían leer los valores guardados de la
+  // BD aunque los hubieran escrito correctamente.
+  state?: string | null;
+  city?: string | null;
+  postalCode?: string | null;
+  street?: string | null;
 }
 
 interface AuthContextType {
@@ -231,6 +239,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         return;
       }
 
+      // ⚡ FIX (May 23 2026): incluir los 4 campos de ubicación en el mapeo.
+      // ANTES: el mapeo solo exponía business_name, business_type, address,
+      // phone, alternative_phone, logo_url, weekly_schedule. Los campos
+      // state/city/postal_code/street se quedaban en data pero NUNCA se
+      // pasaban al state del context, por lo que el form de Mi Negocio y el
+      // wizard leían `businessProfile.state` y obtenían `undefined`.
+      //
+      // Eso causaba el bug que Antonio reportó: "los campos vuelven a
+      // aparecer vacíos al volver a entrar a Mi Negocio aunque ya los había
+      // llenado y guardado". Los datos SÍ se guardaban en BD pero nunca se
+      // leían correctamente del contexto.
       setBusinessProfile({
         id: data.id,
         userId: data.user_id,
@@ -241,6 +260,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         alternativePhone: data.alternative_phone,
         logoUrl: data.logo_url,
         weeklySchedule: data.weekly_schedule,
+        // ─── Campos de ubicación (NUEVOS May 23 2026) ───
+        state: data.state || null,
+        city: data.city || null,
+        postalCode: data.postal_code || null,
+        street: data.street || null,
       });
     } catch (error) {
       logger.error('[Auth] Error loading business profile:', error);
