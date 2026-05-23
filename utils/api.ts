@@ -292,7 +292,26 @@ export async function apiGet<T>(path: string): Promise<T> {
   if (path === '/api/business-profile') {
     const { data, error } = await supabase.from('business_profiles').select('*').eq('user_id', userId).single();
     if (error) throw error;
-    return { id: data.id, userId: data.user_id, businessName: data.business_name, businessType: data.business_type, address: data.address, phone: data.phone, alternativePhone: data.alternative_phone, logoUrl: data.logo_url, weeklySchedule: data.weekly_schedule } as T;
+    // ⚡ FIX (May 23 2026): incluir los 4 campos de ubicación que se agregaron
+    // en la migración de business_profiles. Antes no se devolvían al cliente,
+    // por eso "Mi Negocio" y el wizard de onboarding parecían perder los datos
+    // al recargar (el form mostraba vacío aunque la BD tuviera el valor).
+    return {
+      id: data.id,
+      userId: data.user_id,
+      businessName: data.business_name,
+      businessType: data.business_type,
+      address: data.address,
+      phone: data.phone,
+      alternativePhone: data.alternative_phone,
+      logoUrl: data.logo_url,
+      weeklySchedule: data.weekly_schedule,
+      // ─── Campos de ubicación ───
+      state: data.state || null,
+      city: data.city || null,
+      postalCode: data.postal_code || null,
+      street: data.street || null,
+    } as T;
   }
 
   if (path === '/api/clients') {
@@ -721,7 +740,39 @@ export async function apiPut<T>(path: string, body: any): Promise<T> {
   }
 
   if (path === '/api/business-profile') {
-    const { data, error } = await supabase.from('business_profiles').upsert({ user_id: userId, business_name: body.businessName, business_type: body.businessType, address: body.address || null, phone: body.phone || null, alternative_phone: body.alternativePhone || null, logo_url: body.logoUrl || null, updated_at: new Date().toISOString() }, { onConflict: 'user_id' }).select().single();
+    // ⚡ FIX (May 23 2026): incluir los 4 campos de ubicacion en el upsert.
+    // ANTES: el upsert solo enviaba business_name, business_type, address,
+    // phone, alternative_phone, logo_url. Los campos state/city/postal_code/
+    // street se pasaban por encima sin guardarse en BD. Por eso "Mi Negocio"
+    // y el wizard parecían perder los datos cada vez que el usuario salía y
+    // volvía a entrar.
+    //
+    // AHORA: incluimos los 4 campos nuevos en el upsert. Quedan opcionales
+    // (null si no se proveen) para no romper otros flujos que solo actualizan
+    // datos de identidad o teléfono.
+    const upsertPayload: any = {
+      user_id: userId,
+      business_name: body.businessName,
+      business_type: body.businessType,
+      address: body.address || null,
+      phone: body.phone || null,
+      alternative_phone: body.alternativePhone || null,
+      logo_url: body.logoUrl || null,
+      updated_at: new Date().toISOString(),
+    };
+    // Solo agregamos los campos de ubicación al payload SI vienen definidos,
+    // así no sobrescribimos con null cuando otros componentes hacen un PUT
+    // parcial que no incluye ubicación.
+    if (body.state !== undefined)       upsertPayload.state       = body.state;
+    if (body.city !== undefined)        upsertPayload.city        = body.city;
+    if (body.postalCode !== undefined)  upsertPayload.postal_code = body.postalCode;
+    if (body.street !== undefined)      upsertPayload.street      = body.street;
+
+    const { data, error } = await supabase
+      .from('business_profiles')
+      .upsert(upsertPayload, { onConflict: 'user_id' })
+      .select()
+      .single();
     if (error) throw error;
     return data as T;
   }
