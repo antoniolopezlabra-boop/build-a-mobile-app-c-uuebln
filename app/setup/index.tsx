@@ -22,37 +22,95 @@ import { generateSlug, ensureUniqueSlug } from '@/utils/slugGenerator';
 import { logger } from '@/utils/logger';
 
 // ═════════════════════════════════════════════════════════════════
-// SETUP WIZARD — Onboarding post-registro (v2 — May 23 2026)
+// SETUP WIZARD — Onboarding post-registro (v3 — May 23 2026)
 //
-// ⚡ ACTUALIZACIÓN MAYO 2026:
-// Wizard pasa de 4 a 5 pasos al agregar el paso "Ubicación".
-// El paso de Ubicación captura los 4 campos requeridos por el mapa
-// de calor del Control Center admin:
-//   • Estado (dropdown con los 32 estados de la República Mexicana)
-//   • Municipio / Ciudad
-//   • Código Postal (5 dígitos)
-//   • Calle y número
+// ⚡ FIX CRITICO (May 23 2026 - v3):
+// Antonio reporto que los datos del Paso 2 (Ubicacion) no se reflejaban
+// en Ajustes -> Mi Negocio al terminar el wizard, aunque SI se guardaban
+// en BD. Causa: el context del AuthProvider tenia el businessProfile
+// cargado al login (cuando state aun era null) y nunca se refrescaba
+// despues del wizard.
 //
-// El teléfono ahora es OBLIGATORIO también en el wizard (antes
-// opcional) para alinearlo con Ajustes → Mi Negocio.
+// SOLUCION:
+// 1. Llamar refreshBusinessProfile() DESPUES de cada paso que guarda
+//    ubicacion (Paso 2), asi el context se mantiene sincronizado.
+// 2. Llamar refreshBusinessProfile() al final del wizard (handleFinish)
+//    para garantizar que el home y todas las pantallas vean los datos
+//    completos.
+// 3. Cambiar la mecanica de guardado: usar UPDATE explicito en lugar
+//    de UPSERT para ser mas defensivos. Si por algun caso el row no
+//    existe (shouldn't happen porque auth_callback lo crea), usar INSERT.
 //
 // FLUJO COMPLETO (5 pasos):
-//   1. Negocio    (nombre + tipo + teléfono)
-//   2. Ubicación  (estado + ciudad + CP + calle)  ← NUEVO
-//   3. Servicio   (nombre + precio + duración)
-//   4. Horarios   (días + apertura + cierre)
-//   5. Link       (booking_link generado automáticamente)
-//
-// El wizard solo aparece la primera vez. Se marca en AsyncStorage
-// con la key `setup_completed_<userId>` para nunca volver a mostrarse.
+//   1. Negocio    (nombre + tipo + telefono)
+//   2. Ubicacion  (estado + ciudad + CP + calle)
+//   3. Servicio   (nombre + precio + duracion)
+//   4. Horarios   (dias + apertura + cierre)
+//   5. Link       (booking_link generado automaticamente)
 // ═════════════════════════════════════════════════════════════════
 
 const DAYS_OF_WEEK = ['L', 'M', 'M', 'J', 'V', 'S', 'D'];
 const DAY_NAMES = ['Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado', 'Domingo'];
 
-// Total de pasos del wizard. Si cambia, ajustar el progress bar y los
-// condicionales `step === N` abajo.
 const TOTAL_STEPS = 5;
+
+// ═════════════════════════════════════════════════════════════════
+// upsertBusinessProfile — Helper defensivo (v3 May 23 2026)
+//
+// Garantiza que los campos que SI vienen en el objeto se persisten en
+// BD, sin tocar los demas. Si el row no existe (raro pero posible),
+// hace un insert con todo el objeto.
+//
+// USO:
+//   await upsertBusinessProfile(userId, { business_name, business_type, phone });
+//   await upsertBusinessProfile(userId, { state, city, postal_code, street });
+//
+// Las dos llamadas son completamente independientes y NO se interfieren
+// entre si, lo cual elimina el riesgo de "sobrescribir con NULL" de un
+// upsert mal usado.
+// ═════════════════════════════════════════════════════════════════
+async function upsertBusinessProfile(
+  userId: string,
+  fields: Record<string, any>
+): Promise<void> {
+  // Verificar si el row existe
+  const { data: existing, error: fetchErr } = await supabase
+    .from('business_profiles')
+    .select('id')
+    .eq('user_id', userId)
+    .maybeSingle();
+
+  if (fetchErr) {
+    logger.error('[Setup] upsertBusinessProfile fetch error:', fetchErr);
+    throw fetchErr;
+  }
+
+  const payload = {
+    ...fields,
+    updated_at: new Date().toISOString(),
+  };
+
+  if (existing) {
+    // UPDATE: solo toca los campos que vienen, no afecta el resto
+    const { error } = await supabase
+      .from('business_profiles')
+      .update(payload)
+      .eq('user_id', userId);
+    if (error) {
+      logger.error('[Setup] upsertBusinessProfile UPDATE error:', error);
+      throw error;
+    }
+  } else {
+    // INSERT: crear nuevo row (caso raro porque auth_callback ya deberia haberlo creado)
+    const { error } = await supabase
+      .from('business_profiles')
+      .insert({ user_id: userId, ...payload });
+    if (error) {
+      logger.error('[Setup] upsertBusinessProfile INSERT error:', error);
+      throw error;
+    }
+  }
+}
 
 export default function SetupWizard() {
   const router = useRouter();
@@ -73,12 +131,12 @@ export default function SetupWizard() {
   const [showTypePicker, setShowTypePicker] = useState(false);
   const [phone, setPhone] = useState(businessProfile?.phone || '');
 
-  // ============ PASO 2: Ubicación (NUEVO) ============
+  // ============ PASO 2: Ubicacion ============
   const [state, setStateValue] = useState((businessProfile as any)?.state || '');
   const [city, setCity] = useState((businessProfile as any)?.city || '');
   const [postalCode, setPostalCode] = useState((businessProfile as any)?.postalCode || '');
   const [street, setStreet] = useState(
-    (businessProfile as any)?.street || (businessProfile as any)?.address || ''
+    (businessProfile as any)?.street || ''
   );
   const [showStatePicker, setShowStatePicker] = useState(false);
 
@@ -96,7 +154,25 @@ export default function SetupWizard() {
   const [bookingSlug, setBookingSlug] = useState<string | null>(null);
   const [linkLoading, setLinkLoading] = useState(false);
 
-  // Animación entre pasos
+  // ⚡ FIX v3: re-sincronizar state local cuando businessProfile cambia.
+  // Esto cubre el caso donde el AuthContext se refresca despues de un
+  // paso y el wizard ya esta montado. Sin esto, los TextInput conservan
+  // los valores viejos aunque BD ya tenga los nuevos.
+  useEffect(() => {
+    if (businessProfile) {
+      if (!businessName && businessProfile.businessName) setBusinessName(businessProfile.businessName);
+      if (!state && (businessProfile as any).state) setStateValue((businessProfile as any).state);
+      if (!city && (businessProfile as any).city) setCity((businessProfile as any).city);
+      if (!postalCode && (businessProfile as any).postalCode) setPostalCode((businessProfile as any).postalCode);
+      if (!street && (businessProfile as any).street) setStreet((businessProfile as any).street);
+      if (!phone && businessProfile.phone) setPhone(businessProfile.phone);
+    }
+    // Solo dependemos del id del perfil para detectar refresh, no del objeto entero
+    // (sino haria loops). Usamos businessProfile?.id como signal.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [businessProfile?.id, (businessProfile as any)?.state]);
+
+  // Animacion entre pasos
   const animateStepChange = (next: number) => {
     Animated.timing(fadeAnim, { toValue: 0, duration: 150, useNativeDriver: true }).start(() => {
       setStep(next);
@@ -173,7 +249,6 @@ export default function SetupWizard() {
         return;
       }
     }
-    // ⚡ NUEVO: teléfono ahora obligatorio (consistente con Ajustes → Mi Negocio)
     if (!phone.trim()) {
       Alert.alert(
         'Falta información',
@@ -185,17 +260,15 @@ export default function SetupWizard() {
     setSaving(true);
     try {
       const finalBusinessType = getEffectiveBusinessType();
-      await supabase.from('business_profiles').upsert({
-        user_id: user.id,
+      // ⚡ v3: usar upsertBusinessProfile helper en lugar de supabase.upsert directo
+      await upsertBusinessProfile(user.id, {
         business_name: businessName.trim(),
         business_type: finalBusinessType,
         phone: phone.trim(),
-        updated_at: new Date().toISOString(),
-      }, { onConflict: 'user_id' });
+      });
 
       // ─────────────────────────────────────────────────────────────────
-      // AUTO-CREACIÓN DEL BOOKING_LINK (mantenida sin cambios)
-      // Solo cuentas de DUEÑO, NO staff. Si falla, NO bloquea el wizard.
+      // AUTO-CREACION DEL BOOKING_LINK (sin cambios)
       // ─────────────────────────────────────────────────────────────────
       if (!isStaffAccount) {
         try {
@@ -222,16 +295,18 @@ export default function SetupWizard() {
         }
       }
 
+      // ⚡ v3: refresh DESPUES de guardar para que el context tenga los datos frescos
       if (refreshBusinessProfile) await refreshBusinessProfile();
       animateStepChange(1);
     } catch (err: any) {
+      logger.error('[Setup] Paso 1 error:', err?.message);
       Alert.alert('Error', 'No se pudo guardar. Intenta de nuevo.');
     } finally {
       setSaving(false);
     }
   };
 
-  // ---------- PASO 2 (NUEVO): Guardar ubicación ----------
+  // ---------- PASO 2: Guardar ubicacion ----------
   const handleSaveLocationAndNext = async () => {
     if (!state) {
       Alert.alert('Falta información', 'Selecciona el estado de la República donde se ubica tu negocio.');
@@ -252,23 +327,21 @@ export default function SetupWizard() {
     if (!user?.id) return;
     setSaving(true);
     try {
-      // Armamos el campo `address` legacy a partir de los campos desglosados
-      // para mantener compatibilidad con código viejo que lo lea.
       const composedAddress = `${street.trim()}, ${city.trim()}, ${state}, C.P. ${postalCode.trim()}`;
-      await supabase.from('business_profiles').upsert({
-        user_id: user.id,
+      // ⚡ v3: usar upsertBusinessProfile helper
+      await upsertBusinessProfile(user.id, {
         state: state,
         city: city.trim(),
         postal_code: postalCode.trim(),
         street: street.trim(),
         address: composedAddress,
-        updated_at: new Date().toISOString(),
-      }, { onConflict: 'user_id' });
+      });
 
+      // ⚡ v3: refresh DESPUES de guardar
       if (refreshBusinessProfile) await refreshBusinessProfile();
       animateStepChange(2);
     } catch (err: any) {
-      logger.error('[Setup] Error guardando ubicación:', err?.message);
+      logger.error('[Setup] Paso 2 error:', err?.message);
       Alert.alert('Error', 'No se pudo guardar la ubicación. Intenta de nuevo.');
     } finally {
       setSaving(false);
@@ -333,6 +406,15 @@ export default function SetupWizard() {
 
   // ---------- PASO 5: Finalizar ----------
   const handleFinish = async () => {
+    // ⚡ v3: refresh FINAL del business profile antes de navegar al home.
+    // Esto garantiza que cuando el usuario vaya a Ajustes -> Mi Negocio,
+    // todos los campos (incluyendo state/city/postal_code/street) esten
+    // disponibles en el context.
+    try {
+      if (refreshBusinessProfile) await refreshBusinessProfile();
+    } catch (e) {
+      logger.warn('[Setup] Final refresh failed (no critico):', e);
+    }
     await markSetupCompleted();
     router.replace('/(tabs)/(home)');
   };
@@ -449,7 +531,7 @@ export default function SetupWizard() {
               </>
             )}
 
-            {/* ============ PASO 2: UBICACIÓN (NUEVO) ============ */}
+            {/* ============ PASO 2: UBICACION ============ */}
             {step === 1 && (
               <>
                 <View style={s.stepIconWrap}>
@@ -776,7 +858,7 @@ export default function SetupWizard() {
         </View>
       </Modal>
 
-      {/* MODAL: Selector de estado de la República (NUEVO) */}
+      {/* MODAL: Selector de estado de la República */}
       <Modal
         visible={showStatePicker}
         animationType="slide"
@@ -803,7 +885,6 @@ export default function SetupWizard() {
                     style={[s.typeOption, isSelected && s.typeOptionSelected]}
                     onPress={() => {
                       setStateValue(st.name);
-                      // Sugerencia de capital si la ciudad está vacía
                       if (!city.trim()) setCity(st.capital);
                       setShowStatePicker(false);
                     }}
