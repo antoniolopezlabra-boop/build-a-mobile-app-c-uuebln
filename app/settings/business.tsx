@@ -9,7 +9,7 @@ import { colors } from '@/styles/commonStyles';
 import { IconSymbol } from '@/components/IconSymbol';
 import { ConfirmModal } from '@/components/button';
 import { useAuth } from '@/contexts/AuthContext';
-import { apiPut, getBearerToken, BACKEND_URL } from '@/utils/api';
+import { apiPut } from '@/utils/api';
 import * as ImagePicker from 'expo-image-picker';
 import {
   BUSINESS_TYPES,
@@ -17,25 +17,51 @@ import {
   isCustomBusinessType,
   validateCustomBusinessType,
 } from '@/constants/businessTypes';
+import { MEXICO_STATES, isValidPostalCode } from '@/constants/mexicoStates';
+
+// ═══════════════════════════════════════════════════════════════════════
+// app/settings/business.tsx — Información del negocio
+//
+// ⚡ ACTUALIZACIÓN (May 22 2026):
+// Se agregaron 4 campos de ubicación detallada para habilitar el mapa
+// de calor del Control Center admin:
+//   • Estado (dropdown con los 32 estados de la República Mexicana)
+//   • Municipio / Ciudad
+//   • Código Postal (5 dígitos, validación)
+//   • Calle y número (reemplaza el campo "Dirección" libre)
+//
+// El campo "Teléfono del negocio" ahora es OBLIGATORIO (antes opcional).
+// Estos campos son críticos para:
+//   1. Reportes geográficos del Control Center
+//   2. Personalización de WhatsApp templates (mencionando ciudad)
+//   3. Validación de autenticidad del negocio para verificación
+// ═══════════════════════════════════════════════════════════════════════
 
 export default function BusinessSettingsScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const { businessProfile, refreshBusinessProfile } = useAuth();
-  const [saving, setSaving]                 = useState(false);
-  const [showTypePicker, setShowTypePicker] = useState(false);
-  const [uploadingLogo, setUploadingLogo]   = useState(false);
-  const [errorModal, setErrorModal]         = useState({ visible: false, message: '' });
-  const [successModal, setSuccessModal]     = useState(false);
-  const [businessName, setBusinessName]     = useState('');
-  const [selectedType, setSelectedType]     = useState('');
-  const [customType, setCustomType]         = useState('');
-  const [address, setAddress]               = useState('');
-  const [phone, setPhone]                   = useState('');
-  const [alternativePhone, setAlternativePhone] = useState('');
-  const [logoUrl, setLogoUrl]               = useState('');
+  const [saving, setSaving]                         = useState(false);
+  const [showTypePicker, setShowTypePicker]         = useState(false);
+  const [showStatePicker, setShowStatePicker]       = useState(false);
+  const [uploadingLogo, setUploadingLogo]           = useState(false);
+  const [errorModal, setErrorModal]                 = useState({ visible: false, message: '' });
+  const [successModal, setSuccessModal]             = useState(false);
 
-  // ⚡ Padding inferior dinámico para respetar zona de tolerancia (May 17 2026)
+  // Campos de identidad del negocio
+  const [businessName, setBusinessName] = useState('');
+  const [selectedType, setSelectedType] = useState('');
+  const [customType, setCustomType]     = useState('');
+  const [logoUrl, setLogoUrl]           = useState('');
+  const [phone, setPhone]               = useState('');
+  const [alternativePhone, setAlternativePhone] = useState('');
+
+  // Campos de ubicación (NUEVOS May 22 2026)
+  const [state, setState]             = useState('');
+  const [city, setCity]               = useState('');
+  const [postalCode, setPostalCode]   = useState('');
+  const [street, setStreet]           = useState('');
+
   const safeBottom = Math.max(insets.bottom, 16);
 
   useEffect(() => {
@@ -49,10 +75,14 @@ export default function BusinessSettingsScreen() {
         setSelectedType(currentType);
         setCustomType('');
       }
-      setAddress((businessProfile as any).address || '');
       setPhone((businessProfile as any).phone || '');
       setAlternativePhone((businessProfile as any).alternativePhone || '');
       setLogoUrl((businessProfile as any).logoUrl || '');
+      // Nuevos campos de ubicación
+      setState((businessProfile as any).state || '');
+      setCity((businessProfile as any).city || '');
+      setPostalCode((businessProfile as any).postalCode || '');
+      setStreet((businessProfile as any).street || (businessProfile as any).address || '');
     }
   }, [businessProfile]);
 
@@ -100,6 +130,7 @@ export default function BusinessSettingsScreen() {
   };
 
   const handleSave = async () => {
+    // ─── Validaciones obligatorias ───
     if (!businessName.trim()) {
       setErrorModal({ visible: true, message: 'El nombre del negocio es requerido' });
       return;
@@ -115,15 +146,44 @@ export default function BusinessSettingsScreen() {
         return;
       }
     }
+    if (!phone.trim()) {
+      setErrorModal({ visible: true, message: 'El teléfono del negocio es requerido para contacto y verificación' });
+      return;
+    }
+    // ─── Validaciones nuevas de ubicación ───
+    if (!state) {
+      setErrorModal({ visible: true, message: 'Selecciona el estado donde se ubica tu negocio' });
+      return;
+    }
+    if (!city.trim()) {
+      setErrorModal({ visible: true, message: 'Captura el municipio o ciudad de tu negocio' });
+      return;
+    }
+    if (!isValidPostalCode(postalCode)) {
+      setErrorModal({ visible: true, message: 'El código postal debe tener 5 dígitos numéricos' });
+      return;
+    }
+    if (!street.trim()) {
+      setErrorModal({ visible: true, message: 'Captura la calle y número de tu local' });
+      return;
+    }
+
     setSaving(true);
     try {
       await apiPut('/api/business-profile', {
-        businessName: businessName.trim(),
-        businessType: getEffectiveBusinessType(),
-        address: address.trim() || undefined,
-        phone: phone.trim() || undefined,
-        alternativePhone: alternativePhone.trim() || undefined,
-        logoUrl: logoUrl || undefined,
+        businessName:      businessName.trim(),
+        businessType:      getEffectiveBusinessType(),
+        phone:             phone.trim(),
+        alternativePhone:  alternativePhone.trim() || undefined,
+        logoUrl:           logoUrl || undefined,
+        // ── Campos de ubicación (NUEVOS) ──
+        state:             state,
+        city:              city.trim(),
+        postalCode:        postalCode.trim(),
+        street:            street.trim(),
+        // Mantenemos `address` por compatibilidad: lo armamos en string
+        // a partir de los campos desglosados.
+        address: `${street.trim()}, ${city.trim()}, ${state}, C.P. ${postalCode.trim()}`,
       });
       await refreshBusinessProfile();
       setSuccessModal(true);
@@ -144,10 +204,10 @@ export default function BusinessSettingsScreen() {
 
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
-      <ConfirmModal visible={errorModal.visible} title="Error" message={errorModal.message}
+      <ConfirmModal visible={errorModal.visible} title="Falta información" message={errorModal.message}
         buttons={[{ text: 'Aceptar', onPress: () => setErrorModal({ visible: false, message: '' }), style: 'cancel' }]}
         onDismiss={() => setErrorModal({ visible: false, message: '' })} />
-      <ConfirmModal visible={successModal} title="¡Guardado!" message="La información del negocio se actualizó correctamente."
+      <ConfirmModal visible={successModal} title="¡Guardado!" message="La información de tu negocio se actualizó correctamente."
         buttons={[{ text: 'Aceptar', onPress: () => { setSuccessModal(false); router.back(); }, style: 'default' }]}
         onDismiss={() => { setSuccessModal(false); router.back(); }} />
 
@@ -160,6 +220,7 @@ export default function BusinessSettingsScreen() {
       </View>
 
       <ScrollView contentContainerStyle={[styles.scrollContent, { paddingBottom: safeBottom }]}>
+        {/* ─── Sección de identidad del negocio ─── */}
         <View style={styles.logoSection}>
           <Text style={styles.fieldLabel}>Logo del negocio</Text>
           <TouchableOpacity style={styles.logoContainer} onPress={handlePickLogo}>
@@ -203,20 +264,55 @@ export default function BusinessSettingsScreen() {
           </View>
         )}
 
-        <Text style={styles.fieldLabel}>Dirección (opcional)</Text>
-        <TextInput style={styles.input} value={address} onChangeText={setAddress} placeholder="Calle, número, colonia, ciudad" placeholderTextColor={colors.textSecondary} />
+        {/* ─── Sección de contacto ─── */}
+        <View style={styles.sectionDivider}>
+          <Text style={styles.sectionLabel}>📞 CONTACTO</Text>
+        </View>
 
-        <Text style={styles.fieldLabel}>Teléfono (opcional)</Text>
+        <Text style={styles.fieldLabel}>Teléfono del negocio *</Text>
         <TextInput style={styles.input} value={phone} onChangeText={setPhone} placeholder="+52 55 1234 5678" placeholderTextColor={colors.textSecondary} keyboardType="phone-pad" />
+        <Text style={styles.fieldHint}>Este teléfono se mostrará a tus clientes en el link público de citas.</Text>
 
         <Text style={styles.fieldLabel}>Teléfono alternativo (opcional)</Text>
         <TextInput style={styles.input} value={alternativePhone} onChangeText={setAlternativePhone} placeholder="+52 55 8765 4321" placeholderTextColor={colors.textSecondary} keyboardType="phone-pad" />
+
+        {/* ─── Sección de ubicación (NUEVA) ─── */}
+        <View style={styles.sectionDivider}>
+          <Text style={styles.sectionLabel}>📍 UBICACIÓN</Text>
+        </View>
+
+        <Text style={styles.fieldLabel}>Estado *</Text>
+        <TouchableOpacity style={styles.pickerButton} onPress={() => setShowStatePicker(true)}>
+          <Text style={[styles.pickerText, !state && styles.pickerPlaceholder]} numberOfLines={1}>
+            {state || 'Seleccionar estado'}
+          </Text>
+          <IconSymbol android_material_icon_name="arrow-drop-down" size={24} color={colors.textSecondary} />
+        </TouchableOpacity>
+
+        <Text style={styles.fieldLabel}>Municipio / Ciudad *</Text>
+        <TextInput style={styles.input} value={city} onChangeText={setCity} placeholder="Ej. Santiago de Querétaro" placeholderTextColor={colors.textSecondary} autoCapitalize="words" />
+
+        <Text style={styles.fieldLabel}>Código postal *</Text>
+        <TextInput
+          style={styles.input}
+          value={postalCode}
+          onChangeText={(v) => setPostalCode(v.replace(/[^0-9]/g, '').slice(0, 5))}
+          placeholder="76000"
+          placeholderTextColor={colors.textSecondary}
+          keyboardType="numeric"
+          maxLength={5}
+        />
+
+        <Text style={styles.fieldLabel}>Calle y número *</Text>
+        <TextInput style={styles.input} value={street} onChangeText={setStreet} placeholder="Av. Ejemplo 1234, Col. Centro" placeholderTextColor={colors.textSecondary} />
+        <Text style={styles.fieldHint}>Incluye colonia y referencias si lo deseas.</Text>
 
         <TouchableOpacity style={[styles.saveButton, saving && styles.saveButtonDisabled]} onPress={handleSave} disabled={saving}>
           {saving ? <ActivityIndicator color="#FFFFFF" /> : <Text style={styles.saveButtonText}>Guardar cambios</Text>}
         </TouchableOpacity>
       </ScrollView>
 
+      {/* ─── Modal selector de tipo de negocio (existente) ─── */}
       <Modal visible={showTypePicker} animationType="slide" transparent onRequestClose={() => setShowTypePicker(false)}>
         <View style={styles.modalOverlay}>
           <View style={styles.pickerContainer}>
@@ -227,7 +323,7 @@ export default function BusinessSettingsScreen() {
               </TouchableOpacity>
             </View>
             <Text style={styles.pickerSubtitle}>
-              Selecciona el que mejor describe tu negocio. Si no aparece, elige “Otro”.
+              Selecciona el que mejor describe tu negocio. Si no aparece, elige "Otro".
             </Text>
             <ScrollView showsVerticalScrollIndicator={false}>
               {BUSINESS_TYPES.map(type => {
@@ -256,6 +352,43 @@ export default function BusinessSettingsScreen() {
           </View>
         </View>
       </Modal>
+
+      {/* ─── Modal selector de estado de México (NUEVO) ─── */}
+      <Modal visible={showStatePicker} animationType="slide" transparent onRequestClose={() => setShowStatePicker(false)}>
+        <View style={styles.modalOverlay}>
+          <View style={styles.pickerContainer}>
+            <View style={styles.pickerHeader}>
+              <Text style={styles.pickerTitle}>Estado de la República</Text>
+              <TouchableOpacity onPress={() => setShowStatePicker(false)}>
+                <IconSymbol android_material_icon_name="close" size={24} color={colors.text} />
+              </TouchableOpacity>
+            </View>
+            <Text style={styles.pickerSubtitle}>
+              Selecciona el estado donde se ubica tu negocio.
+            </Text>
+            <ScrollView showsVerticalScrollIndicator={false}>
+              {MEXICO_STATES.map(st => {
+                const isSelected = state === st.name;
+                return (
+                  <TouchableOpacity
+                    key={st.iso}
+                    style={[styles.typeOption, isSelected && styles.typeOptionSelected]}
+                    onPress={() => {
+                      setState(st.name);
+                      // Sugerencia de capital si la ciudad está vacía
+                      if (!city.trim()) setCity(st.capital);
+                      setShowStatePicker(false);
+                    }}
+                  >
+                    <Text style={[styles.typeText, isSelected && styles.typeTextSelected]}>{st.name}</Text>
+                    {isSelected && <IconSymbol android_material_icon_name="check" size={20} color={colors.primary} />}
+                  </TouchableOpacity>
+                );
+              })}
+            </ScrollView>
+          </View>
+        </View>
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -266,7 +399,6 @@ const styles = StyleSheet.create({
   backButton:         { padding: 4 },
   title:              { fontSize: 20, fontWeight: 'bold', color: colors.text },
   placeholder:        { width: 32 },
-  // ⚡ paddingBottom removido: se aplica dinámico desde contentContainerStyle
   scrollContent:      { padding: 20 },
   logoSection:        { alignItems: 'center', marginBottom: 24 },
   logoContainer:      { width: 120, height: 120, borderRadius: 60, overflow: 'hidden', marginBottom: 12 },
@@ -276,6 +408,7 @@ const styles = StyleSheet.create({
   changeLogoButton:   { paddingVertical: 8, paddingHorizontal: 16 },
   changeLogoText:     { fontSize: 14, color: colors.primary, fontWeight: '600' },
   fieldLabel:         { fontSize: 14, fontWeight: '600', color: colors.text, marginBottom: 8, marginTop: 16 },
+  fieldHint:          { fontSize: 12, color: colors.textSecondary, marginTop: 6, marginLeft: 4 },
   input:              { backgroundColor: colors.card, borderRadius: 12, padding: 14, fontSize: 16, color: colors.text, borderWidth: 1, borderColor: colors.border },
   pickerButton:       { backgroundColor: colors.card, borderRadius: 12, padding: 14, borderWidth: 1, borderColor: colors.border, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
   pickerText:         { flex: 1, fontSize: 16, color: colors.text },
@@ -283,12 +416,14 @@ const styles = StyleSheet.create({
   customInputWrap:    { backgroundColor: '#FEF3C7', borderRadius: 12, padding: 12, marginTop: 8, borderWidth: 1, borderColor: '#FDE68A' },
   customInputLabel:   { fontSize: 12, fontWeight: '700', color: '#92400E', marginBottom: 8, textTransform: 'uppercase', letterSpacing: 0.4 },
   customInputHint:    { fontSize: 11, color: '#A16207', marginTop: 4, textAlign: 'right' },
+  sectionDivider:     { marginTop: 28, marginBottom: 4, paddingBottom: 8, borderBottomWidth: 1, borderBottomColor: colors.border },
+  sectionLabel:       { fontSize: 12, fontWeight: '800', color: colors.primary, letterSpacing: 1.2 },
   saveButton:         { backgroundColor: colors.primary, borderRadius: 12, padding: 16, alignItems: 'center', marginTop: 32 },
   saveButtonDisabled: { opacity: 0.6 },
   saveButtonText:     { color: '#FFFFFF', fontSize: 18, fontWeight: '600' },
   modalOverlay:       { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-end' },
   pickerContainer:    { backgroundColor: colors.card, borderTopLeftRadius: 24, borderTopRightRadius: 24, maxHeight: '80%', paddingBottom: 32 },
-  pickerHeader:       { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', padding: 20, paddingBottom: 8, borderBottomWidth: 0 },
+  pickerHeader:       { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', padding: 20, paddingBottom: 8 },
   pickerTitle:        { fontSize: 20, fontWeight: 'bold', color: colors.text },
   pickerSubtitle:     { paddingHorizontal: 20, paddingBottom: 16, fontSize: 13, color: colors.textSecondary, lineHeight: 18 },
   typeOption:         { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', padding: 18, borderTopWidth: 1, borderTopColor: colors.border },
