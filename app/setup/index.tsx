@@ -17,27 +17,42 @@ import {
   isCustomBusinessType,
   validateCustomBusinessType,
 } from '@/constants/businessTypes';
+import { MEXICO_STATES, isValidPostalCode } from '@/constants/mexicoStates';
 import { generateSlug, ensureUniqueSlug } from '@/utils/slugGenerator';
 import { logger } from '@/utils/logger';
 
 // ═════════════════════════════════════════════════════════════════
-// SETUP WIZARD — Onboarding post-registro
-// 4 pasos: Negocio → Servicios → Horarios → Link de citas
-// Solo aparece la primera vez que el usuario entra. Se marca en AsyncStorage
+// SETUP WIZARD — Onboarding post-registro (v2 — May 23 2026)
+//
+// ⚡ ACTUALIZACIÓN MAYO 2026:
+// Wizard pasa de 4 a 5 pasos al agregar el paso "Ubicación".
+// El paso de Ubicación captura los 4 campos requeridos por el mapa
+// de calor del Control Center admin:
+//   • Estado (dropdown con los 32 estados de la República Mexicana)
+//   • Municipio / Ciudad
+//   • Código Postal (5 dígitos)
+//   • Calle y número
+//
+// El teléfono ahora es OBLIGATORIO también en el wizard (antes
+// opcional) para alinearlo con Ajustes → Mi Negocio.
+//
+// FLUJO COMPLETO (5 pasos):
+//   1. Negocio    (nombre + tipo + teléfono)
+//   2. Ubicación  (estado + ciudad + CP + calle)  ← NUEVO
+//   3. Servicio   (nombre + precio + duración)
+//   4. Horarios   (días + apertura + cierre)
+//   5. Link       (booking_link generado automáticamente)
+//
+// El wizard solo aparece la primera vez. Se marca en AsyncStorage
 // con la key `setup_completed_<userId>` para nunca volver a mostrarse.
-//
-// PASO 1 (Negocio): Lista de 31 tipos + opción 'Otro' con input de texto libre.
-// La lista vive en /constants/businessTypes.ts (single source of truth).
-//
-// PASO 2 (Servicio): Placeholder inclusivo cubre 3 sectores en 3 ejemplos:
-//   - Consulta Médica (salud) → médicos, clínicas, especialistas
-//   - Corte de cabello (belleza tradicional) → barberías, salones
-//   - Poligel (belleza premium) → nail techs modernas
-// Icono: inventory_2 (caja con productos) — universal y sin sesgo.
 // ═════════════════════════════════════════════════════════════════
 
 const DAYS_OF_WEEK = ['L', 'M', 'M', 'J', 'V', 'S', 'D'];
 const DAY_NAMES = ['Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado', 'Domingo'];
+
+// Total de pasos del wizard. Si cambia, ajustar el progress bar y los
+// condicionales `step === N` abajo.
+const TOTAL_STEPS = 5;
 
 export default function SetupWizard() {
   const router = useRouter();
@@ -48,11 +63,6 @@ export default function SetupWizard() {
 
   // ============ PASO 1: Negocio ============
   const [businessName, setBusinessName] = useState(businessProfile?.businessName || '');
-  // Inicialización inteligente del tipo de negocio:
-  //   - Si el perfil tiene un valor que SI está en la lista oficial, lo usamos.
-  //   - Si tiene un valor que NO está (ej: 'Especialista Parasitólogo'),
-  //     ponemos selectedType = 'Otro' y el customType con ese valor.
-  //   - Si no tiene nada, vacío.
   const initialType = businessProfile?.businessType || '';
   const [selectedType, setSelectedType] = useState(
     initialType ? (isCustomBusinessType(initialType) ? BUSINESS_TYPE_OTHER : initialType) : ''
@@ -63,17 +73,26 @@ export default function SetupWizard() {
   const [showTypePicker, setShowTypePicker] = useState(false);
   const [phone, setPhone] = useState(businessProfile?.phone || '');
 
-  // ============ PASO 2: Primer servicio ============
+  // ============ PASO 2: Ubicación (NUEVO) ============
+  const [state, setStateValue] = useState((businessProfile as any)?.state || '');
+  const [city, setCity] = useState((businessProfile as any)?.city || '');
+  const [postalCode, setPostalCode] = useState((businessProfile as any)?.postalCode || '');
+  const [street, setStreet] = useState(
+    (businessProfile as any)?.street || (businessProfile as any)?.address || ''
+  );
+  const [showStatePicker, setShowStatePicker] = useState(false);
+
+  // ============ PASO 3: Primer servicio ============
   const [serviceName, setServiceName] = useState('');
   const [servicePrice, setServicePrice] = useState('');
   const [serviceDuration, setServiceDuration] = useState('30');
 
-  // ============ PASO 3: Horarios ============
-  const [openDays, setOpenDays] = useState<number[]>([0, 1, 2, 3, 4, 5]); // Lun-Sáb por defecto
+  // ============ PASO 4: Horarios ============
+  const [openDays, setOpenDays] = useState<number[]>([0, 1, 2, 3, 4, 5]);
   const [openTime, setOpenTime] = useState('09:00');
   const [closeTime, setCloseTime] = useState('19:00');
 
-  // ============ PASO 4: Link ============
+  // ============ PASO 5: Link ============
   const [bookingSlug, setBookingSlug] = useState<string | null>(null);
   const [linkLoading, setLinkLoading] = useState(false);
 
@@ -85,9 +104,9 @@ export default function SetupWizard() {
     });
   };
 
-  // Cargar slug existente cuando llegamos al paso 4
+  // Cargar slug existente cuando llegamos al paso 5
   useEffect(() => {
-    if (step === 3 && user?.id) loadBookingLink();
+    if (step === 4 && user?.id) loadBookingLink();
   }, [step, user?.id]);
 
   const loadBookingLink = async () => {
@@ -131,9 +150,6 @@ export default function SetupWizard() {
   };
 
   // ---------- PASO 1: Guardar negocio ----------
-  // Calcula el valor final que se guarda en BD:
-  //   - Si selectedType es 'Otro' → usa customType (texto libre del usuario)
-  //   - Caso contrario → usa selectedType tal cual
   const getEffectiveBusinessType = (): string => {
     if (selectedType === BUSINESS_TYPE_OTHER) {
       return customType.trim();
@@ -150,13 +166,20 @@ export default function SetupWizard() {
       Alert.alert('Falta información', 'Por favor selecciona el tipo de negocio.');
       return;
     }
-    // Validar input personalizado de 'Otro'
     if (selectedType === BUSINESS_TYPE_OTHER) {
       const v = validateCustomBusinessType(customType);
       if (!v.valid) {
         Alert.alert('Tipo de negocio', v.error || 'Escribe tu tipo de negocio.');
         return;
       }
+    }
+    // ⚡ NUEVO: teléfono ahora obligatorio (consistente con Ajustes → Mi Negocio)
+    if (!phone.trim()) {
+      Alert.alert(
+        'Falta información',
+        'El teléfono es necesario para que tus clientes te contacten desde el link público de citas.'
+      );
+      return;
     }
     if (!user?.id) return;
     setSaving(true);
@@ -166,22 +189,13 @@ export default function SetupWizard() {
         user_id: user.id,
         business_name: businessName.trim(),
         business_type: finalBusinessType,
-        phone: phone.trim() || null,
+        phone: phone.trim(),
         updated_at: new Date().toISOString(),
       }, { onConflict: 'user_id' });
 
       // ─────────────────────────────────────────────────────────────────
-      // AUTO-CREACIÓN DEL BOOKING_LINK (May 2026):
-      // Genera el link público automáticamente para que el flujo de
-      // [Reagendar] desde WhatsApp siempre tenga un slug válido al cual
-      // dirigir al cliente. El usuario no necesita configurar nada más.
-      //
-      // GUARD: Solo se crea para cuentas de DUEÑO, no para staff.
-      // Los staff accounts (empleados de un dueño) NO deben tener su propio
-      // booking_link público — operan dentro del negocio del dueño.
-      //
-      // Si falla la creación, NO bloqueamos el wizard — el usuario puede
-      // crear el link manualmente desde Ajustes después. Solo loggeamos.
+      // AUTO-CREACIÓN DEL BOOKING_LINK (mantenida sin cambios)
+      // Solo cuentas de DUEÑO, NO staff. Si falla, NO bloquea el wizard.
       // ─────────────────────────────────────────────────────────────────
       if (!isStaffAccount) {
         try {
@@ -205,7 +219,6 @@ export default function SetupWizard() {
           }
         } catch (linkErr: any) {
           logger.warn('[Setup] No se pudo auto-crear el booking_link:', linkErr?.message);
-          // No bloqueamos el wizard — el negocio sí se guardó correctamente
         }
       }
 
@@ -218,11 +231,55 @@ export default function SetupWizard() {
     }
   };
 
-  // ---------- PASO 2: Guardar primer servicio ----------
+  // ---------- PASO 2 (NUEVO): Guardar ubicación ----------
+  const handleSaveLocationAndNext = async () => {
+    if (!state) {
+      Alert.alert('Falta información', 'Selecciona el estado de la República donde se ubica tu negocio.');
+      return;
+    }
+    if (!city.trim()) {
+      Alert.alert('Falta información', 'Captura el municipio o ciudad donde está tu negocio.');
+      return;
+    }
+    if (!isValidPostalCode(postalCode)) {
+      Alert.alert('Código postal inválido', 'El código postal debe tener exactamente 5 dígitos numéricos.');
+      return;
+    }
+    if (!street.trim()) {
+      Alert.alert('Falta información', 'Captura la calle y número de tu local.');
+      return;
+    }
+    if (!user?.id) return;
+    setSaving(true);
+    try {
+      // Armamos el campo `address` legacy a partir de los campos desglosados
+      // para mantener compatibilidad con código viejo que lo lea.
+      const composedAddress = `${street.trim()}, ${city.trim()}, ${state}, C.P. ${postalCode.trim()}`;
+      await supabase.from('business_profiles').upsert({
+        user_id: user.id,
+        state: state,
+        city: city.trim(),
+        postal_code: postalCode.trim(),
+        street: street.trim(),
+        address: composedAddress,
+        updated_at: new Date().toISOString(),
+      }, { onConflict: 'user_id' });
+
+      if (refreshBusinessProfile) await refreshBusinessProfile();
+      animateStepChange(2);
+    } catch (err: any) {
+      logger.error('[Setup] Error guardando ubicación:', err?.message);
+      Alert.alert('Error', 'No se pudo guardar la ubicación. Intenta de nuevo.');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  // ---------- PASO 3: Guardar primer servicio ----------
   const handleSaveServiceAndNext = async () => {
     if (!user?.id) return;
     if (!serviceName.trim()) {
-      animateStepChange(2);
+      animateStepChange(3);
       return;
     }
     const price = parseFloat(servicePrice);
@@ -244,7 +301,7 @@ export default function SetupWizard() {
         duration_minutes: duration,
         is_active: true,
       });
-      animateStepChange(2);
+      animateStepChange(3);
     } catch (err: any) {
       Alert.alert('Error', 'No se pudo guardar el servicio.');
     } finally {
@@ -252,7 +309,7 @@ export default function SetupWizard() {
     }
   };
 
-  // ---------- PASO 3: Guardar horarios ----------
+  // ---------- PASO 4: Guardar horarios ----------
   const handleSaveScheduleAndNext = async () => {
     if (!user?.id) return;
     setSaving(true);
@@ -266,7 +323,7 @@ export default function SetupWizard() {
       }));
       await supabase.from('business_hours').delete().eq('user_id', user.id);
       await supabase.from('business_hours').insert(rows);
-      animateStepChange(3);
+      animateStepChange(4);
     } catch (err: any) {
       Alert.alert('Error', 'No se pudieron guardar los horarios.');
     } finally {
@@ -274,7 +331,7 @@ export default function SetupWizard() {
     }
   };
 
-  // ---------- PASO 4: Finalizar ----------
+  // ---------- PASO 5: Finalizar ----------
   const handleFinish = async () => {
     await markSetupCompleted();
     router.replace('/(tabs)/(home)');
@@ -296,13 +353,12 @@ export default function SetupWizard() {
   const renderProgressBar = () => (
     <View style={s.progressContainer}>
       <View style={s.progressBarBg}>
-        <View style={[s.progressBarFill, { width: `${((step + 1) / 4) * 100}%` }]} />
+        <View style={[s.progressBarFill, { width: `${((step + 1) / TOTAL_STEPS) * 100}%` }]} />
       </View>
-      <Text style={s.progressText}>Paso {step + 1} de 4</Text>
+      <Text style={s.progressText}>Paso {step + 1} de {TOTAL_STEPS}</Text>
     </View>
   );
 
-  // Texto que se muestra en el botón del picker
   const pickerDisplayText = () => {
     if (!selectedType) return 'Seleccionar tipo de negocio';
     if (selectedType === BUSINESS_TYPE_OTHER) {
@@ -363,7 +419,6 @@ export default function SetupWizard() {
                   <MaterialIcons name="arrow-drop-down" size={24} color="#64748B" />
                 </TouchableOpacity>
 
-                {/* Input de texto libre cuando se selecciona 'Otro' */}
                 {selectedType === BUSINESS_TYPE_OTHER && (
                   <View style={s.customInputWrap}>
                     <Text style={s.customInputLabel}>Especifica tu tipo de negocio o especialidad *</Text>
@@ -380,7 +435,7 @@ export default function SetupWizard() {
                   </View>
                 )}
 
-                <Text style={s.label}>Teléfono de contacto (opcional)</Text>
+                <Text style={s.label}>Teléfono de contacto *</Text>
                 <TextInput
                   style={s.input}
                   placeholder="442 123 4567"
@@ -390,11 +445,81 @@ export default function SetupWizard() {
                   keyboardType="phone-pad"
                   maxLength={15}
                 />
+                <Text style={s.fieldHint}>Tus clientes verán este teléfono en el link público para contactarte.</Text>
               </>
             )}
 
-            {/* ============ PASO 2: SERVICIO ============ */}
+            {/* ============ PASO 2: UBICACIÓN (NUEVO) ============ */}
             {step === 1 && (
+              <>
+                <View style={s.stepIconWrap}>
+                  <View style={[s.stepIconCircle, { backgroundColor: '#FEF3F2' }]}>
+                    <MaterialIcons name="place" size={40} color="#EF4444" />
+                  </View>
+                </View>
+                <Text style={s.stepTitle}>¿Dónde se ubica tu negocio?</Text>
+                <Text style={s.stepDesc}>Esta dirección aparecerá en el link público para que tus clientes te encuentren.</Text>
+
+                <Text style={s.label}>Estado *</Text>
+                <TouchableOpacity
+                  style={s.pickerButton}
+                  onPress={() => setShowStatePicker(true)}
+                  activeOpacity={0.8}
+                >
+                  <Text style={[s.pickerButtonText, !state && s.pickerButtonPlaceholder]} numberOfLines={1}>
+                    {state || 'Seleccionar estado'}
+                  </Text>
+                  <MaterialIcons name="arrow-drop-down" size={24} color="#64748B" />
+                </TouchableOpacity>
+
+                <Text style={s.label}>Municipio / Ciudad *</Text>
+                <TextInput
+                  style={s.input}
+                  placeholder="Ej. Santiago de Querétaro"
+                  placeholderTextColor="#94A3B8"
+                  value={city}
+                  onChangeText={setCity}
+                  autoCapitalize="words"
+                  maxLength={60}
+                />
+
+                <View style={s.row2}>
+                  <View style={{ flex: 1 }}>
+                    <Text style={s.label}>Código postal *</Text>
+                    <TextInput
+                      style={s.input}
+                      placeholder="76000"
+                      placeholderTextColor="#94A3B8"
+                      value={postalCode}
+                      onChangeText={(v) => setPostalCode(v.replace(/[^0-9]/g, '').slice(0, 5))}
+                      keyboardType="numeric"
+                      maxLength={5}
+                    />
+                  </View>
+                  <View style={{ flex: 2 }}>
+                    <Text style={s.label}>Calle y número *</Text>
+                    <TextInput
+                      style={s.input}
+                      placeholder="Av. Ejemplo 1234"
+                      placeholderTextColor="#94A3B8"
+                      value={street}
+                      onChangeText={setStreet}
+                      maxLength={100}
+                    />
+                  </View>
+                </View>
+
+                <View style={s.tipBox}>
+                  <MaterialIcons name="lightbulb" size={16} color="#F59E0B" />
+                  <Text style={s.tipText}>
+                    Incluye colonia y referencias en "Calle y número" si quieres que sea más fácil encontrarte.
+                  </Text>
+                </View>
+              </>
+            )}
+
+            {/* ============ PASO 3: SERVICIO ============ */}
+            {step === 2 && (
               <>
                 <View style={s.stepIconWrap}>
                   <View style={[s.stepIconCircle, { backgroundColor: '#FFFBEB' }]}>
@@ -449,8 +574,8 @@ export default function SetupWizard() {
               </>
             )}
 
-            {/* ============ PASO 3: HORARIOS ============ */}
-            {step === 2 && (
+            {/* ============ PASO 4: HORARIOS ============ */}
+            {step === 3 && (
               <>
                 <View style={s.stepIconWrap}>
                   <View style={[s.stepIconCircle, { backgroundColor: '#EFF6FF' }]}>
@@ -511,8 +636,8 @@ export default function SetupWizard() {
               </>
             )}
 
-            {/* ============ PASO 4: LINK ============ */}
-            {step === 3 && (
+            {/* ============ PASO 5: LINK ============ */}
+            {step === 4 && (
               <>
                 <View style={s.stepIconWrap}>
                   <View style={[s.stepIconCircle, { backgroundColor: '#F5F3FF' }]}>
@@ -582,8 +707,9 @@ export default function SetupWizard() {
             style={[s.nextBtn, saving && s.nextBtnDisabled]}
             onPress={
               step === 0 ? handleSaveBusinessAndNext :
-              step === 1 ? handleSaveServiceAndNext :
-              step === 2 ? handleSaveScheduleAndNext :
+              step === 1 ? handleSaveLocationAndNext :
+              step === 2 ? handleSaveServiceAndNext :
+              step === 3 ? handleSaveScheduleAndNext :
               handleFinish
             }
             disabled={saving}
@@ -594,9 +720,9 @@ export default function SetupWizard() {
             ) : (
               <>
                 <Text style={s.nextBtnText}>
-                  {step === 3 ? 'Comenzar a usar VYLTA' : 'Continuar'}
+                  {step === 4 ? 'Comenzar a usar VYLTA' : 'Continuar'}
                 </Text>
-                <MaterialIcons name={step === 3 ? 'check' : 'arrow-forward'} size={20} color="#fff" />
+                <MaterialIcons name={step === 4 ? 'check' : 'arrow-forward'} size={20} color="#fff" />
               </>
             )}
           </TouchableOpacity>
@@ -636,12 +762,54 @@ export default function SetupWizard() {
                     onPress={() => {
                       setSelectedType(type);
                       setShowTypePicker(false);
-                      // Si selecciona algo que no es 'Otro', limpiamos el customType
                       if (type !== BUSINESS_TYPE_OTHER) setCustomType('');
                     }}
                     activeOpacity={0.7}
                   >
                     <Text style={[s.typeOptionText, isSelected && s.typeOptionTextSelected]}>{type}</Text>
+                    {isSelected && <MaterialIcons name="check" size={20} color={colors.primary} />}
+                  </TouchableOpacity>
+                );
+              })}
+            </ScrollView>
+          </View>
+        </View>
+      </Modal>
+
+      {/* MODAL: Selector de estado de la República (NUEVO) */}
+      <Modal
+        visible={showStatePicker}
+        animationType="slide"
+        transparent
+        onRequestClose={() => setShowStatePicker(false)}
+      >
+        <View style={s.modalOverlay}>
+          <View style={s.pickerContainer}>
+            <View style={s.pickerHeader}>
+              <Text style={s.pickerTitle}>Estado de la República</Text>
+              <TouchableOpacity onPress={() => setShowStatePicker(false)} style={s.pickerCloseBtn}>
+                <MaterialIcons name="close" size={24} color="#0F172A" />
+              </TouchableOpacity>
+            </View>
+            <Text style={s.pickerSubtitle}>
+              Selecciona el estado donde se ubica tu negocio.
+            </Text>
+            <ScrollView showsVerticalScrollIndicator={false}>
+              {MEXICO_STATES.map(st => {
+                const isSelected = state === st.name;
+                return (
+                  <TouchableOpacity
+                    key={st.iso}
+                    style={[s.typeOption, isSelected && s.typeOptionSelected]}
+                    onPress={() => {
+                      setStateValue(st.name);
+                      // Sugerencia de capital si la ciudad está vacía
+                      if (!city.trim()) setCity(st.capital);
+                      setShowStatePicker(false);
+                    }}
+                    activeOpacity={0.7}
+                  >
+                    <Text style={[s.typeOptionText, isSelected && s.typeOptionTextSelected]}>{st.name}</Text>
                     {isSelected && <MaterialIcons name="check" size={20} color={colors.primary} />}
                   </TouchableOpacity>
                 );
@@ -674,15 +842,14 @@ const s = StyleSheet.create({
   stepDesc: { fontSize: 14, color: '#64748B', textAlign: 'center', lineHeight: 20, marginBottom: 28, paddingHorizontal: 8 },
 
   label: { fontSize: 12, fontWeight: '700', color: '#475569', textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 8, marginTop: 4 },
+  fieldHint: { fontSize: 12, color: '#64748B', marginTop: -10, marginBottom: 16, marginLeft: 4 },
   input: { backgroundColor: '#fff', borderRadius: 12, padding: 14, fontSize: 16, color: '#0F172A', borderWidth: 1, borderColor: '#E2E8F0', marginBottom: 16 },
   row2: { flexDirection: 'row', gap: 12 },
 
-  // Botón picker (reemplaza el typeGrid de chips)
   pickerButton: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', backgroundColor: '#fff', borderRadius: 12, paddingHorizontal: 14, paddingVertical: 14, borderWidth: 1, borderColor: '#E2E8F0', marginBottom: 8 },
   pickerButtonText: { flex: 1, fontSize: 16, color: '#0F172A', fontWeight: '500' },
   pickerButtonPlaceholder: { color: '#94A3B8', fontWeight: '400' },
 
-  // Input de texto libre cuando es 'Otro'
   customInputWrap: { backgroundColor: '#FEF3C7', borderRadius: 12, padding: 12, marginTop: 4, marginBottom: 12, borderWidth: 1, borderColor: '#FDE68A' },
   customInputLabel: { fontSize: 12, fontWeight: '700', color: '#92400E', marginBottom: 6, textTransform: 'uppercase', letterSpacing: 0.4 },
   customInputHint: { fontSize: 11, color: '#A16207', marginTop: -8, marginBottom: 4, textAlign: 'right' },
@@ -716,7 +883,6 @@ const s = StyleSheet.create({
   nextBtnDisabled: { backgroundColor: '#9CA3AF' },
   nextBtnText: { color: '#fff', fontSize: 16, fontWeight: '700' },
 
-  // Modal selector
   modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-end' },
   pickerContainer: { backgroundColor: '#fff', borderTopLeftRadius: 24, borderTopRightRadius: 24, maxHeight: '80%', paddingBottom: 32 },
   pickerHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 24, paddingTop: 20, paddingBottom: 8 },
