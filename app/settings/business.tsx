@@ -18,23 +18,26 @@ import {
   validateCustomBusinessType,
 } from '@/constants/businessTypes';
 import { MEXICO_STATES, isValidPostalCode } from '@/constants/mexicoStates';
+import { supabase } from '@/lib/supabase';
 
 // ═══════════════════════════════════════════════════════════════════════
 // app/settings/business.tsx — Información del negocio
 //
-// ⚡ ACTUALIZACIÓN (May 22 2026):
-// Se agregaron 4 campos de ubicación detallada para habilitar el mapa
-// de calor del Control Center admin:
-//   • Estado (dropdown con los 32 estados de la República Mexicana)
-//   • Municipio / Ciudad
-//   • Código Postal (5 dígitos, validación)
-//   • Calle y número (reemplaza el campo "Dirección" libre)
+// ⚡ FIX CRITICO (May 23 2026 - v2):
+// Antonio reporto que despues de completar el wizard de onboarding, los
+// datos de ubicacion (estado, ciudad, CP, calle) NO aparecian al abrir
+// Ajustes -> Mi Negocio, aunque en BD si se habian guardado correctamente.
 //
-// El campo "Teléfono del negocio" ahora es OBLIGATORIO (antes opcional).
-// Estos campos son críticos para:
-//   1. Reportes geográficos del Control Center
-//   2. Personalización de WhatsApp templates (mencionando ciudad)
-//   3. Validación de autenticidad del negocio para verificación
+// CAUSA: el form leia los datos UNICAMENTE del context `businessProfile`.
+// Si el context estaba stale (datos cacheados al login, antes del wizard),
+// el form se mostraba vacio aunque BD tuviera los valores correctos.
+//
+// SOLUCION: cargar directamente de BD al montar el componente, NO depender
+// exclusivamente del context. Asi el form SIEMPRE muestra la fuente de
+// verdad (BD), independientemente del estado del context.
+//
+// Esto es defensa en profundidad: el context se sigue refrescando al
+// terminar el wizard, PERO el form ya no depende de eso para funcionar.
 // ═══════════════════════════════════════════════════════════════════════
 
 export default function BusinessSettingsScreen() {
@@ -42,6 +45,7 @@ export default function BusinessSettingsScreen() {
   const insets = useSafeAreaInsets();
   const { businessProfile, refreshBusinessProfile } = useAuth();
   const [saving, setSaving]                         = useState(false);
+  const [loading, setLoading]                       = useState(true);
   const [showTypePicker, setShowTypePicker]         = useState(false);
   const [showStatePicker, setShowStatePicker]       = useState(false);
   const [uploadingLogo, setUploadingLogo]           = useState(false);
@@ -56,7 +60,7 @@ export default function BusinessSettingsScreen() {
   const [phone, setPhone]               = useState('');
   const [alternativePhone, setAlternativePhone] = useState('');
 
-  // Campos de ubicación (NUEVOS May 22 2026)
+  // Campos de ubicación
   const [state, setState]             = useState('');
   const [city, setCity]               = useState('');
   const [postalCode, setPostalCode]   = useState('');
@@ -64,27 +68,92 @@ export default function BusinessSettingsScreen() {
 
   const safeBottom = Math.max(insets.bottom, 16);
 
+  // ⚡ FIX v2: cargar datos directamente de BD al montar.
+  // Esto garantiza que el form SIEMPRE muestra la fuente de verdad,
+  // independientemente del estado del context. Cubre el caso donde el
+  // usuario completa el wizard de onboarding y abre este form pero el
+  // context todavia no se ha refrescado.
   useEffect(() => {
-    if (businessProfile) {
-      setBusinessName(businessProfile.businessName || '');
-      const currentType = businessProfile.businessType || '';
-      if (currentType && isCustomBusinessType(currentType)) {
-        setSelectedType(BUSINESS_TYPE_OTHER);
-        setCustomType(currentType);
-      } else {
-        setSelectedType(currentType);
-        setCustomType('');
+    let cancelled = false;
+
+    async function loadFreshFromDB() {
+      try {
+        const { data: { user }, error: userErr } = await supabase.auth.getUser();
+        if (userErr || !user) {
+          if (!cancelled) setLoading(false);
+          return;
+        }
+
+        const { data, error } = await supabase
+          .from('business_profiles')
+          .select('*')
+          .eq('user_id', user.id)
+          .maybeSingle();
+
+        if (cancelled) return;
+
+        if (error) {
+          console.error('[BusinessSettings] Error cargando perfil:', error);
+          setLoading(false);
+          return;
+        }
+
+        if (data) {
+          // Aplicar los valores de BD al state local
+          setBusinessName(data.business_name || '');
+
+          const currentType = data.business_type || '';
+          if (currentType && isCustomBusinessType(currentType)) {
+            setSelectedType(BUSINESS_TYPE_OTHER);
+            setCustomType(currentType);
+          } else {
+            setSelectedType(currentType);
+            setCustomType('');
+          }
+
+          setPhone(data.phone || '');
+          setAlternativePhone(data.alternative_phone || '');
+          setLogoUrl(data.logo_url || '');
+
+          // Campos de ubicación
+          setState(data.state || '');
+          setCity(data.city || '');
+          setPostalCode(data.postal_code || '');
+          setStreet(data.street || data.address || '');
+        }
+
+        // Re-sincronizar context para que otras pantallas vean los datos frescos
+        try {
+          if (refreshBusinessProfile) await refreshBusinessProfile();
+        } catch {}
+
+        setLoading(false);
+      } catch (e) {
+        console.error('[BusinessSettings] Excepcion cargando perfil:', e);
+        if (!cancelled) setLoading(false);
       }
-      setPhone((businessProfile as any).phone || '');
-      setAlternativePhone((businessProfile as any).alternativePhone || '');
-      setLogoUrl((businessProfile as any).logoUrl || '');
-      // Nuevos campos de ubicación
-      setState((businessProfile as any).state || '');
-      setCity((businessProfile as any).city || '');
-      setPostalCode((businessProfile as any).postalCode || '');
-      setStreet((businessProfile as any).street || (businessProfile as any).address || '');
     }
-  }, [businessProfile]);
+
+    loadFreshFromDB();
+
+    return () => { cancelled = true; };
+    // Solo se ejecuta una vez al montar. Si el usuario cambia de cuenta,
+    // el componente se desmonta y vuelve a montar.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Fallback: si el context tiene datos y los del state local estan vacios,
+  // usarlos como respaldo (caso raro pero defensivo).
+  useEffect(() => {
+    if (!businessProfile) return;
+    if (!businessName && businessProfile.businessName) setBusinessName(businessProfile.businessName);
+    if (!phone && businessProfile.phone) setPhone(businessProfile.phone);
+    if (!state && (businessProfile as any).state) setState((businessProfile as any).state);
+    if (!city && (businessProfile as any).city) setCity((businessProfile as any).city);
+    if (!postalCode && (businessProfile as any).postalCode) setPostalCode((businessProfile as any).postalCode);
+    if (!street && (businessProfile as any).street) setStreet((businessProfile as any).street);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [businessProfile?.id, (businessProfile as any)?.state]);
 
   const handlePickLogo = async () => {
     const result = await ImagePicker.launchImageLibraryAsync({
@@ -97,7 +166,6 @@ export default function BusinessSettingsScreen() {
     setUploadingLogo(true);
     try {
       const { getCurrentUserId } = await import('@/utils/api');
-      const { supabase } = await import('@/lib/supabase');
       const userId = await getCurrentUserId();
       const response = await fetch(uri);
       const blob = await response.blob();
@@ -150,7 +218,6 @@ export default function BusinessSettingsScreen() {
       setErrorModal({ visible: true, message: 'El teléfono del negocio es requerido para contacto y verificación' });
       return;
     }
-    // ─── Validaciones nuevas de ubicación ───
     if (!state) {
       setErrorModal({ visible: true, message: 'Selecciona el estado donde se ubica tu negocio' });
       return;
@@ -176,13 +243,10 @@ export default function BusinessSettingsScreen() {
         phone:             phone.trim(),
         alternativePhone:  alternativePhone.trim() || undefined,
         logoUrl:           logoUrl || undefined,
-        // ── Campos de ubicación (NUEVOS) ──
         state:             state,
         city:              city.trim(),
         postalCode:        postalCode.trim(),
         street:            street.trim(),
-        // Mantenemos `address` por compatibilidad: lo armamos en string
-        // a partir de los campos desglosados.
         address: `${street.trim()}, ${city.trim()}, ${state}, C.P. ${postalCode.trim()}`,
       });
       await refreshBusinessProfile();
@@ -201,6 +265,24 @@ export default function BusinessSettingsScreen() {
     }
     return selectedType;
   };
+
+  if (loading) {
+    return (
+      <SafeAreaView style={styles.container} edges={['top']}>
+        <View style={styles.header}>
+          <TouchableOpacity onPress={() => router.back()} style={styles.backButton}>
+            <IconSymbol android_material_icon_name="arrow-back" size={24} color={colors.text} />
+          </TouchableOpacity>
+          <Text style={styles.title}>Mi Negocio</Text>
+          <View style={styles.placeholder} />
+        </View>
+        <View style={styles.loadingContainer}>
+          <ActivityIndicator size="large" color={colors.primary} />
+          <Text style={styles.loadingText}>Cargando tu información...</Text>
+        </View>
+      </SafeAreaView>
+    );
+  }
 
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
@@ -276,7 +358,7 @@ export default function BusinessSettingsScreen() {
         <Text style={styles.fieldLabel}>Teléfono alternativo (opcional)</Text>
         <TextInput style={styles.input} value={alternativePhone} onChangeText={setAlternativePhone} placeholder="+52 55 8765 4321" placeholderTextColor={colors.textSecondary} keyboardType="phone-pad" />
 
-        {/* ─── Sección de ubicación (NUEVA) ─── */}
+        {/* ─── Sección de ubicación ─── */}
         <View style={styles.sectionDivider}>
           <Text style={styles.sectionLabel}>📍 UBICACIÓN</Text>
         </View>
@@ -312,7 +394,7 @@ export default function BusinessSettingsScreen() {
         </TouchableOpacity>
       </ScrollView>
 
-      {/* ─── Modal selector de tipo de negocio (existente) ─── */}
+      {/* ─── Modal selector de tipo de negocio ─── */}
       <Modal visible={showTypePicker} animationType="slide" transparent onRequestClose={() => setShowTypePicker(false)}>
         <View style={styles.modalOverlay}>
           <View style={styles.pickerContainer}>
@@ -353,7 +435,7 @@ export default function BusinessSettingsScreen() {
         </View>
       </Modal>
 
-      {/* ─── Modal selector de estado de México (NUEVO) ─── */}
+      {/* ─── Modal selector de estado de México ─── */}
       <Modal visible={showStatePicker} animationType="slide" transparent onRequestClose={() => setShowStatePicker(false)}>
         <View style={styles.modalOverlay}>
           <View style={styles.pickerContainer}>
@@ -375,7 +457,6 @@ export default function BusinessSettingsScreen() {
                     style={[styles.typeOption, isSelected && styles.typeOptionSelected]}
                     onPress={() => {
                       setState(st.name);
-                      // Sugerencia de capital si la ciudad está vacía
                       if (!city.trim()) setCity(st.capital);
                       setShowStatePicker(false);
                     }}
@@ -399,6 +480,8 @@ const styles = StyleSheet.create({
   backButton:         { padding: 4 },
   title:              { fontSize: 20, fontWeight: 'bold', color: colors.text },
   placeholder:        { width: 32 },
+  loadingContainer:   { flex: 1, justifyContent: 'center', alignItems: 'center', gap: 12 },
+  loadingText:        { fontSize: 14, color: colors.textSecondary },
   scrollContent:      { padding: 20 },
   logoSection:        { alignItems: 'center', marginBottom: 24 },
   logoContainer:      { width: 120, height: 120, borderRadius: 60, overflow: 'hidden', marginBottom: 12 },
