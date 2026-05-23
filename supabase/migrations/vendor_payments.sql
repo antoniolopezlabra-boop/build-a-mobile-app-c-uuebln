@@ -8,26 +8,24 @@
 --           Resend, Stripe fees, etc) para tener visibilidad financiera
 --           total desde un solo lugar.
 --
+-- ⚡ FIX (May 22 2026 - 2da versión):
+--   Corregido nombre de tabla admin: `admin_users` → `vylta_admins`
+--   (es el nombre real en este proyecto, validado en lib/admin-server.ts)
+--
 -- ESTRUCTURA:
 --   • id           UUID PK
---   • vendor_name  TEXT NOT NULL (Supabase, Vercel, 360dialog, etc)
---   • category     TEXT NOT NULL (infraestructura, comunicaciones, etc)
---   • amount_mxn   NUMERIC(10,2) NOT NULL (monto en MXN)
+--   • vendor_name  TEXT NOT NULL
+--   • category     TEXT NOT NULL CHECK (infraestructura, comunicaciones, etc)
+--   • amount_mxn   NUMERIC(10,2) NOT NULL
 --   • currency     TEXT NOT NULL DEFAULT 'MXN'
---   • due_date     DATE NOT NULL (cuándo se debe pagar)
---   • status       TEXT NOT NULL DEFAULT 'pending'
---                   ('pending'|'paid'|'overdue'|'cancelled')
---   • frequency    TEXT NOT NULL DEFAULT 'monthly'
---                   ('one-time'|'monthly'|'quarterly'|'annual')
---   • notes        TEXT (notas opcionales)
---   • paid_at      TIMESTAMPTZ (cuándo se pagó)
---   • created_at   TIMESTAMPTZ DEFAULT NOW()
---   • updated_at   TIMESTAMPTZ DEFAULT NOW()
+--   • due_date     DATE NOT NULL
+--   • status       TEXT ('pending'|'paid'|'overdue'|'cancelled')
+--   • frequency    TEXT ('one-time'|'monthly'|'quarterly'|'annual')
+--   • notes, paid_at, created_at, updated_at
 --
 -- RLS:
---   Solo administradores activos pueden ver, insertar, actualizar y
---   borrar registros. Esta tabla es 100% admin-only — no es visible para
---   usuarios finales.
+--   Solo administradores activos (vylta_admins.is_active=true) pueden
+--   ver, insertar, actualizar y borrar registros.
 -- ═══════════════════════════════════════════════════════════════════════
 
 CREATE TABLE IF NOT EXISTS public.vendor_payments (
@@ -38,7 +36,7 @@ CREATE TABLE IF NOT EXISTS public.vendor_payments (
     'comunicaciones',      -- 360dialog, Twilio, Resend
     'automatizacion',      -- n8n, Zapier
     'pagos',               -- Stripe fees
-    'desarrollo',          -- GitHub, dominio expo
+    'desarrollo',          -- GitHub, dominio, expo
     'marketing',           -- ads, herramientas
     'legal',               -- contadora, abogados, IMPI
     'otro'
@@ -83,29 +81,27 @@ CREATE TRIGGER trg_vendor_payments_updated_at
   BEFORE UPDATE ON public.vendor_payments
   FOR EACH ROW EXECUTE FUNCTION public.set_vendor_payments_updated_at();
 
--- ─── RLS: solo admins ───
+-- ─── RLS: solo admins (tabla vylta_admins) ───
 ALTER TABLE public.vendor_payments ENABLE ROW LEVEL SECURITY;
 
--- Política: solo admins activos pueden hacer lo que sea
 DROP POLICY IF EXISTS "vendor_payments_admin_all" ON public.vendor_payments;
 CREATE POLICY "vendor_payments_admin_all" ON public.vendor_payments
   FOR ALL
   USING (
     EXISTS (
-      SELECT 1 FROM public.admin_users
+      SELECT 1 FROM public.vylta_admins
       WHERE user_id = auth.uid() AND is_active = true
     )
   );
 
 -- ─── Comentarios de documentación ───
 COMMENT ON TABLE public.vendor_payments IS
-  'Calendario de pagos a proveedores. Solo visible para admins. Usado por el Control Center para mostrar próximos pagos, reportes de gastos y cashflow.';
+  'Calendario de pagos a proveedores. Solo visible para admins (vylta_admins). Usado por el Control Center para mostrar próximos pagos, reportes de gastos y cashflow.';
 
 COMMENT ON COLUMN public.vendor_payments.frequency IS
   'one-time = pago único; monthly = mensual recurrente; quarterly = trimestral; annual = anual';
 
 -- ─── Función helper: marcar pagos vencidos automáticamente ───
--- Se puede ejecutar como cron diario para mover pending → overdue
 CREATE OR REPLACE FUNCTION public.mark_overdue_vendor_payments()
 RETURNS INTEGER
 LANGUAGE plpgsql
@@ -127,19 +123,16 @@ COMMENT ON FUNCTION public.mark_overdue_vendor_payments() IS
   'Marca pagos pendientes vencidos como overdue. Idempotente. Ejecutar diariamente via cron.';
 
 -- ─── Datos iniciales: proveedores conocidos de VYLTA ───
--- Insertamos los pagos recurrentes conocidos como punto de partida.
--- Los montos son aproximados y deben ser ajustados manualmente cuando
--- Antonio confirme las cifras reales.
 INSERT INTO public.vendor_payments (vendor_name, category, amount_mxn, currency, due_date, status, frequency, notes)
 VALUES
-  ('Supabase Pro',     'infraestructura', 500.00,  'MXN', DATE_TRUNC('month', NOW()) + INTERVAL '1 month', 'pending', 'monthly', 'Plan Pro de Supabase para producción'),
-  ('Vercel Pro',       'infraestructura', 400.00,  'MXN', DATE_TRUNC('month', NOW()) + INTERVAL '1 month', 'pending', 'monthly', 'Hosting del CRM Web y landing'),
-  ('360dialog',        'comunicaciones',  980.00,  'MXN', DATE_TRUNC('month', NOW()) + INTERVAL '1 month', 'pending', 'monthly', 'WhatsApp Business API (€49/mes ≈ 980 MXN)'),
-  ('n8n Cloud',        'automatizacion',  400.00,  'MXN', DATE_TRUNC('month', NOW()) + INTERVAL '1 month', 'pending', 'monthly', 'Workflows automatizados'),
-  ('Resend',           'comunicaciones',  0.00,    'MXN', DATE_TRUNC('month', NOW()) + INTERVAL '1 month', 'pending', 'monthly', 'Email transaccional (free tier por ahora)'),
-  ('Cloudflare',       'infraestructura', 0.00,    'MXN', DATE_TRUNC('month', NOW()) + INTERVAL '1 month', 'pending', 'monthly', 'DNS y proxy (free tier)'),
-  ('Expo EAS',         'infraestructura', 0.00,    'MXN', DATE_TRUNC('month', NOW()) + INTERVAL '1 month', 'pending', 'monthly', 'Builds Android/iOS (free tier por ahora)'),
-  ('Apple Developer',  'desarrollo',      2200.00, 'MXN', (CURRENT_DATE + INTERVAL '11 months'),           'pending', 'annual',  'Membresía anual Apple Developer Program ($99 USD)'),
-  ('Google Play',      'desarrollo',      550.00,  'MXN', (CURRENT_DATE + INTERVAL '1 year'),              'pending', 'one-time','Tarifa única registro Google Play Console ($25 USD)'),
-  ('Dominio vylta.lat','desarrollo',      350.00,  'MXN', (CURRENT_DATE + INTERVAL '11 months'),           'pending', 'annual',  'Renovación anual dominio .lat')
+  ('Supabase Pro',     'infraestructura', 500.00,  'MXN', DATE_TRUNC('month', NOW())::DATE + INTERVAL '1 month', 'pending', 'monthly', 'Plan Pro de Supabase para producción'),
+  ('Vercel Pro',       'infraestructura', 400.00,  'MXN', DATE_TRUNC('month', NOW())::DATE + INTERVAL '1 month', 'pending', 'monthly', 'Hosting del CRM Web y landing'),
+  ('360dialog',        'comunicaciones',  980.00,  'MXN', DATE_TRUNC('month', NOW())::DATE + INTERVAL '1 month', 'pending', 'monthly', 'WhatsApp Business API (€49/mes ≈ 980 MXN)'),
+  ('n8n Cloud',        'automatizacion',  400.00,  'MXN', DATE_TRUNC('month', NOW())::DATE + INTERVAL '1 month', 'pending', 'monthly', 'Workflows automatizados'),
+  ('Resend',           'comunicaciones',  0.00,    'MXN', DATE_TRUNC('month', NOW())::DATE + INTERVAL '1 month', 'pending', 'monthly', 'Email transaccional (free tier por ahora)'),
+  ('Cloudflare',       'infraestructura', 0.00,    'MXN', DATE_TRUNC('month', NOW())::DATE + INTERVAL '1 month', 'pending', 'monthly', 'DNS y proxy (free tier)'),
+  ('Expo EAS',         'infraestructura', 0.00,    'MXN', DATE_TRUNC('month', NOW())::DATE + INTERVAL '1 month', 'pending', 'monthly', 'Builds Android/iOS (free tier por ahora)'),
+  ('Apple Developer',  'desarrollo',      2200.00, 'MXN', (CURRENT_DATE + INTERVAL '11 months'),                  'pending', 'annual',  'Membresía anual Apple Developer Program ($99 USD)'),
+  ('Google Play',      'desarrollo',      550.00,  'MXN', (CURRENT_DATE + INTERVAL '1 year'),                     'pending', 'one-time','Tarifa única registro Google Play Console ($25 USD)'),
+  ('Dominio vylta.lat','desarrollo',      350.00,  'MXN', (CURRENT_DATE + INTERVAL '11 months'),                  'pending', 'annual',  'Renovación anual dominio .lat')
 ON CONFLICT DO NOTHING;
