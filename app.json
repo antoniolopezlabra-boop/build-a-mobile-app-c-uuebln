@@ -2,7 +2,7 @@
   "expo": {
     "name": "VYLTA",
     "slug": "vylta",
-    "version": "1.0.6",
+    "version": "1.0.7",
     "orientation": "portrait",
     "icon": "./assets/images/app-icon-hkt.png",
     "userInterfaceStyle": "automatic",
@@ -15,7 +15,7 @@
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "lat.vylta.app",
-      "buildNumber": "7",
+      "buildNumber": "8",
       "infoPlist": {
         "ITSAppUsesNonExemptEncryption": false,
         "NSCameraUsageDescription": "VYLTA usa la cámara para que puedas tomar la foto del logo de tu negocio.",
@@ -30,7 +30,7 @@
       },
       "edgeToEdgeEnabled": true,
       "package": "lat.vylta.app",
-      "versionCode": 25,
+      "versionCode": 26,
       "googleServicesFile": "./google-services.json",
       "permissions": [
         "android.permission.INTERNET",
