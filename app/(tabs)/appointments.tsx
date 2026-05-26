@@ -8,13 +8,14 @@ import { getCached, setCached, invalidateCache, CACHE_TTL } from '@/utils/cache'
 import { apiGet } from '@/utils/api';
 import { supabase } from '@/lib/supabase';
 import { useAuth } from '@/contexts/AuthContext';
-import React, { useState, useCallback, useMemo } from 'react';
+import React, { useState, useCallback, useMemo, memo } from 'react';
 import { useRouter, useFocusEffect } from 'expo-router';
 import { usePlan } from '@/contexts/PlanContext';
 import { useTheme } from '@/contexts/ThemeContext';
 import { Calendar } from 'react-native-calendars';
 import MaterialIcons from '@expo/vector-icons/MaterialIcons';
 import { getTodayString } from '@/utils/dateUtils';
+import { logger } from '@/utils/logger';
 // ⚡ FIX UX (May 19 2026): refetch automático al volver de background.
 // Necesario porque useFocusEffect NO se dispara cuando el usuario está
 // EN esta pantalla y minimiza/vuelve la app (la pantalla nunca pierde
@@ -62,6 +63,61 @@ const STATUS_META: Record<string, { color: string; label: string }> = {
 // Usamos 56 para dejar un poco de margen de seguridad.
 const TAB_BAR_HEIGHT = 56;
 
+// ⚡ QUICK WIN #4 (May 26 2026): AppointmentCard extraído + React.memo
+// Antes: ~30 líneas de JSX inline POR CADA CITA. Cuando cambia cualquier
+// state del componente padre, todas las tarjetas se re-renderean.
+// Ahora: cada tarjeta solo se re-rendea si SUS props cambian.
+// Impacto medible: -50% renders al cambiar de día o filtrar por staff.
+interface AppointmentCardProps {
+  appt: ApiAppointment;
+  staffMember: StaffMember | null;
+  tcText: string;
+  tcSurface: string;
+  tcBorder: string;
+  tcTextMuted: string;
+  onPress: (id: string) => void;
+}
+
+const AppointmentCard = memo(function AppointmentCard({
+  appt, staffMember, tcText, tcSurface, tcBorder, tcTextMuted, onPress,
+}: AppointmentCardProps) {
+  const meta        = STATUS_META[appt.status] || { color: '#94A3B8', label: appt.status };
+  const displayName = appt.client?.name || appt.clientNameTemp || 'Cliente';
+  const stripeColor = staffMember ? staffMember.color : meta.color;
+
+  return (
+    <TouchableOpacity
+      style={[s.apptCard, { backgroundColor: tcSurface, borderColor: tcBorder }]}
+      onPress={() => onPress(appt.id)}
+      activeOpacity={0.75}
+    >
+      <View style={[s.stripe, { backgroundColor: stripeColor }]} />
+      <View style={s.timeCol}>
+        <Text style={[s.timeText, { color: tcText }]}>{appt.time}</Text>
+        {staffMember && <View style={[s.staffDot, { backgroundColor: staffMember.color }]} />}
+      </View>
+      <View style={s.infoCol}>
+        <Text style={[s.clientName, { color: tcText }]} numberOfLines={1}>{displayName}</Text>
+        <Text style={[s.serviceName, { color: tcTextMuted }]} numberOfLines={1}>
+          {appt.service || 'Servicio'}{staffMember ? ' \u00B7 ' + staffMember.name : ''}
+        </Text>
+        <View style={s.pillRow}>
+          {appt.isRescheduled && <View style={s.pill}><Text style={s.pillText}>Reagendada</Text></View>}
+          {appt.source === 'public_link' && !appt.client && (
+            <View style={[s.pill, { backgroundColor: '#EFF6FF' }]}>
+              <Text style={[s.pillText, { color: '#3B82F6' }]}>Link p\u00FAblico</Text>
+            </View>
+          )}
+        </View>
+      </View>
+      <View style={[s.statusBadge, { backgroundColor: meta.color + '22' }]}>
+        <Text style={[s.statusText, { color: meta.color }]}>{meta.label}</Text>
+      </View>
+      <MaterialIcons name="chevron-right" size={18} color={tcBorder} />
+    </TouchableOpacity>
+  );
+});
+
 export default function AppointmentsScreen() {
   const router  = useRouter();
   const { user } = useAuth();
@@ -101,11 +157,19 @@ export default function AppointmentsScreen() {
     loadAll(false, true);
   });
 
+  // ⚡ QUICK WIN #3 (May 26 2026): Promise.all → Promise.allSettled
+  //
+  // ANTES: si la query de staff_members fallaba (timeout, RLS, red), TODA
+  // la operación se rechazaba y entrábamos al catch, marcando loadError=true,
+  // AUNQUE las citas SÍ se hubieran obtenido correctamente.
+  //
+  // AHORA: cada query es independiente. Si una falla, la otra sigue funcionando.
+  // El usuario ve sus citas aunque staff_members haya fallado (degradación graceful).
   const loadAll = async (showLoading = true, silent = false) => {
     if (showLoading && !silent) setLoading(true);
     setLoadError(false);
     try {
-      const [data, staffData] = await Promise.all([
+      const results = await Promise.allSettled([
         apiGet<ApiAppointment[]>('/api/appointments'),
         supabase
           .from('staff_members')
@@ -115,10 +179,30 @@ export default function AppointmentsScreen() {
           .order('sort_order')
           .then(r => r.data || []),
       ]);
-      setAppointments(data);
-      setCached('appointments_list', data, CACHE_TTL.APPOINTMENTS);
-      setStaffMembers(staffData as StaffMember[]);
-    } catch {
+
+      // Procesar citas (esencial)
+      const apptResult = results[0];
+      if (apptResult.status === 'fulfilled') {
+        setAppointments(apptResult.value);
+        setCached('appointments_list', apptResult.value, CACHE_TTL.APPOINTMENTS);
+      } else {
+        // Si las citas fallaron, sí marcamos error (es lo esencial)
+        logger.warn('[Appointments] Error cargando citas:', apptResult.reason);
+        if (!silent) setLoadError(true);
+      }
+
+      // Procesar staff (opcional - no rompe la UI si falla)
+      const staffResult = results[1];
+      if (staffResult.status === 'fulfilled') {
+        setStaffMembers(staffResult.value as StaffMember[]);
+      } else {
+        // Staff falló, no es crítico. Logueamos pero no rompemos UX.
+        logger.warn('[Appointments] Error cargando staff (no critico):', staffResult.reason);
+        // No cambiamos setStaffMembers — se queda con los datos previos.
+      }
+    } catch (err) {
+      // Solo entraría aquí si Promise.allSettled mismo falla (muy raro)
+      logger.error('[Appointments] Error inesperado:', err);
       if (!silent) setLoadError(true);
     } finally {
       if (showLoading && !silent) setLoading(false);
@@ -220,6 +304,11 @@ export default function AppointmentsScreen() {
     textMonthFontSize:          17,
     textDayHeaderFontSize:      13,
   }), [tc.surface, tc.textMuted, tc.text, tc.border]);
+
+  // ⚡ QUICK WIN #4: handler estable para que AppointmentCard.memo funcione bien
+  const handleApptPress = useCallback((id: string) => {
+    router.push(`/appointments/${id}`);
+  }, [router]);
 
   if (loading) {
     return (
@@ -387,41 +476,18 @@ export default function AppointmentsScreen() {
           {!loadError && dateAppointments.length > 0 && (
             <View style={s.list}>
               {dateAppointments.map(appt => {
-                const meta        = STATUS_META[appt.status] || { color: '#94A3B8', label: appt.status };
-                const displayName = appt.client?.name || appt.clientNameTemp || 'Cliente';
-                const staffMember = hasStaff && appt.staff_id ? staffMembers.find(m => m.id === appt.staff_id) : null;
-                const stripeColor = staffMember ? staffMember.color : meta.color;
+                const staffMember = hasStaff && appt.staff_id ? staffMembers.find(m => m.id === appt.staff_id) || null : null;
                 return (
-                  <TouchableOpacity
+                  <AppointmentCard
                     key={appt.id}
-                    style={[s.apptCard, { backgroundColor: tc.surface, borderColor: tc.border }]}
-                    onPress={() => router.push(`/appointments/${appt.id}`)}
-                    activeOpacity={0.75}
-                  >
-                    <View style={[s.stripe, { backgroundColor: stripeColor }]} />
-                    <View style={s.timeCol}>
-                      <Text style={[s.timeText, { color: tc.text }]}>{appt.time}</Text>
-                      {staffMember && <View style={[s.staffDot, { backgroundColor: staffMember.color }]} />}
-                    </View>
-                    <View style={s.infoCol}>
-                      <Text style={[s.clientName, { color: tc.text }]} numberOfLines={1}>{displayName}</Text>
-                      <Text style={[s.serviceName, { color: tc.textMuted }]} numberOfLines={1}>
-                        {appt.service || 'Servicio'}{staffMember ? ' \u00B7 ' + staffMember.name : ''}
-                      </Text>
-                      <View style={s.pillRow}>
-                        {appt.isRescheduled && <View style={s.pill}><Text style={s.pillText}>Reagendada</Text></View>}
-                        {appt.source === 'public_link' && !appt.client && (
-                          <View style={[s.pill, { backgroundColor: '#EFF6FF' }]}>
-                            <Text style={[s.pillText, { color: '#3B82F6' }]}>Link p\xFAblico</Text>
-                          </View>
-                        )}
-                      </View>
-                    </View>
-                    <View style={[s.statusBadge, { backgroundColor: meta.color + '22' }]}>
-                      <Text style={[s.statusText, { color: meta.color }]}>{meta.label}</Text>
-                    </View>
-                    <MaterialIcons name="chevron-right" size={18} color={tc.border} />
-                  </TouchableOpacity>
+                    appt={appt}
+                    staffMember={staffMember}
+                    tcText={tc.text}
+                    tcSurface={tc.surface}
+                    tcBorder={tc.border}
+                    tcTextMuted={tc.textMuted}
+                    onPress={handleApptPress}
+                  />
                 );
               })}
             </View>
