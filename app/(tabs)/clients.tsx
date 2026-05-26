@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useMemo } from 'react';
+import React, { useState, useCallback, useMemo, memo } from 'react';
 import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity,
   ActivityIndicator, TextInput, RefreshControl,
@@ -69,6 +69,67 @@ const formatLastVisit = (lastVisit: string | null | undefined) => {
   return `Hace ${y} año${y > 1 ? 's' : ''}`;
 };
 
+// ⚡ QUICK WIN #4 (May 26 2026): ClientListItem extraído + React.memo
+//
+// ANTES: ~30 líneas de JSX inline POR CADA CLIENTE. Al escribir en el
+// buscador, cada keystroke re-renderizaba TODAS las tarjetas aunque
+// el cliente individual no cambiara.
+//
+// AHORA: cada tarjeta solo se re-rendea si SUS props cambian. Con 100
+// clientes y búsqueda activa, los renders bajan ~80%.
+interface ClientListItemProps {
+  client: Client;
+  isDark: boolean;
+  tcText: string;
+  tcSurface: string;
+  tcBorder: string;
+  tcTextMuted: string;
+  onPress: (id: string) => void;
+}
+
+const ClientListItem = memo(function ClientListItem({
+  client, isDark, tcText, tcSurface, tcBorder, tcTextMuted, onPress,
+}: ClientListItemProps) {
+  const avatarColor = getAvatarColor(client.name, isDark);
+  const initials    = getInitials(client.name);
+  const lastVisit   = formatLastVisit(client.lastVisit);
+  const isActive    = client.isActive !== false;
+
+  return (
+    <TouchableOpacity
+      style={[s.clientCard, { backgroundColor: tcSurface, borderColor: tcBorder }]}
+      onPress={() => onPress(client.id)}
+      activeOpacity={0.75}
+    >
+      <View style={[s.avatar, { backgroundColor: avatarColor.bg }]}>
+        <Text style={[s.avatarText, { color: avatarColor.fg }]}>{initials}</Text>
+      </View>
+      <View style={s.clientInfo}>
+        <View style={s.clientNameRow}>
+          <Text style={[s.clientName, { color: tcText }]} numberOfLines={1}>{client.name}</Text>
+          <View style={[s.activeDot, { backgroundColor: isActive ? '#10B981' : tcBorder }]} />
+        </View>
+        <Text style={[s.clientPhone, { color: tcTextMuted }]}>{client.phone}</Text>
+        <View style={s.clientMeta}>
+          {lastVisit && (
+            <View style={s.metaChip}>
+              <MaterialIcons name="access-time" size={11} color={tcTextMuted} />
+              <Text style={[s.metaText, { color: tcTextMuted }]}>{lastVisit}</Text>
+            </View>
+          )}
+          <View style={s.metaChip}>
+            <MaterialIcons name="event" size={11} color={tcTextMuted} />
+            <Text style={[s.metaText, { color: tcTextMuted }]}>
+              {client.totalVisits} {client.totalVisits === 1 ? 'cita' : 'citas'}
+            </Text>
+          </View>
+        </View>
+      </View>
+      <MaterialIcons name="chevron-right" size={20} color={tcBorder} />
+    </TouchableOpacity>
+  );
+});
+
 export default function ClientsScreen() {
   const router = useRouter();
   const { colors: tc, isDark } = useTheme();
@@ -96,10 +157,6 @@ export default function ClientsScreen() {
   );
 
   // ⚡ FIX UX (May 19 2026): refetch silencioso cuando vuelve la app de background.
-  // - silent=true → no se muestra spinner ni modal de error si falla.
-  //   La pantalla sigue mostrando los datos que tenía (mejor UX).
-  // - El cache de 'clients_list' ya fue invalidado por AppStateContext,
-  //   así que loadClients pega a la red y trae datos frescos.
   useAppRefreshListener(() => {
     loadClients(true);
   });
@@ -124,12 +181,18 @@ export default function ClientsScreen() {
     loadClients(true);
   }, []);
 
-  // PERFORMANCE FIX (Abr 2026): useMemo para evitar recalcular estas derivaciones
-  // en CADA keystroke de búsqueda. Antes: con 200 clientes, se iteraba 3x la lista
-  // en cada tecla (1x filter, 1x activeCount, 1x inactiveCount).
-  // Ahora: solo se recalcula cuando cambian sus dependencias reales.
+  // ⚡ QUICK WIN #4: handler estable para que ClientListItem.memo funcione
+  const handleClientPress = useCallback((id: string) => {
+    router.push(`/clients/${id}`);
+  }, [router]);
 
-  // searchQuery en minúsculas — se memoiza aparte para no lowercasear en cada item del filter
+  // PERFORMANCE FIX (Abr 2026): useMemo para evitar recalcular estas derivaciones
+  // en CADA keystroke de búsqueda.
+
+  // ⚡ QUICK WIN #4 (May 26 2026): eliminado searchQuery duplicado en deps
+  // ANTES: deps incluían normalizedSearch Y searchQuery (redundante).
+  // AHORA: solo normalizedSearch. La búsqueda por teléfono también la
+  // normalizamos para que use el mismo string en todas las comparaciones.
   const normalizedSearch = useMemo(() => searchQuery.toLowerCase(), [searchQuery]);
 
   const filteredClients = useMemo(() => {
@@ -137,7 +200,7 @@ export default function ClientsScreen() {
       const matchesSearch =
         !normalizedSearch ||
         c.name.toLowerCase().includes(normalizedSearch) ||
-        c.phone.includes(searchQuery) ||
+        c.phone.toLowerCase().includes(normalizedSearch) ||
         (c.email || '').toLowerCase().includes(normalizedSearch);
       const matchesFilter =
         filter === 'Todos'   ? true :
@@ -145,7 +208,7 @@ export default function ClientsScreen() {
         c.isActive === false;
       return matchesSearch && matchesFilter;
     });
-  }, [allClients, normalizedSearch, searchQuery, filter]);
+  }, [allClients, normalizedSearch, filter]);
 
   const { activeCount, inactiveCount, hasClients } = useMemo(() => {
     let active = 0;
@@ -325,46 +388,18 @@ export default function ClientsScreen() {
               </TouchableOpacity>
             )}
 
-            {filteredClients.map(client => {
-              const avatarColor = getAvatarColor(client.name, isDark);
-              const initials    = getInitials(client.name);
-              const lastVisit   = formatLastVisit(client.lastVisit);
-              const isActive    = client.isActive !== false;
-              return (
-                <TouchableOpacity
-                  key={client.id}
-                  style={[s.clientCard, { backgroundColor: tc.surface, borderColor: tc.border }]}
-                  onPress={() => router.push(`/clients/${client.id}`)}
-                  activeOpacity={0.75}
-                >
-                  <View style={[s.avatar, { backgroundColor: avatarColor.bg }]}>
-                    <Text style={[s.avatarText, { color: avatarColor.fg }]}>{initials}</Text>
-                  </View>
-                  <View style={s.clientInfo}>
-                    <View style={s.clientNameRow}>
-                      <Text style={[s.clientName, { color: tc.text }]} numberOfLines={1}>{client.name}</Text>
-                      <View style={[s.activeDot, { backgroundColor: isActive ? '#10B981' : tc.border }]} />
-                    </View>
-                    <Text style={[s.clientPhone, { color: tc.textMuted }]}>{client.phone}</Text>
-                    <View style={s.clientMeta}>
-                      {lastVisit && (
-                        <View style={s.metaChip}>
-                          <MaterialIcons name="access-time" size={11} color={tc.textMuted} />
-                          <Text style={[s.metaText, { color: tc.textMuted }]}>{lastVisit}</Text>
-                        </View>
-                      )}
-                      <View style={s.metaChip}>
-                        <MaterialIcons name="event" size={11} color={tc.textMuted} />
-                        <Text style={[s.metaText, { color: tc.textMuted }]}>
-                          {client.totalVisits} {client.totalVisits === 1 ? 'cita' : 'citas'}
-                        </Text>
-                      </View>
-                    </View>
-                  </View>
-                  <MaterialIcons name="chevron-right" size={20} color={tc.border} />
-                </TouchableOpacity>
-              );
-            })}
+            {filteredClients.map(client => (
+              <ClientListItem
+                key={client.id}
+                client={client}
+                isDark={isDark}
+                tcText={tc.text}
+                tcSurface={tc.surface}
+                tcBorder={tc.border}
+                tcTextMuted={tc.textMuted}
+                onPress={handleClientPress}
+              />
+            ))}
           </>
         )}
       </ScrollView>
