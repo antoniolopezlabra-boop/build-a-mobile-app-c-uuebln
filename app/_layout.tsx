@@ -6,7 +6,31 @@ import { useEffect, useState, useRef } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { logger } from '@/utils/logger';
 
-LogBox.ignoreAllLogs();
+// ⚡ QUICK WIN #1 (May 26 2026): LogBox.ignoreAllLogs() → patterns específicos.
+//
+// ANTES: LogBox.ignoreAllLogs() silenciaba TODOS los warnings de React Native,
+// incluyendo memory leaks, ciclos de re-render, deprecation warnings, etc.
+// Eso nos cegaba ante bugs reales que solo se manifestaban en producción.
+//
+// AHORA: Silenciamos solo los warnings ruidosos conocidos (libs de terceros)
+// y dejamos visibles los que de verdad importan para nuestra app.
+LogBox.ignoreLogs([
+  // ─── Warnings de Expo / React Native con falsos positivos ───
+  'Non-serializable values were found in the navigation state',
+  'AsyncStorage has been extracted from react-native',
+  'EventEmitter.removeListener',
+  '`new NativeEventEmitter`',
+  // ─── Warnings de libs de terceros ya conocidas ───
+  '[react-native-gesture-handler]',
+  'VirtualizedLists should never be nested', // ScrollView de Calendar dentro de ScrollView
+  // ─── Warnings cosméticos de Reanimated ───
+  '[Reanimated] Reading from `value`',
+  'Tried to modify key',
+  // ─── Style warnings irrelevantes en Hermes ───
+  'shadow* style props are deprecated',
+  'props.pointerEvents is deprecated',
+]);
+
 import { StatusBar } from 'expo-status-bar';
 import { AuthProvider, useAuth } from '@/contexts/AuthContext';
 import { PlanProvider } from '@/contexts/PlanContext';
