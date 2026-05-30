@@ -2,20 +2,20 @@
   "expo": {
     "name": "VYLTA",
     "slug": "vylta",
-    "version": "1.0.10",
+    "version": "1.0.11",
     "orientation": "portrait",
-    "icon": "./assets/images/app-icon-hkt.png",
+    "icon": "./assets/images/icon.png",
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
     "splash": {
-      "image": "./assets/images/app-icon-hkt.png",
+      "image": "./assets/images/adaptive-icon.png",
       "resizeMode": "contain",
-      "backgroundColor": "#000000"
+      "backgroundColor": "#0E1424"
     },
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "lat.vylta.app",
-      "buildNumber": "11",
+      "buildNumber": "12",
       "infoPlist": {
         "ITSAppUsesNonExemptEncryption": false,
         "NSCameraUsageDescription": "VYLTA usa la cámara para que puedas tomar la foto del logo de tu negocio.",
@@ -25,12 +25,12 @@
     },
     "android": {
       "adaptiveIcon": {
-        "foregroundImage": "./assets/images/app-icon-hkt.png",
-        "backgroundColor": "#000000"
+        "foregroundImage": "./assets/images/adaptive-icon.png",
+        "backgroundColor": "#0E1424"
       },
       "edgeToEdgeEnabled": true,
       "package": "lat.vylta.app",
-      "versionCode": 29,
+      "versionCode": 30,
       "googleServicesFile": "./google-services.json",
       "permissions": [
         "android.permission.INTERNET",
@@ -41,7 +41,7 @@
       ]
     },
     "web": {
-      "favicon": "./assets/images/final_quest_240x240.png",
+      "favicon": "./assets/images/favicon.png",
       "bundler": "metro"
     },
     "plugins": [
@@ -51,7 +51,7 @@
       [
         "expo-notifications",
         {
-          "icon": "./assets/images/app-icon-hkt.png",
+          "icon": "./assets/images/notification-icon.png",
           "color": "#10B981",
           "defaultChannel": "default"
         }
