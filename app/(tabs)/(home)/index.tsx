@@ -21,6 +21,7 @@ import { translateError, buildErrorAlertButtons } from '@/utils/errorMessages';
 // vuelve de background después de >5 min. Coordinado con AppStateContext
 // para que las pantallas refetcheen datos frescos automáticamente.
 import { useAppRefreshListener } from '@/hooks/useAppRefreshListener';
+import Svg, { Circle } from 'react-native-svg';
 
 function getReportsCacheKey() {
   const n = new Date();
@@ -247,8 +248,6 @@ export default function HomeScreen() {
     return f.charAt(0).toUpperCase() + f.slice(1);
   };
 
-  const initials  = user?.name?.split(' ').map((w: string) => w[0]).slice(0, 2).join('').toUpperCase() || 'U';
-  const firstName = authLoading ? '' : (user?.name?.split(' ')[0] || 'Usuario');
   const filteredToday = selectedStaffId
     ? todayAppointments.filter(a => a.staff_id === selectedStaffId)
     : todayAppointments;
@@ -270,6 +269,25 @@ export default function HomeScreen() {
     : usage.isNearLimit
       ? 'Te estás acercando al límite. Considera actualizar a Premium.'
       : 'Plan Básico · Mejora a Premium para citas ilimitadas';
+
+  // Header: nombre + logo del NEGOCIO (homologado con la web)
+  const businessName = authLoading ? '' : (businessProfile?.businessName?.trim() || 'Tu negocio');
+  const businessInitials = businessProfile?.businessName?.trim()
+    ? businessProfile.businessName.trim().split(/\s+/).map((w: string) => w[0]).slice(0, 2).join('').toUpperCase()
+    : 'V';
+
+  // Resumen del día — datos para el anillo de progreso
+  const todayTotal     = stats.todayAppointments;
+  const todayConfirmed = stats.confirmedToday;
+  const todayProgress  = todayTotal > 0 ? Math.min(todayConfirmed / todayTotal, 1) : 0;
+  const RING_R = 46;
+  const RING_CIRC = 2 * Math.PI * RING_R;
+  const ringOffset = RING_CIRC * (1 - todayProgress);
+
+  // Esta semana — tasa de confirmación real
+  const weekConfirmRate = stats.weekAppointments > 0
+    ? Math.round((stats.confirmedWeek / stats.weekAppointments) * 100)
+    : 0;
 
   if (loading) {
     return (
@@ -296,28 +314,28 @@ export default function HomeScreen() {
           />
         }
       >
-        {/* HEADER */}
+        {/* HEADER — logo + nombre del NEGOCIO */}
         <View style={s.header}>
+          <TouchableOpacity onPress={() => router.push('/settings/profile')} activeOpacity={0.85}>
+            {businessProfile?.logoUrl ? (
+              <Image source={{ uri: businessProfile.logoUrl }} style={s.avatar} />
+            ) : (
+              <View style={[s.avatarFallback, { backgroundColor: colors.primary + '18' }]}>
+                <Text style={[s.avatarText, { color: colors.primary }]}>{businessInitials}</Text>
+              </View>
+            )}
+          </TouchableOpacity>
           <View style={{ flex: 1 }}>
-            <Text style={[s.greeting, { color: tc.textMuted }]}>{getGreeting()},</Text>
-            <Text style={[s.userName, { color: tc.text }]}>{firstName} 👋</Text>
+            <Text style={[s.greeting, { color: tc.textMuted }]}>{getGreeting()}</Text>
+            <Text style={[s.businessName, { color: tc.text }]} numberOfLines={1}>{businessName}</Text>
             <View style={[s.datePill, { backgroundColor: tc.surface, borderColor: tc.border }]}>
               <View style={s.dateDot} />
               <Text style={[s.dateText, { color: tc.textMuted }]}>{getTodayDate()}</Text>
             </View>
           </View>
-          <TouchableOpacity onPress={() => router.push('/settings/profile')} activeOpacity={0.85} style={s.avatarBtn}>
-            {businessProfile?.logoUrl ? (
-              <Image source={{ uri: businessProfile.logoUrl }} style={s.avatar} />
-            ) : (
-              <View style={[s.avatarFallback, { backgroundColor: colors.primary + '18' }]}>
-                <Text style={[s.avatarText, { color: colors.primary }]}>{initials}</Text>
-              </View>
-            )}
-          </TouchableOpacity>
         </View>
 
-        {/* ⚡ BANNER DE ERROR (BUG-002 fix) */}
+        {/* BANNER DE ERROR */}
         {loadError && (
           <TouchableOpacity
             style={[s.errorBanner, { backgroundColor: '#FEF2F2', borderColor: '#FCA5A5' }]}
@@ -333,7 +351,7 @@ export default function HomeScreen() {
           </TouchableOpacity>
         )}
 
-        {/* USAGE BANNER (Plan Básico/Gratuito) */}
+        {/* USAGE BANNER (Plan Gratuito) */}
         {isGratuito && !usage.loading && (
           <TouchableOpacity
             style={[s.usageCard, { backgroundColor: isDark ? tc.surface : usageBgColor, borderColor: usageBorderColor }]}
@@ -350,21 +368,67 @@ export default function HomeScreen() {
               </View>
               <MaterialIcons name="arrow-forward-ios" size={14} color={usageColor} />
             </View>
-
             <View style={s.usageProgressWrap}>
               <View style={[s.usageProgressBg, { backgroundColor: tc.border + '60' }]}>
                 <View style={[s.usageProgressFill, { width: `${usage.percentage}%`, backgroundColor: usageColor }]} />
               </View>
               <View style={s.usageProgressLabels}>
-                <Text style={[s.usageCount, { color: usageColor }]}>
-                  {usage.used} / {usage.limit}
-                </Text>
+                <Text style={[s.usageCount, { color: usageColor }]}>{usage.used} / {usage.limit}</Text>
                 <Text style={[s.usageRemaining, { color: tc.textMuted }]}>
                   {usage.isAtLimit ? 'Sin disponibles' : `${usage.remaining} disponibles`}
                 </Text>
               </View>
             </View>
           </TouchableOpacity>
+        )}
+
+        {/* RESUMEN DEL DÍA — anillo de progreso */}
+        {!isGratuito && (
+          <View style={[s.dayCard, { backgroundColor: tc.surface, borderColor: tc.border }]}>
+            <View style={[s.dayGlow, { backgroundColor: colors.primary, opacity: isDark ? 0.10 : 0.05 }]} />
+            <View style={s.dayTop}>
+              <Text style={[s.dayLabel, { color: tc.textMuted }]}>Tu día de hoy</Text>
+              <View style={[s.dayPill, { backgroundColor: colors.primary + '1A' }]}>
+                <Text style={[s.dayPillText, { color: colors.primary }]}>{todayTotal} {todayTotal === 1 ? 'cita' : 'citas'}</Text>
+              </View>
+            </View>
+            <View style={s.dayMain}>
+              <View style={s.ring}>
+                <Svg width={112} height={112}>
+                  <Circle cx={56} cy={56} r={RING_R} stroke={isDark ? '#243049' : '#E5E7EB'} strokeWidth={11} fill="none" />
+                  <Circle
+                    cx={56} cy={56} r={RING_R}
+                    stroke={colors.primary} strokeWidth={11} fill="none"
+                    strokeLinecap="round"
+                    strokeDasharray={RING_CIRC}
+                    strokeDashoffset={ringOffset}
+                    transform="rotate(-90 56 56)"
+                  />
+                </Svg>
+                <View style={s.ringCenter}>
+                  <Text style={[s.ringBig, { color: tc.text }]}>{todayTotal}</Text>
+                  <Text style={[s.ringCap, { color: tc.textMuted }]}>{todayTotal === 1 ? 'cita' : 'citas'}</Text>
+                </View>
+              </View>
+              <View style={s.breakdown}>
+                <View style={s.bdRow}>
+                  <View style={[s.bdSwatch, { backgroundColor: colors.primary }]} />
+                  <Text style={[s.bdNum, { color: tc.text }]}>{todayConfirmed}</Text>
+                  <Text style={[s.bdLabel, { color: tc.textMuted }]}>Confirmadas</Text>
+                </View>
+                <View style={s.bdRow}>
+                  <View style={[s.bdSwatch, { backgroundColor: '#3B82F6' }]} />
+                  <Text style={[s.bdNum, { color: tc.text }]}>{stats.unconfirmedToday}</Text>
+                  <Text style={[s.bdLabel, { color: tc.textMuted }]}>Por confirmar</Text>
+                </View>
+                <View style={s.bdRow}>
+                  <View style={[s.bdSwatch, { backgroundColor: tc.textMuted }]} />
+                  <Text style={[s.bdNum, { color: tc.text }]}>{todayTotal}</Text>
+                  <Text style={[s.bdLabel, { color: tc.textMuted }]}>Total del día</Text>
+                </View>
+              </View>
+            </View>
+          </View>
         )}
 
         {/* COBROS PENDIENTES — hero card */}
@@ -376,55 +440,12 @@ export default function HomeScreen() {
                 <Text style={[s.heroBadgeText, { color: '#F59E0B' }]}>Por cobrar</Text>
               </View>
               <Text style={[s.heroAmount, { color: '#F59E0B' }]}>${totalUnpaid.toLocaleString('es-MX')}</Text>
-              <Text style={[s.heroSub, { color: tc.textMuted }]}>{unpaidAppointments.length} cita{unpaidAppointments.length !== 1 ? 's' : ''} pendiente{unpaidAppointments.length !== 1 ? 's' : ''}</Text>
+              <Text style={[s.heroSub, { color: tc.textMuted }]}>{unpaidAppointments.length} cita{unpaidAppointments.length !== 1 ? 's' : ''} pendiente{unpaidAppointments.length !== 1 ? 's' : ''} de pago</Text>
             </View>
             <View style={[s.heroIconWrap, { backgroundColor: '#F59E0B18' }]}>
-              <MaterialIcons name="payments" size={36} color="#F59E0B" />
+              <MaterialIcons name="payments" size={34} color="#F59E0B" />
             </View>
           </View>
-        )}
-
-        {/* KPIs */}
-        {!isGratuito && (
-          <>
-            <View style={s.sectionRow}>
-              <Text style={[s.sectionTitle, { color: tc.textMuted }]}>HOY</Text>
-              <Text style={[s.sectionDate, { color: tc.textMuted }]}>{new Date().toLocaleDateString('es-MX', { day: 'numeric', month: 'short' })}</Text>
-            </View>
-            <View style={s.kpiRow}>
-              {[
-                { value: stats.todayAppointments, label: 'TOTAL',       accent: '#F59E0B', icon: 'event' },
-                { value: stats.confirmedToday,    label: 'CONFIRMADAS', accent: colors.primary, icon: 'check-circle' },
-                { value: stats.unconfirmedToday,  label: 'PENDIENTES',  accent: '#3B82F6', icon: 'schedule' },
-              ].map(({ value, label, accent, icon }) => (
-                <View key={label} style={[s.kpiCard, { backgroundColor: tc.surface, borderColor: accent + '33' }]}>
-                  <View style={[s.kpiIconWrap, { backgroundColor: accent + '18' }]}>
-                    <MaterialIcons name={icon as any} size={18} color={accent} />
-                  </View>
-                  <Text style={[s.kpiValue, { color: accent }]}>{value}</Text>
-                  <Text style={[s.kpiLabel, { color: tc.textMuted }]}>{label}</Text>
-                </View>
-              ))}
-            </View>
-            <View style={[s.sectionRow, { marginTop: 4 }]}>
-              <Text style={[s.sectionTitle, { color: tc.textMuted }]}>ESTA SEMANA</Text>
-            </View>
-            <View style={s.kpiRow}>
-              {[
-                { value: stats.weekAppointments, label: 'TOTAL',       accent: '#8B5CF6', icon: 'date-range' },
-                { value: stats.confirmedWeek,    label: 'CONFIRMADAS', accent: colors.primary, icon: 'check-circle' },
-                { value: stats.unconfirmedWeek,  label: 'PENDIENTES',  accent: '#3B82F6', icon: 'schedule' },
-              ].map(({ value, label, accent, icon }) => (
-                <View key={label} style={[s.kpiCard, { backgroundColor: tc.surface, borderColor: accent + '33' }]}>
-                  <View style={[s.kpiIconWrap, { backgroundColor: accent + '18' }]}>
-                    <MaterialIcons name={icon as any} size={18} color={accent} />
-                  </View>
-                  <Text style={[s.kpiValue, { color: accent }]}>{value}</Text>
-                  <Text style={[s.kpiLabel, { color: tc.textMuted }]}>{label}</Text>
-                </View>
-              ))}
-            </View>
-          </>
         )}
 
         {/* LISTA COBROS */}
@@ -432,7 +453,7 @@ export default function HomeScreen() {
           <>
             <View style={s.sectionRow}>
               <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-                <Text style={[s.sectionTitle, { color: tc.textMuted }]}>COBROS PENDIENTES</Text>
+                <Text style={[s.sectionTitle, { color: tc.text }]}>Cobros pendientes</Text>
                 <View style={[s.countBadge, { backgroundColor: '#F97316' + '22' }]}>
                   <Text style={[s.countBadgeText, { color: '#F97316' }]}>{unpaidAppointments.length}</Text>
                 </View>
@@ -473,11 +494,34 @@ export default function HomeScreen() {
           </>
         )}
 
+        {/* ESTA SEMANA — tira compacta */}
+        {!isGratuito && (
+          <>
+            <View style={s.sectionRow}>
+              <Text style={[s.sectionTitle, { color: tc.text }]}>Esta semana</Text>
+            </View>
+            <View style={s.weekRow}>
+              <View style={[s.weekCard, { backgroundColor: tc.surface, borderColor: tc.border }]}>
+                <Text style={[s.weekNum, { color: tc.text }]}>{stats.weekAppointments}</Text>
+                <Text style={[s.weekLabel, { color: tc.textMuted }]}>Citas</Text>
+              </View>
+              <View style={[s.weekCard, { backgroundColor: tc.surface, borderColor: tc.border }]}>
+                <Text style={[s.weekNum, { color: tc.text }]}>{stats.confirmedWeek}</Text>
+                <Text style={[s.weekLabel, { color: tc.textMuted }]}>Confirmadas</Text>
+              </View>
+              <View style={[s.weekCard, { backgroundColor: tc.surface, borderColor: tc.border }]}>
+                <Text style={[s.weekNum, { color: colors.primary }]}>{weekConfirmRate}%</Text>
+                <Text style={[s.weekLabel, { color: tc.textMuted }]}>Confirmación</Text>
+              </View>
+            </View>
+          </>
+        )}
+
         {/* FILTRO STAFF */}
         {staffMembers.length > 0 && (
           <>
             <View style={s.sectionRow}>
-              <Text style={[s.sectionTitle, { color: tc.textMuted }]}>VER AGENDA DE</Text>
+              <Text style={[s.sectionTitle, { color: tc.text }]}>Ver agenda de</Text>
             </View>
             <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 16 }}>
               <TouchableOpacity
@@ -501,10 +545,10 @@ export default function HomeScreen() {
           </>
         )}
 
-        {/* CITAS DE HOY */}
+        {/* AGENDA DE HOY — línea de tiempo */}
         <View style={s.sectionRow}>
-          <Text style={[s.sectionTitle, { color: tc.textMuted }]}>
-            {selectedStaffId ? 'CITAS - ' + (staffMembers.find(m => m.id === selectedStaffId)?.name?.toUpperCase() || '') : 'AGENDA DE HOY'}
+          <Text style={[s.sectionTitle, { color: tc.text }]}>
+            {selectedStaffId ? 'Citas de ' + (staffMembers.find(m => m.id === selectedStaffId)?.name || '') : 'Agenda de hoy'}
           </Text>
           {filteredToday.length > 0 && (
             <TouchableOpacity onPress={() => router.push('/(tabs)/appointments')}>
@@ -528,42 +572,43 @@ export default function HomeScreen() {
             )}
           </View>
         ) : (
-          <View style={{ gap: 8, marginBottom: 20 }}>
-            {filteredToday.map(appt => {
+          <View style={s.timeline}>
+            {filteredToday.map((appt, idx) => {
               const statusColor = getStatusColor(appt.status);
               const displayName = appt.client?.name || appt.clientNameTemp || 'Cliente';
               const staffMember = appt.staff_id ? staffMembers.find(m => m.id === appt.staff_id) : null;
               const accentColor = staffMember ? staffMember.color : statusColor;
+              const isLast = idx === filteredToday.length - 1;
               return (
-                <TouchableOpacity
-                  key={appt.id}
-                  style={[s.apptCard, { backgroundColor: tc.surface, borderColor: tc.border, borderLeftColor: accentColor }]}
-                  onPress={() => router.push('/appointments/' + appt.id)}
-                  activeOpacity={0.75}
-                >
-                  <View style={s.apptTimeCol}>
-                    <Text style={[s.apptTime, { color: tc.text }]}>{appt.time}</Text>
-                    {staffMember && <View style={[s.apptStaffDot, { backgroundColor: staffMember.color }]} />}
+                <View key={appt.id} style={s.tlRow}>
+                  <View style={s.tlRail}>
+                    <Text style={[s.tlTime, { color: tc.text }]}>{appt.time}</Text>
+                    {!isLast && <View style={[s.tlLine, { backgroundColor: tc.border }]} />}
                   </View>
-                  <View style={s.apptBody}>
-                    <Text style={[s.apptClient, { color: tc.text }]} numberOfLines={1}>{displayName}</Text>
-                    <Text style={[s.apptService, { color: tc.textMuted }]} numberOfLines={1}>
-                      {appt.service}{staffMember ? ' · ' + staffMember.name : ''}
-                    </Text>
-                  </View>
-                  <View style={[s.apptBadge, { backgroundColor: accentColor + '22' }]}>
-                    <Text style={[s.apptBadgeText, { color: accentColor }]}>{appt.status}</Text>
-                  </View>
-                  <MaterialIcons name="chevron-right" size={16} color={tc.border} />
-                </TouchableOpacity>
+                  <TouchableOpacity
+                    style={[s.tlCard, { backgroundColor: tc.surface, borderColor: tc.border, borderLeftColor: accentColor }]}
+                    onPress={() => router.push('/appointments/' + appt.id)}
+                    activeOpacity={0.75}
+                  >
+                    <View style={s.tlBody}>
+                      <Text style={[s.tlClient, { color: tc.text }]} numberOfLines={1}>{displayName}</Text>
+                      <Text style={[s.tlSvc, { color: tc.textMuted }]} numberOfLines={1}>
+                        {appt.service}{staffMember ? ' · ' + staffMember.name : ''}
+                      </Text>
+                    </View>
+                    <View style={[s.tlBadge, { backgroundColor: accentColor + '22' }]}>
+                      <Text style={[s.tlBadgeText, { color: accentColor }]}>{appt.status}</Text>
+                    </View>
+                  </TouchableOpacity>
+                </View>
               );
             })}
           </View>
         )}
 
-        {/* ACCIONES RAPIDAS */}
+        {/* ACCIONES RÁPIDAS */}
         <View style={s.sectionRow}>
-          <Text style={[s.sectionTitle, { color: tc.textMuted }]}>ACCIONES RAPIDAS</Text>
+          <Text style={[s.sectionTitle, { color: tc.text }]}>Acciones rápidas</Text>
         </View>
         <View style={s.actionsGrid}>
           {[
@@ -597,23 +642,21 @@ const s = StyleSheet.create({
   loadingWrap:     { flex: 1, justifyContent: 'center', alignItems: 'center', gap: 12 },
   loadingText:     { fontSize: 13 },
   scroll:          { paddingHorizontal: 16, paddingTop: 16, paddingBottom: 120 },
-  header:          { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 24 },
-  greeting:        { fontSize: 13, fontWeight: '500', marginBottom: 2 },
-  userName:        { fontSize: 26, fontWeight: '900', letterSpacing: -0.5, marginBottom: 10 },
+
+  header:          { flexDirection: 'row', alignItems: 'center', gap: 14, marginBottom: 24 },
+  greeting:        { fontSize: 13, fontWeight: '500', marginBottom: 1 },
+  businessName:    { fontSize: 23, fontWeight: '800', letterSpacing: -0.5, marginBottom: 8 },
   datePill:        { flexDirection: 'row', alignItems: 'center', gap: 6, alignSelf: 'flex-start', borderRadius: 20, paddingHorizontal: 12, paddingVertical: 5, borderWidth: 1 },
   dateDot:         { width: 6, height: 6, borderRadius: 3, backgroundColor: colors.primary },
   dateText:        { fontSize: 11, fontWeight: '600', letterSpacing: 0.3 },
-  avatarBtn:       {},
-  avatar:          { width: 56, height: 56, borderRadius: 16, borderWidth: 2, borderColor: colors.primary },
-  avatarFallback:  { width: 56, height: 56, borderRadius: 16, justifyContent: 'center', alignItems: 'center', borderWidth: 2, borderColor: colors.primary },
+  avatar:          { width: 56, height: 56, borderRadius: 17, borderWidth: 2, borderColor: colors.primary },
+  avatarFallback:  { width: 56, height: 56, borderRadius: 17, justifyContent: 'center', alignItems: 'center', borderWidth: 2, borderColor: colors.primary },
   avatarText:      { fontSize: 20, fontWeight: '900' },
 
-  // ⚡ Banner de error (BUG-002 fix)
   errorBanner:     { flexDirection: 'row', alignItems: 'center', gap: 10, borderRadius: 12, padding: 12, marginBottom: 16, borderWidth: 1 },
   errorBannerTitle:{ fontSize: 13, fontWeight: '700', color: '#DC2626' },
   errorBannerDesc: { fontSize: 11, color: '#991B1B', marginTop: 2 },
 
-  // Usage card (Plan Básico) — contador con barra de progreso
   usageCard:       { borderRadius: 16, padding: 16, marginBottom: 20, borderWidth: 1.5 },
   usageHeader:     { flexDirection: 'row', alignItems: 'center', gap: 12, marginBottom: 14 },
   usageIconWrap:   { width: 38, height: 38, borderRadius: 11, justifyContent: 'center', alignItems: 'center' },
@@ -626,25 +669,43 @@ const s = StyleSheet.create({
   usageCount:      { fontSize: 13, fontWeight: '800' },
   usageRemaining:  { fontSize: 11, fontWeight: '500' },
 
-  heroCard:        { borderRadius: 20, padding: 22, marginBottom: 20, flexDirection: 'row', alignItems: 'center', borderWidth: 1 },
+  dayCard:         { borderRadius: 24, padding: 20, marginBottom: 16, borderWidth: 1, overflow: 'hidden' },
+  dayGlow:         { position: 'absolute', top: -34, right: -26, width: 150, height: 150, borderRadius: 75 },
+  dayTop:          { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 },
+  dayLabel:        { fontSize: 14, fontWeight: '600' },
+  dayPill:         { borderRadius: 20, paddingHorizontal: 11, paddingVertical: 5 },
+  dayPillText:     { fontSize: 12, fontWeight: '800' },
+  dayMain:         { flexDirection: 'row', alignItems: 'center', gap: 20 },
+  ring:            { width: 112, height: 112, justifyContent: 'center', alignItems: 'center' },
+  ringCenter:      { position: 'absolute', justifyContent: 'center', alignItems: 'center' },
+  ringBig:         { fontSize: 34, fontWeight: '900', letterSpacing: -1.5, lineHeight: 38 },
+  ringCap:         { fontSize: 11, fontWeight: '600', marginTop: 1 },
+  breakdown:       { flex: 1, gap: 11 },
+  bdRow:           { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  bdSwatch:        { width: 9, height: 9, borderRadius: 3 },
+  bdNum:           { fontSize: 18, fontWeight: '800', letterSpacing: -0.5, minWidth: 22 },
+  bdLabel:         { fontSize: 12.5, fontWeight: '500' },
+
+  heroCard:        { borderRadius: 20, padding: 20, marginBottom: 16, flexDirection: 'row', alignItems: 'center', borderWidth: 1 },
   heroLeft:        { flex: 1 },
-  heroBadge:       { flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 8 },
+  heroBadge:       { flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 6 },
   heroBadgeDot:    { width: 7, height: 7, borderRadius: 4 },
-  heroBadgeText:   { fontSize: 11, fontWeight: '700', letterSpacing: 1 },
-  heroAmount:      { fontSize: 36, fontWeight: '900', letterSpacing: -1, lineHeight: 40 },
+  heroBadgeText:   { fontSize: 11, fontWeight: '700', letterSpacing: 0.5, textTransform: 'uppercase' },
+  heroAmount:      { fontSize: 32, fontWeight: '900', letterSpacing: -1, lineHeight: 36 },
   heroSub:         { fontSize: 12, marginTop: 4 },
-  heroIconWrap:    { width: 72, height: 72, borderRadius: 20, justifyContent: 'center', alignItems: 'center' },
-  sectionRow:      { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12, marginTop: 4 },
-  sectionTitle:    { fontSize: 11, fontWeight: '800', letterSpacing: 1.5 },
-  sectionDate:     { fontSize: 11, fontWeight: '600' },
-  seeAll:          { fontSize: 12, fontWeight: '700' },
+  heroIconWrap:    { width: 60, height: 60, borderRadius: 18, justifyContent: 'center', alignItems: 'center' },
+
+  sectionRow:      { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12, marginTop: 8 },
+  sectionTitle:    { fontSize: 16, fontWeight: '700', letterSpacing: -0.3 },
+  seeAll:          { fontSize: 13, fontWeight: '600' },
   countBadge:      { borderRadius: 10, paddingHorizontal: 8, paddingVertical: 2 },
   countBadgeText:  { fontSize: 11, fontWeight: '800' },
-  kpiRow:          { flexDirection: 'row', marginBottom: 16, gap: 8 },
-  kpiCard:         { flex: 1, borderRadius: 14, padding: 12, borderWidth: 1, alignItems: 'center', gap: 5 },
-  kpiIconWrap:     { width: 34, height: 34, borderRadius: 10, justifyContent: 'center', alignItems: 'center' },
-  kpiValue:        { fontSize: 26, fontWeight: '900', letterSpacing: -1, lineHeight: 30 },
-  kpiLabel:        { fontSize: 9, fontWeight: '700', textAlign: 'center', letterSpacing: 0.5 },
+
+  weekRow:         { flexDirection: 'row', gap: 10, marginBottom: 16 },
+  weekCard:        { flex: 1, borderRadius: 16, paddingVertical: 14, paddingHorizontal: 12, borderWidth: 1, alignItems: 'flex-start' },
+  weekNum:         { fontSize: 22, fontWeight: '900', letterSpacing: -0.8 },
+  weekLabel:       { fontSize: 11, fontWeight: '500', marginTop: 2 },
+
   unpaidCard:      { flexDirection: 'row', alignItems: 'center', borderRadius: 14, padding: 14, marginBottom: 8, borderWidth: 1, borderLeftWidth: 3, borderLeftColor: '#F97316' },
   unpaidLeft:      { flex: 1, marginRight: 10 },
   unpaidClient:    { fontSize: 14, fontWeight: '700', marginBottom: 3 },
@@ -652,23 +713,29 @@ const s = StyleSheet.create({
   unpaidAmount:    { fontSize: 15, fontWeight: '900', marginRight: 10 },
   payBtn:          { backgroundColor: '#F59E0B', borderRadius: 10, paddingHorizontal: 14, paddingVertical: 9, minWidth: 64, alignItems: 'center' },
   payBtnText:      { fontSize: 12, fontWeight: '800', color: '#fff' },
+
   staffChip:       { flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 14, paddingVertical: 8, borderRadius: 20, borderWidth: 1, marginRight: 8 },
   staffChipText:   { fontSize: 12, fontWeight: '600' },
   staffDot:        { width: 7, height: 7, borderRadius: 4 },
-  apptCard:        { borderRadius: 14, flexDirection: 'row', alignItems: 'center', overflow: 'hidden', borderWidth: 1, borderLeftWidth: 3 },
-  apptTimeCol:     { paddingHorizontal: 14, paddingVertical: 16, minWidth: 60, alignItems: 'center', gap: 4 },
-  apptTime:        { fontSize: 13, fontWeight: '800' },
-  apptStaffDot:    { width: 5, height: 5, borderRadius: 3 },
-  apptBody:        { flex: 1, paddingVertical: 14 },
-  apptClient:      { fontSize: 14, fontWeight: '700' },
-  apptService:     { fontSize: 11, marginTop: 2 },
-  apptBadge:       { marginRight: 8, paddingHorizontal: 8, paddingVertical: 4, borderRadius: 8 },
-  apptBadgeText:   { fontSize: 10, fontWeight: '700' },
+
+  timeline:        { marginBottom: 24 },
+  tlRow:           { flexDirection: 'row', gap: 12 },
+  tlRail:          { width: 52, alignItems: 'center' },
+  tlTime:          { fontSize: 13, fontWeight: '800' },
+  tlLine:          { width: 2, flex: 1, marginTop: 6, marginBottom: 2, borderRadius: 1 },
+  tlCard:          { flex: 1, flexDirection: 'row', alignItems: 'center', borderRadius: 16, paddingVertical: 13, paddingHorizontal: 15, borderWidth: 1, borderLeftWidth: 3, marginBottom: 12 },
+  tlBody:          { flex: 1 },
+  tlClient:        { fontSize: 14.5, fontWeight: '700', letterSpacing: -0.2 },
+  tlSvc:           { fontSize: 12, marginTop: 2 },
+  tlBadge:         { paddingHorizontal: 10, paddingVertical: 5, borderRadius: 9 },
+  tlBadgeText:     { fontSize: 10.5, fontWeight: '700' },
+
   emptyCard:       { borderRadius: 18, padding: 32, alignItems: 'center', borderWidth: 1, gap: 8, marginBottom: 20 },
   emptyTitle:      { fontSize: 16, fontWeight: '700' },
   emptyDesc:       { fontSize: 13, textAlign: 'center' },
   emptyBtn:        { flexDirection: 'row', alignItems: 'center', gap: 6, paddingVertical: 10, paddingHorizontal: 20, borderRadius: 12, marginTop: 8 },
   emptyBtnText:    { color: '#fff', fontWeight: '800', fontSize: 14 },
+
   actionsGrid:     { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between', marginBottom: 20 },
   qaBtn:           { width: '48%', borderRadius: 16, padding: 14, marginBottom: 10, borderWidth: 1, flexDirection: 'row', alignItems: 'center', gap: 10 },
   qaIconWrap:      { width: 38, height: 38, borderRadius: 11, justifyContent: 'center', alignItems: 'center' },
