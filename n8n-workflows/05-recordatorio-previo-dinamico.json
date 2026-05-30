@@ -140,7 +140,7 @@
             {
               "id": "field-minutes-left",
               "name": "minutes_left",
-              "value": "={{ Math.round( DateTime.fromFormat($json.start_time, 'HH:mm').diff( DateTime.now().setZone('America/Mexico_City').set({year: DateTime.fromFormat($json.start_time,'HH:mm').year, month: DateTime.fromFormat($json.start_time,'HH:mm').month, day: DateTime.fromFormat($json.start_time,'HH:mm').day}), 'minutes').minutes ) }}",
+              "value": "={{ Math.round( DateTime.fromFormat($json.date + ' ' + $json.start_time, 'yyyy-MM-dd HH:mm', { zone: 'America/Mexico_City' }).diff(DateTime.now().setZone('America/Mexico_City'), 'minutes').minutes ) }}",
               "type": "number"
             }
           ]
