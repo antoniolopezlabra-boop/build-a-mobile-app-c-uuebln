@@ -200,7 +200,7 @@ function NewAppointmentInner() {
   const [tempDate, setTempDate] = useState(new Date());
   const [showDatePickerAndroid, setShowDatePickerAndroid] = useState(false);
 
-  const [time, setTime] = useState('09:00');
+  const [time, setTime] = useState('');
   const [selectedBlocks, setSelectedBlocks] = useState<string[]>([]);
   const [notes, setNotes] = useState('');
   const [serviceCost, setServiceCost] = useState('');
@@ -341,7 +341,7 @@ function NewAppointmentInner() {
                 setNotes(draft.notes || '');
                 setServiceCost(draft.serviceCost || '');
                 setSendWhatsApp(draft.sendWhatsApp !== false);
-                setTime(draft.time || '09:00');
+                setTime(draft.time || '');
                 setSelectedBlocks(Array.isArray(draft.selectedBlocks) ? draft.selectedBlocks : []);
                 if (draft.dateIso) {
                   const d = new Date(draft.dateIso);
@@ -646,6 +646,7 @@ function NewAppointmentInner() {
     Keyboard.dismiss();
     if (!selectedClient) { setErrorModal({ visible: true, message: 'Por favor selecciona un cliente' }); return; }
     if (!service.trim())  { setErrorModal({ visible: true, message: 'Por favor ingresa el servicio' }); return; }
+    if (selectedBlocks.length === 0 || !time) { setErrorModal({ visible: true, message: 'Por favor selecciona un horario disponible' }); return; }
     const lastBlock = selectedBlocks.length > 0 ? selectedBlocks[selectedBlocks.length-1] : time;
     const [lh, lm] = lastBlock.split(':').map(Number);
     const endMinutes = lh*60+lm+30;
@@ -707,6 +708,7 @@ function NewAppointmentInner() {
     : 'Plan Básico — Mejora a Premium para citas ilimitadas';
 
   const hasInvalidByDuration = !!selectedCatalogService && timeSlots.some(s => s.unavailableReason);
+  const canSave = !!selectedClient && !!service.trim() && selectedBlocks.length > 0 && !dayIsClosed;
 
   // ⚡ Padding inferior dinámico para respetar zona de tolerancia.
   // - Android con botones clásicos de navegación: insets.bottom = 0 → mínimo 16px
@@ -895,7 +897,7 @@ function NewAppointmentInner() {
                         return `${Math.floor(e/60).toString().padStart(2,'0')}:${(e%60).toString().padStart(2,'0')}`;
                       })()} · {selectedBlocks.length*30} min
                     </Text>
-                    <TouchableOpacity onPress={() => { setSelectedBlocks([]); setTime('09:00'); }}>
+                    <TouchableOpacity onPress={() => { setSelectedBlocks([]); setTime(''); }}>
                       <Text style={styles.durationClear}>✕ Limpiar</Text>
                     </TouchableOpacity>
                   </View>
@@ -909,6 +911,9 @@ function NewAppointmentInner() {
                     return (
                       <TouchableOpacity
                         key={slot.time}
+                        accessibilityRole="button"
+                        accessibilityLabel={`Horario ${slot.time}${isBlocked ? ', bloqueado' : !slot.available ? ', no disponible' : ''}`}
+                        accessibilityState={{ disabled: !slot.available, selected: isSelected }}
                         style={[
                           styles.timeSlot,
                           isSelected && styles.timeSlotSelected,
@@ -965,7 +970,11 @@ function NewAppointmentInner() {
                   })}
                 </ScrollView>
 
-                {(timeSlots.some(s => s.isBlocked) || hasInvalidByDuration) && (
+                {selectedBlocks.length === 0 && timeSlots.some(s => s.available) && (
+                  <Text style={styles.selectHint}>Selecciona un horario disponible</Text>
+                )}
+
+                {(timeSlots.some(s => s.isBlocked) || hasInvalidByDuration || timeSlots.some(s => s.isOverlap)) && (
                   <View style={styles.legendCol}>
                     {timeSlots.some(s => s.isBlocked) && (
                       <View style={styles.legendItem}>
@@ -979,6 +988,12 @@ function NewAppointmentInner() {
                         <Text style={styles.legendText}>
                           La duración del servicio ({durationLabel(selectedCatalogService!.durationMinutes)}) no alcanza antes del próximo bloqueo o cita
                         </Text>
+                      </View>
+                    )}
+                    {timeSlots.some(s => s.isOverlap) && (
+                      <View style={styles.legendItem}>
+                        <View style={[styles.legendDot, { backgroundColor: '#FFFBEB', borderColor: '#F59E0B' }]} />
+                        <Text style={styles.legendText}>⚡ Horario con empalme permitido (se traslapa con otra cita)</Text>
                       </View>
                     )}
                   </View>
@@ -1033,9 +1048,9 @@ function NewAppointmentInner() {
           </View>
 
           <TouchableOpacity
-            style={[styles.saveButton, loading && styles.saveButtonDisabled]}
+            style={[styles.saveButton, (loading || !canSave) && styles.saveButtonDisabled]}
             onPress={handleSave}
-            disabled={loading}
+            disabled={loading || !canSave}
             activeOpacity={0.8}
           >
             {loading ? (
@@ -1372,6 +1387,7 @@ const styles = StyleSheet.create({
   legendItem:             { flexDirection: 'row', alignItems: 'flex-start', gap: 6 },
   legendDot:              { width: 10, height: 10, borderRadius: 3, borderWidth: 1, marginTop: 2 },
   legendText:             { flex: 1, fontSize: 11, color: '#64748B', fontStyle: 'italic', lineHeight: 15 },
+  selectHint:             { fontSize: 13, color: '#F59E0B', fontWeight: '600', marginTop: 8, marginLeft: 2 },
   switchRow:              { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', backgroundColor: '#ffffff', borderRadius: 12, padding: 16 },
   switchLabel:            { flexDirection: 'row', alignItems: 'center', gap: 8, flex: 1 },
   switchText:             { fontSize: 16, fontWeight: '600', color: colors.text },
