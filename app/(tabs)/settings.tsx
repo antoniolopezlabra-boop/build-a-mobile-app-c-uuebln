@@ -290,7 +290,6 @@ export default function SettingsScreen() {
 
         <SettingGroup title="SOPORTE">
           <SettingRow iconName="support-agent" iconColor={canUseAISupport ? '#10B981' : '#CBD5E1'} iconBg={canUseAISupport ? '#ECFDF5' : '#F8FAFC'} label="Chat con IA · Soporte" sublabel={canUseAISupport ? 'Pregunta lo que quieras sobre VYLTA' : 'Disponible en Plan Premium y Luxury'} badge={!canUseAISupport ? <View style={s.premiumChip}><Text style={s.premiumChipText}>PREMIUM</Text></View> : undefined} right={canUseAISupport ? (<View style={s.aiChip}><MaterialIcons name="auto-awesome" size={12} color="#10B981" /><Text style={s.aiChipText}>IA</Text></View>) : undefined} onPress={() => canUseAISupport ? router.push('/settings/support-chat') : router.push('/settings/subscription')} />
-          <SettingRow iconName="notifications-active" iconColor="#10B981" iconBg="#ECFDF5" label="Probar notificaciones" sublabel="Diagnóstico paso a paso si no te llegan las alertas" onPress={() => router.push('/settings/test-push' as any)} />
         </SettingGroup>
 
         <SettingGroup title="SESIÓN">
