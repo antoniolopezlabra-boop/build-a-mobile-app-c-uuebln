@@ -1,0 +1,351 @@
+{
+  "name": "VYLTA #5 - Recordatorio Previo Dinamico",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "minutes",
+              "minutesInterval": 15
+            }
+          ]
+        }
+      },
+      "id": "a1b2c3d4-0001-4001-8001-000000000001",
+      "name": "Cada 15 min",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        -1264,
+        160
+      ]
+    },
+    {
+      "parameters": {
+        "url": "=https://nhjmwmkaduiaifgztymi.supabase.co/rest/v1/appointments",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "supabaseApi",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "select",
+              "value": "id,user_id,service_name,date,start_time,status,clients(name,phone),business_profiles!appointments_user_id_business_profiles_fkey(business_name)"
+            },
+            {
+              "name": "date",
+              "value": "=eq.{{ DateTime.now().setZone('America/Mexico_City').toFormat('yyyy-MM-dd') }}"
+            },
+            {
+              "name": "start_time",
+              "value": "=gte.{{ DateTime.now().setZone('America/Mexico_City').toFormat('HH:mm') }}"
+            },
+            {
+              "name": "start_time",
+              "value": "=lte.{{ DateTime.now().setZone('America/Mexico_City').plus({hours: 2}).toFormat('HH:mm') }}"
+            },
+            {
+              "name": "status",
+              "value": "in.(Pendiente,Confirmada)"
+            },
+            {
+              "name": "whatsapp_notification",
+              "value": "eq.true"
+            },
+            {
+              "name": "whatsapp_reminder_24h_sent",
+              "value": "eq.false"
+            },
+            {
+              "name": "whatsapp_reminder_2h_sent",
+              "value": "eq.false"
+            },
+            {
+              "name": "whatsapp_reminder_pre_sent",
+              "value": "eq.false"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "a1b2c3d4-0002-4002-8002-000000000002",
+      "name": "Citas en el hueco (0-2h)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -1040,
+        160
+      ],
+      "credentials": {
+        "supabaseApi": {
+          "id": "vAyoHByapFR2KN7y",
+          "name": "Supabase account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "id": "a1b2c3d4-0003-4003-8003-000000000003",
+      "name": "Procesar una a una",
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [
+        -816,
+        160
+      ]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "field-phone",
+              "name": "phone",
+              "value": "={{ $json.clients.phone.replace(new RegExp('[^0-9]', 'g'), '') }}",
+              "type": "string"
+            },
+            {
+              "id": "field-client_name",
+              "name": "client_name",
+              "value": "={{ $json.clients.name }}",
+              "type": "string"
+            },
+            {
+              "id": "field-business",
+              "name": "business",
+              "value": "={{ $json.business_profiles.business_name }}",
+              "type": "string"
+            },
+            {
+              "id": "field-time_text",
+              "name": "time_text",
+              "value": "={{ DateTime.fromFormat($json.start_time, 'HH:mm').toFormat('h:mm a') }}",
+              "type": "string"
+            },
+            {
+              "id": "field-service",
+              "name": "service",
+              "value": "={{ $json.service_name }}",
+              "type": "string"
+            },
+            {
+              "id": "field-appt_id",
+              "name": "appt_id",
+              "value": "={{ $json.id }}",
+              "type": "string"
+            },
+            {
+              "id": "field-minutes-left",
+              "name": "minutes_left",
+              "value": "={{ Math.round( DateTime.fromFormat($json.start_time, 'HH:mm').diff( DateTime.now().setZone('America/Mexico_City').set({year: DateTime.fromFormat($json.start_time,'HH:mm').year, month: DateTime.fromFormat($json.start_time,'HH:mm').month, day: DateTime.fromFormat($json.start_time,'HH:mm').day}), 'minutes').minutes ) }}",
+              "type": "number"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "a1b2c3d4-0004-4004-8004-000000000004",
+      "name": "Preparar datos",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        -608,
+        160
+      ]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "field-tiempo-texto",
+              "name": "tiempo_texto",
+              "value": "={{ (() => { const m = $json.minutes_left; if (m >= 90) return '2 horas'; if (m >= 50) return '1 hora'; if (m >= 35) return '45 minutos'; if (m >= 20) return '30 minutos'; return '15 minutos'; })() }}",
+              "type": "string"
+            }
+          ]
+        },
+        "include": "all",
+        "options": {}
+      },
+      "id": "a1b2c3d4-0005-4005-8005-000000000005",
+      "name": "Calcular tiempo bonito",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        -400,
+        160
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://waba-v2.360dialog.io/messages",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"messaging_product\": \"whatsapp\",\n  \"to\": \"{{ $json.phone }}\",\n  \"type\": \"template\",\n  \"template\": {\n    \"name\": \"recordatorio_previo_vylta\",\n    \"language\": { \"code\": \"es_MX\" },\n    \"components\": [\n      {\n        \"type\": \"body\",\n        \"parameters\": [\n          { \"type\": \"text\", \"text\": \"{{ $json.client_name }}\" },\n          { \"type\": \"text\", \"text\": \"{{ $json.business }}\" },\n          { \"type\": \"text\", \"text\": \"{{ $json.tiempo_texto }}\" },\n          { \"type\": \"text\", \"text\": \"{{ $json.time_text }}\" },\n          { \"type\": \"text\", \"text\": \"{{ $json.service }}\" }\n        ]\n      }\n    ]\n  }\n}",
+        "options": {}
+      },
+      "id": "a1b2c3d4-0006-4006-8006-000000000006",
+      "name": "Enviar recordatorio previo",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -176,
+        160
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "vayMUXFT0U1STlx5",
+          "name": "360dialog-vylta-prod"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "PATCH",
+        "url": "=https://nhjmwmkaduiaifgztymi.supabase.co/rest/v1/appointments",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "supabaseApi",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "id",
+              "value": "=eq.{{ $('Preparar datos').item.json.appt_id }}"
+            }
+          ]
+        },
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Prefer",
+              "value": "return=minimal"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"whatsapp_reminder_pre_sent\": true,\n  \"whatsapp_reminder_pre_message_id\": \"{{ $json.messages[0].id }}\"\n}",
+        "options": {}
+      },
+      "id": "a1b2c3d4-0007-4007-8007-000000000007",
+      "name": "Marcar pre enviado",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        48,
+        160
+      ],
+      "credentials": {
+        "supabaseApi": {
+          "id": "vAyoHByapFR2KN7y",
+          "name": "Supabase account"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Cada 15 min": {
+      "main": [
+        [
+          {
+            "node": "Citas en el hueco (0-2h)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Citas en el hueco (0-2h)": {
+      "main": [
+        [
+          {
+            "node": "Procesar una a una",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Procesar una a una": {
+      "main": [
+        [],
+        [
+          {
+            "node": "Preparar datos",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Preparar datos": {
+      "main": [
+        [
+          {
+            "node": "Calcular tiempo bonito",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Calcular tiempo bonito": {
+      "main": [
+        [
+          {
+            "node": "Enviar recordatorio previo",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Enviar recordatorio previo": {
+      "main": [
+        [
+          {
+            "node": "Marcar pre enviado",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Marcar pre enviado": {
+      "main": [
+        [
+          {
+            "node": "Procesar una a una",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "pinData": {},
+  "meta": {
+    "instanceId": "b48094bf37750355743e50cb6ed04c479af6ea078c690b50c9a9538d7b246d02"
+  }
+}
