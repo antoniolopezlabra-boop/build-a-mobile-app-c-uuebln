@@ -1,7 +1,7 @@
 import React, { useState, useCallback, useMemo, memo } from 'react';
 import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity,
-  TextInput, RefreshControl,
+  TextInput, RefreshControl, Modal,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
@@ -142,6 +142,7 @@ export default function ClientsScreen() {
   const [searchQuery, setSearchQuery] = useState('');
   const [filter,      setFilter]      = useState<FilterType>('Todos');
   const [errorModal,  setErrorModal]  = useState({ visible: false, message: '' });
+  const [importMenu,  setImportMenu]  = useState(false);
 
   // FIX: siempre revisar si el caché fue invalidado al hacer focus
   // Si no hay caché (fue invalidado por importación u otra acción), recarga desde API
@@ -304,9 +305,9 @@ export default function ClientsScreen() {
           <MaterialIcons name="person-add-alt" size={16} color="#fff" />
           <Text style={s.emptyBtnText}>Agregar primer cliente</Text>
         </TouchableOpacity>
-        <TouchableOpacity style={s.emptyBtnSecondary} onPress={() => router.push('/clients/import-contacts')}>
-          <MaterialIcons name="contacts" size={15} color="#10B981" />
-          <Text style={s.emptyBtnSecondaryText}>Importar desde contactos</Text>
+        <TouchableOpacity style={s.emptyBtnSecondary} onPress={() => setImportMenu(true)}>
+          <MaterialIcons name="upload-file" size={15} color="#10B981" />
+          <Text style={s.emptyBtnSecondaryText}>Importar clientes</Text>
         </TouchableOpacity>
       </View>
     );
@@ -343,6 +344,63 @@ export default function ClientsScreen() {
         onDismiss={() => setErrorModal({ visible: false, message: '' })}
       />
 
+      <Modal
+        visible={importMenu}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setImportMenu(false)}
+      >
+        <TouchableOpacity style={s.menuBackdrop} activeOpacity={1} onPress={() => setImportMenu(false)}>
+          <View style={[s.menuSheet, { backgroundColor: tc.surface }]}>
+            <View style={s.menuHandle} />
+            <Text style={[s.menuTitle, { color: tc.text }]}>Importar clientes</Text>
+            <Text style={[s.menuSubtitle, { color: tc.textMuted }]}>Elige cómo quieres subirlos</Text>
+
+            <TouchableOpacity
+              style={[s.menuOption, { borderColor: tc.border }]}
+              activeOpacity={0.8}
+              onPress={() => {
+                haptics.selection();
+                setImportMenu(false);
+                router.push('/clients/import-contacts');
+              }}
+            >
+              <View style={[s.menuOptionIcon, { backgroundColor: '#10B98118' }]}>
+                <MaterialIcons name="contacts" size={22} color="#10B981" />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={[s.menuOptionTitle, { color: tc.text }]}>Desde mis contactos</Text>
+                <Text style={[s.menuOptionDesc, { color: tc.textMuted }]}>Importa desde la agenda del teléfono</Text>
+              </View>
+              <MaterialIcons name="chevron-right" size={20} color={tc.textMuted} />
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={[s.menuOption, { borderColor: tc.border }]}
+              activeOpacity={0.8}
+              onPress={() => {
+                haptics.selection();
+                setImportMenu(false);
+                router.push('/clients/import-excel');
+              }}
+            >
+              <View style={[s.menuOptionIcon, { backgroundColor: '#1D6F4218' }]}>
+                <MaterialIcons name="grid-on" size={22} color="#1D6F42" />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={[s.menuOptionTitle, { color: tc.text }]}>Desde Excel o CSV</Text>
+                <Text style={[s.menuOptionDesc, { color: tc.textMuted }]}>Descarga una plantilla y súbela llena</Text>
+              </View>
+              <MaterialIcons name="chevron-right" size={20} color={tc.textMuted} />
+            </TouchableOpacity>
+
+            <TouchableOpacity style={s.menuCancel} onPress={() => setImportMenu(false)} activeOpacity={0.7}>
+              <Text style={[s.menuCancelText, { color: tc.textMuted }]}>Cancelar</Text>
+            </TouchableOpacity>
+          </View>
+        </TouchableOpacity>
+      </Modal>
+
       <View style={[s.header, { backgroundColor: tc.surface, borderBottomColor: tc.border }]}>
         <View style={s.headerTop}>
           <View>
@@ -354,7 +412,7 @@ export default function ClientsScreen() {
               style={[s.importContactsBtn, { backgroundColor: isDark ? '#052E16' : '#ECFDF5', borderColor: isDark ? '#065F46' : '#BBF7D0' }]}
               onPress={() => {
                 haptics.light();
-                router.push('/clients/import-contacts');
+                setImportMenu(true);
               }}
               activeOpacity={0.75}
             >
@@ -453,6 +511,17 @@ export default function ClientsScreen() {
 }
 
 const s = StyleSheet.create({
+  menuBackdrop:    { flex: 1, backgroundColor: 'rgba(0,0,0,0.45)', justifyContent: 'flex-end' },
+  menuSheet:       { borderTopLeftRadius: 24, borderTopRightRadius: 24, padding: 20, paddingBottom: 36 },
+  menuHandle:      { width: 40, height: 4, borderRadius: 2, backgroundColor: '#CBD5E1', alignSelf: 'center', marginBottom: 16 },
+  menuTitle:       { fontSize: 18, fontWeight: '800', textAlign: 'center' },
+  menuSubtitle:    { fontSize: 13, textAlign: 'center', marginTop: 2, marginBottom: 18 },
+  menuOption:      { flexDirection: 'row', alignItems: 'center', gap: 14, borderRadius: 14, padding: 14, marginBottom: 10, borderWidth: 1 },
+  menuOptionIcon:  { width: 44, height: 44, borderRadius: 12, justifyContent: 'center', alignItems: 'center' },
+  menuOptionTitle: { fontSize: 15, fontWeight: '700' },
+  menuOptionDesc:  { fontSize: 12, marginTop: 1 },
+  menuCancel:      { paddingVertical: 14, alignItems: 'center', marginTop: 4 },
+  menuCancelText:  { fontSize: 14, fontWeight: '600' },
   container:             { flex: 1 },
   loading:               { flex: 1, justifyContent: 'center', alignItems: 'center' },
   header:                { paddingHorizontal: 20, paddingTop: 16, paddingBottom: 12, borderBottomWidth: 0.5 },
