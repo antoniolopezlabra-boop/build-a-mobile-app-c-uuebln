@@ -306,17 +306,41 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
   };
 
   /**
-   * Decide qué tipo de refresh hacer según tiempo en background.
-   * Muestra el splash de reconexión durante el proceso.
-   *
-   * ⚡ v3: ahora con watchdog universal + botón de escape + detección de token muerto.
+   * Refresh silencioso para el caso COMÚN (5-30 min en background).
+   * NO muestra splash: invalida cache, verifica sesión y emite el evento de
+   * refresh para que las pantallas refetcheen en su lugar con su propio
+   * indicador sutil (no bloqueante).
    */
-  const performRefresh = async (backgroundDurationMs: number) => {
-    // Si fue menos de 5 min, no hacemos nada (mejor performance, no UX disruption)
-    if (backgroundDurationMs <= LIGHT_REFRESH_THRESHOLD) {
+  const performLightRefreshSilent = async () => {
+    setIsRefreshing(true);
+    let tokenAlive = true;
+    try {
+      const result = await withTimeout(lightRefresh(), FULL_REFRESH_TIMEOUT_MS);
+      // Si timeout disparó (result === null), asumir token vivo (no logout por timeout)
+      tokenAlive = result === null ? true : result.tokenAlive;
+    } catch (error) {
+      logger.error('[AppState] Silent light refresh error:', error);
+      tokenAlive = true;
+    } finally {
+      setIsRefreshing(false);
+    }
+
+    // CAPA 3: token muerto -> logout forzado (raro en 5-30 min, pero posible)
+    if (!tokenAlive) {
+      await handleDeadToken();
       return;
     }
 
+    // Notificar a las pantallas que pueden refetchear (en sitio, sin splash)
+    emitRefreshEvent();
+  };
+
+  /**
+   * Refresh COMPLETO con splash para ausencias largas (> 30 min).
+   * Conserva las 4 capas de defensa: watchdog universal, sin disconnect
+   * destructivo, detección de token muerto y botón de escape.
+   */
+  const performFullRefreshWithSplash = async () => {
     // Generación única de este refresh — para que callbacks viejos no afecten estado nuevo
     const myGeneration = ++refreshGenerationRef.current;
 
@@ -333,7 +357,7 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
       useNativeDriver: true,
     }).start();
 
-    // ⚡ CAPA 4: timer del contador "Reconectando... 5s" + botón escape a los 8s
+    // CAPA 4: timer del contador "Reconectando... 5s" + botón escape a los 8s
     elapsedTimerRef.current = setInterval(() => {
       if (refreshStartedAtRef.current === null) return;
       const elapsed = Math.floor((Date.now() - refreshStartedAtRef.current) / 1000);
@@ -343,11 +367,8 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
       }
     }, 1000);
 
-    // ⚡ CAPA 1: watchdog universal — SIEMPRE dispara a los 15s sin importar lo demás.
-    // Si por alguna razón el refresh queda colgado (bug de Supabase, network, Hermes),
-    // forzamos la salida del splash y emitimos refresh event de todas formas.
+    // CAPA 1: watchdog universal — SIEMPRE dispara a los 15s sin importar lo demás.
     watchdogTimerRef.current = setTimeout(() => {
-      // Verificar que sigue siendo el mismo refresh que arrancó (no uno nuevo)
       if (refreshGenerationRef.current === myGeneration) {
         logger.warn(`[AppState] Watchdog fired after ${WATCHDOG_TIMEOUT_MS}ms — forcing escape`);
         closeSplash('watchdog_timeout');
@@ -355,19 +376,12 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
       }
     }, WATCHDOG_TIMEOUT_MS);
 
-    // Ejecutar el refresh real
+    // Ejecutar el refresh real (siempre fullRefresh en este path)
     let tokenAlive = true;
     try {
-      const refreshOp = backgroundDurationMs > FULL_REFRESH_THRESHOLD
-        ? fullRefresh()
-        : lightRefresh();
-
-      const result = await withTimeout(refreshOp, FULL_REFRESH_TIMEOUT_MS);
-
-      // Si timeout disparó (result === null), asumir token vivo (no forzar logout por timeout)
+      const result = await withTimeout(fullRefresh(), FULL_REFRESH_TIMEOUT_MS);
       tokenAlive = result === null ? true : result.tokenAlive;
     } catch (error) {
-      // Error inesperado — log pero no forzar logout
       logger.error('[AppState] Unexpected refresh error:', error);
       tokenAlive = true;
     }
@@ -378,7 +392,7 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
       return;
     }
 
-    // ⚡ CAPA 3: si el token está muerto, hacer logout forzado ANTES de cerrar splash
+    // CAPA 3: si el token está muerto, hacer logout forzado ANTES de cerrar splash
     if (!tokenAlive) {
       closeSplash('dead_token');
       await handleDeadToken();
@@ -392,6 +406,35 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
     closeSplash('success');
   };
 
+  // ───────────────────────────────────────────────────────────────────
+  // ⚡ FIX UX (foreground, May 31 2026): refresh silencioso vs splash.
+  //
+  // PROBLEMA detectado en auditoría:
+  //   El splash blanco "Reconectando..." se mostraba para CUALQUIER regreso de
+  //   background > 5 min, incluso el refresh ligero (5-30 min) cuyo trabajo real
+  //   es < 1s. Para el caso común (un negocio deja la app de fondo unos minutos
+  //   entre clientes) eso se PERCIBE como "la app se pasmó / se quedó cargando".
+  //
+  // SOLUCIÓN:
+  //   • 5-30 min  -> refresh SILENCIOSO, sin splash. Las pantallas refrescan en
+  //                  su lugar (RefreshControl sutil, no bloqueante).
+  //   • > 30 min  -> refresh COMPLETO con splash + watchdog + botón escape.
+  // ───────────────────────────────────────────────────────────────────
+  const performRefresh = async (backgroundDurationMs: number) => {
+    // < 5 min: no hacemos nada (mejor performance, cero disrupción de UX)
+    if (backgroundDurationMs <= LIGHT_REFRESH_THRESHOLD) {
+      return;
+    }
+
+    // 5-30 min: refresh SILENCIOSO (sin splash)
+    if (backgroundDurationMs <= FULL_REFRESH_THRESHOLD) {
+      await performLightRefreshSilent();
+      return;
+    }
+
+    // > 30 min: refresh COMPLETO con splash
+    await performFullRefreshWithSplash();
+  };
   /**
    * Trigger manual desde fuera (ej. pull-to-refresh).
    * NO muestra splash porque viene de un gesto explícito del usuario.
