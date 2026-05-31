@@ -75,6 +75,10 @@ export default function HomeScreen() {
   const [loadError, setLoadError] = useState<string | null>(null);
 
   const loadingRef  = useRef(false);
+  // ⚡ FIX UX (foreground): marca si ya mostramos datos al menos una vez. Sirve
+  // para NO vaciar la pantalla a spinner completo en refrescos de regreso de
+  // background; en ese caso refrescamos en sitio (RefreshControl sutil).
+  const hasDataRef  = useRef(false);
   const userIdRef   = useRef<string | undefined>(undefined);
   const prevPathRef = useRef(pathname);
 
@@ -150,9 +154,15 @@ export default function HomeScreen() {
       if (!forceRefresh && cachedStats && cachedApts) {
         setStats(cachedStats); setTodayAppointments(cachedApts);
         if (cachedWeek) setWeekAppointments(cachedWeek);
+        hasDataRef.current = true;
         setLoading(false); loadStaffMembers(userId); return;
       }
-      if (isPullRefresh) setRefreshing(true); else setLoading(true);
+      // ⚡ FIX UX (foreground): si es pull-to-refresh, o un refresh de regreso de
+      // background CUANDO ya hay datos en pantalla, usamos el indicador sutil
+      // (RefreshControl) en vez de vaciar todo a "Cargando dashboard...". El
+      // spinner de pantalla completa queda reservado solo para la PRIMERA carga.
+      if (isPullRefresh || (forceRefresh && hasDataRef.current)) setRefreshing(true);
+      else setLoading(true);
       const results = await Promise.allSettled([
         apiGet<DashboardStats>('/api/stats/dashboard'),
         apiGet<TodayAppointment[]>('/api/appointments/today'),
@@ -161,6 +171,9 @@ export default function HomeScreen() {
       if (results[0].status === 'fulfilled') { setStats(results[0].value); setCached('dashboard_stats', results[0].value, CACHE_TTL.DASHBOARD); }
       if (results[1].status === 'fulfilled') { setTodayAppointments(results[1].value); setCached('today_appointments', results[1].value, CACHE_TTL.APPOINTMENTS); }
       if (results[2].status === 'fulfilled') { setWeekAppointments(results[2].value); setCached('week_appointments', results[2].value, CACHE_TTL.APPOINTMENTS); }
+      // ⚡ FIX UX (foreground): si al menos uno cargó, ya tenemos datos válidos en
+      // pantalla; los próximos refrescos de regreso de background serán en sitio.
+      if (results.some(r => r.status === 'fulfilled')) hasDataRef.current = true;
 
       // ⚡ FIX BUG-002: detectar fallas parciales en el dashboard.
       const failed = results.filter(r => r.status === 'rejected');
