@@ -17,6 +17,11 @@ const corsHeaders = corsForWebhook();
  *   ≥  39900 → Basico      ($399  / mes)   Plan Premium mensual
  *   <  39900 → Gratuito    (default)
  *
+ * IMPORTANTE: este detector debe recibir el monto del plan ANTES de
+ * descuentos (amount_subtotal), NO el monto cobrado tras cupones
+ * (amount_total). Un cupón de 100% deja amount_total en 0 y haría que el
+ * plan se asignara como Gratuito. Ver lógica en checkout.session.completed.
+ *
  * NOTA: el upgrade de mensual→anual con prorrateo genera montos menores
  * al precio base anual. Por eso el orden de evaluación va de mayor a
  * menor con thresholds intermedios. Si el cliente upgradea de Premium
@@ -25,23 +30,23 @@ const corsHeaders = corsForWebhook();
  * por debajo de eso se asignaría como Premium mensual (incorrecto).
  *
  * Por eso para upgrades prorrateados confiamos en la metadata del Price,
- * NO solo en el amount_total. Ver lógica abajo.
+ * NO solo en el amount. Ver lógica abajo.
  */
-function detectPlanFromAmount(amountTotal: number): {
+function detectPlanFromAmount(amount: number): {
   planType: string;
   billingCycle: 'monthly' | 'annual';
   isVip: boolean;
 } {
-  if (amountTotal >= 879000) {
+  if (amount >= 879000) {
     return { planType: 'VipPremium', billingCycle: 'annual', isVip: true };
   }
-  if (amountTotal >= 439000) {
+  if (amount >= 439000) {
     return { planType: 'VipBasico', billingCycle: 'annual', isVip: true };
   }
-  if (amountTotal >= 79900) {
+  if (amount >= 79900) {
     return { planType: 'Premium', billingCycle: 'monthly', isVip: false };
   }
-  if (amountTotal >= 39900) {
+  if (amount >= 39900) {
     return { planType: 'Basico', billingCycle: 'monthly', isVip: false };
   }
   return { planType: 'Gratuito', billingCycle: 'monthly', isVip: false };
@@ -49,8 +54,13 @@ function detectPlanFromAmount(amountTotal: number): {
 
 /**
  * Detecta el plan a partir del Price ID de Stripe (más confiable que monto).
- * Útil para upgrades prorrateados donde amount_total no refleja el plan real.
+ * Útil para upgrades prorrateados donde amount no refleja el plan real.
  * Si el priceId no está en el mapa, retorna null y se usa fallback a amount.
+ *
+ * NOTA: session.line_items NO viene incluido en el evento del webhook por
+ * defecto. Para usar este detector de forma fiable habría que expandir
+ * line_items o consultar la suscripción vía API de Stripe. Mientras tanto,
+ * la detección por amount_subtotal (precio pre-descuento) es suficiente.
  */
 function detectPlanFromPriceId(priceId: string | undefined): {
   planType: string;
@@ -58,17 +68,16 @@ function detectPlanFromPriceId(priceId: string | undefined): {
   isVip: boolean;
 } | null {
   if (!priceId) return null;
-  // TODO: cuando se creen los Price IDs reales en Stripe, mapearlos aquí.
-  // Por ahora, devolvemos null y delegamos a detectPlanFromAmount.
-  // Ejemplo futuro:
-  //   const PRICE_MAP: Record<string, ...> = {
-  //     'price_xxx_399':       { planType: 'Basico',     billingCycle: 'monthly', isVip: false },
-  //     'price_xxx_799':       { planType: 'Premium',    billingCycle: 'monthly', isVip: false },
-  //     'price_xxx_vip_4390':  { planType: 'VipBasico',  billingCycle: 'annual',  isVip: true  },
-  //     'price_xxx_vip_8790':  { planType: 'VipPremium', billingCycle: 'annual',  isVip: true  },
-  //   };
-  //   return PRICE_MAP[priceId] ?? null;
-  return null;
+  const PRICE_MAP: Record<string, { planType: string; billingCycle: 'monthly' | 'annual'; isVip: boolean }> = {
+    // Premium mensual ($399) — confirmado desde una suscripción real.
+    'price_1TTCMZR0yiPecGZxX7L10AKs': { planType: 'Basico', billingCycle: 'monthly', isVip: false },
+    // TODO: agregar los Price IDs de Luxury ($799), VIP Premium ($4,390) y
+    // VIP Luxury ($8,790) cuando se confirmen, para detección 100% por price.
+    //   'price_xxx_799':      { planType: 'Premium',    billingCycle: 'monthly', isVip: false },
+    //   'price_xxx_vip_4390': { planType: 'VipBasico',  billingCycle: 'annual',  isVip: true  },
+    //   'price_xxx_vip_8790': { planType: 'VipPremium', billingCycle: 'annual',  isVip: true  },
+  };
+  return PRICE_MAP[priceId] ?? null;
 }
 
 /**
@@ -119,6 +128,7 @@ Deno.serve(async (req: Request) => {
       const customerId = session.customer;
       const subscriptionId = session.subscription;
       const amountTotal = session.amount_total;
+      const amountSubtotal = session.amount_subtotal;
 
       if (!userId) {
         console.error('[Webhook] No user ID in session');
@@ -130,9 +140,18 @@ Deno.serve(async (req: Request) => {
       const lineItems = session.line_items?.data ?? [];
       const firstPriceId = lineItems[0]?.price?.id;
       const planByPrice = detectPlanFromPriceId(firstPriceId);
-      const planInfo = planByPrice ?? detectPlanFromAmount(amountTotal);
 
-      console.log(`[Webhook] Processing payment: userId=${userId}, amount=${amountTotal}, priceId=${firstPriceId}, plan=${planInfo.planType} (${planInfo.billingCycle}${planInfo.isVip ? ', VIP' : ''})`);
+      // IMPORTANTE: amount_total viene DESPUÉS de descuentos. Un cupón de
+      // 100% lo deja en 0 y el plan se detectaba como Gratuito (bug que dejó
+      // suscripciones de pago marcadas como gratis). Usamos amount_subtotal,
+      // que es el precio del plan ANTES de cualquier descuento, para que la
+      // detección sea inmune a cupones (100%, monto fijo, trials, etc.).
+      const amountForPlan = (typeof amountSubtotal === 'number' && amountSubtotal > 0)
+        ? amountSubtotal
+        : amountTotal;
+      const planInfo = planByPrice ?? detectPlanFromAmount(amountForPlan);
+
+      console.log(`[Webhook] Processing payment: userId=${userId}, amountSubtotal=${amountSubtotal}, amountTotal=${amountTotal}, priceId=${firstPriceId}, plan=${planInfo.planType} (${planInfo.billingCycle}${planInfo.isVip ? ', VIP' : ''})`);
 
       // Construir el payload del upsert
       const upsertPayload: Record<string, unknown> = {
