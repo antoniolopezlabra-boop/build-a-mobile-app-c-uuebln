@@ -15,7 +15,7 @@ import { supabase } from '@/lib/supabase';
 import { logger } from '@/utils/logger';
 import MaterialIcons from '@expo/vector-icons/MaterialIcons';
 
-// ─── Burbuja de WhatsApp simulada ─────────────────────────────────────────────
+// ─── Burbuja de WhatsApp simulada ─────────────────────────────────────
 function WaBubble({ text }: { text: string }) {
   return (
     <View style={wb.container}>
@@ -43,7 +43,7 @@ const wb = StyleSheet.create({
   time:       { fontSize: 10, color: '#94A3B8', textAlign: 'right', marginTop: 6 },
 });
 
-// ─── Pantalla ACTIVA (todos los planes) ──────────────────────────────────────
+// ─── Pantalla ACTIVA (todos los planes) ─────────────────────────────
 // WhatsApp está incluido en todos los planes (Básico, Premium, Luxury).
 // Los mensajes salen desde el número compartido VYLTA verificado por Meta.
 function ActiveScreen({ isGratuito, canFollowUp }: {
@@ -54,10 +54,12 @@ function ActiveScreen({ isGratuito, canFollowUp }: {
   const { user } = useAuth();
 
   // ─── Toggle: seguimiento automático al marcar "No asistió" ───
-  // Vive en whatsapp_config.no_show_followup (OFF por defecto).
+  // Vive en whatsapp_config.no_show_followup (ON por defecto: opt-out).
   // Solo editable en planes pagados (Premium/Luxury). El envío real
   // lo dispara un trigger en BD -> n8n -> plantilla seguimiento_no_asistio_vylta.
-  const [noShowFollowup, setNoShowFollowup] = useState(false);
+  // Si el negocio aún no tiene registro en whatsapp_config, se trata como ACTIVADO
+  // (el default de la columna en BD también es true), por eso usamos `?? true`.
+  const [noShowFollowup, setNoShowFollowup] = useState(true);
   const [savingFollowup, setSavingFollowup] = useState(false);
   const [followupLoaded, setFollowupLoaded] = useState(false);
 
@@ -69,7 +71,8 @@ function ActiveScreen({ isGratuito, canFollowUp }: {
         .select('no_show_followup')
         .eq('user_id', user.id)
         .maybeSingle();
-      setNoShowFollowup(!!data?.no_show_followup);
+      // ON por defecto: si no hay registro, o el campo viene null, se muestra activado.
+      setNoShowFollowup(data?.no_show_followup ?? true);
     } catch (e) {
       logger.error('[WhatsApp] loadFollowup failed:', e);
     } finally {
@@ -135,8 +138,9 @@ function ActiveScreen({ isGratuito, canFollowUp }: {
           { icon: '📋', time: 'Al agendar',  title: 'Confirmación inmediata',      desc: 'El cliente recibe el detalle de su cita en segundos.',            color: '#10B981' },
           { icon: '🌙', time: '24h antes',   title: 'Recordatorio día anterior',   desc: 'Le avisa con tiempo para que pueda confirmar o cancelar.',        color: '#3B82F6' },
           { icon: '⏰', time: '2h antes',    title: 'Recordatorio final',           desc: 'Un último aviso el mismo día antes de la cita.',                  color: '#F59E0B' },
-        ].map((item, i) => (
-          <View key={i} style={[s.timelineRow, i < 2 && s.timelineRowBorder]}>
+          { icon: '⚡', time: 'Cita de último minuto', title: 'Recordatorio inmediato',  desc: 'Si la cita se agenda con menos de 2 horas de anticipación, le avisamos al cliente cuánto falta aproximadamente.', color: '#8B5CF6' },
+        ].map((item, i, arr) => (
+          <View key={i} style={[s.timelineRow, i < arr.length - 1 && s.timelineRowBorder]}>
             <Text style={s.timelineEmoji}>{item.icon}</Text>
             <View style={s.timelineInfo}>
               <View style={[s.timeBadge, { backgroundColor: item.color + '20' }]}>
@@ -167,7 +171,7 @@ function ActiveScreen({ isGratuito, canFollowUp }: {
               )}
             </View>
             <Text style={s.followupDesc}>
-              Cuando marcas una cita como “No asistió”, le enviamos un WhatsApp al cliente con tu enlace para que reagende.
+              Cuando marcas una cita como “No asistió”, le enviamos un WhatsApp al cliente con tu enlace para que reagende. Viene activado; puédelo apagar cuando quieras.
             </Text>
           </View>
           {canFollowUp ? (
@@ -199,6 +203,15 @@ function ActiveScreen({ isGratuito, canFollowUp }: {
             <MaterialIcons name="check-circle" size={14} color="#10B981" />
             <Text style={s.followupOnText}>
               Activo. Solo se envía si el cliente tiene teléfono y tu link de citas está activo.
+            </Text>
+          </View>
+        )}
+
+        {canFollowUp && !noShowFollowup && (
+          <View style={s.followupOnNote}>
+            <MaterialIcons name="info-outline" size={14} color="#94A3B8" />
+            <Text style={[s.followupOnText, { color: '#94A3B8' }]}>
+              Desactivado. No se enviará ningún mensaje cuando marques una cita como “No asistió”.
             </Text>
           </View>
         )}
@@ -238,7 +251,7 @@ function ActiveScreen({ isGratuito, canFollowUp }: {
   );
 }
 
-// ─── Componente principal ─────────────────────────────────────────────────────
+// ─── Componente principal ────────────────────────────────────────
 export default function WhatsAppSettingsScreen() {
   const router = useRouter();
   const { isGratuito, isBasico, isPremium } = usePlan();
