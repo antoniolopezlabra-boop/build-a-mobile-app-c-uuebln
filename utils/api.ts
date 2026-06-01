@@ -107,9 +107,22 @@ async function enforceGratuitoMonthlyLimit(userId: string): Promise<void> {
 }
 
 // ────────────────────────────────────────────────────────────────────
-// SEGURIDAD: Valida que el usuario tenga plan Premium (Luxury visible)
-// para crear citas con isOverlapping=true (citas simultáneas).
+// SEGURIDAD: Valida que el usuario tenga un plan PAGADO para crear citas
+// con isOverlapping=true (citas simultáneas / empalme).
+//
+// ⚡ CAMBIO (Jun 2026): antes solo el plan interno 'premium' (Luxury visible)
+// podía empalmar. Ahora se habilita también para 'basico' (Premium visible)
+// y los equivalentes VIP. Gratuito sigue SIN acceso.
+//
+// Convención de planes (interno → visible):
+//   gratuito    → Básico       (SIN empalme)
+//   basico      → Premium      (CON empalme)
+//   premium     → Luxury       (CON empalme)
+//   vipbasico   → VIP Premium  (CON empalme, hereda de Premium)
+//   vippremium  → VIP Luxury   (CON empalme, hereda de Luxury)
 // ────────────────────────────────────────────────────────────────────
+const OVERLAP_ALLOWED_PLANS = ['basico', 'premium', 'vipbasico', 'vippremium'];
+
 async function validateOverlappingPermission(userId: string, isOverlapping: boolean): Promise<void> {
   if (!isOverlapping) return;
 
@@ -121,11 +134,12 @@ async function validateOverlappingPermission(userId: string, isOverlapping: bool
 
   const planType = sub?.plan_type?.toLowerCase() ?? 'gratuito';
   const status   = sub?.status?.toLowerCase() ?? '';
-  const isPremium = planType === 'premium' && (status === 'active' || status === 'pending_cancellation');
+  const isPaidPlan = OVERLAP_ALLOWED_PLANS.includes(planType)
+    && (status === 'active' || status === 'pending_cancellation');
 
-  if (!isPremium) {
+  if (!isPaidPlan) {
     const err: any = new Error(
-      'Las citas simultáneas solo están disponibles en el Plan Luxury. Actualiza tu plan para activar esta función.'
+      'Las citas simultáneas están disponibles en los planes Premium y Luxury. Actualiza tu plan para activar esta función.'
     );
     err.code = 'OVERLAP_NOT_ALLOWED';
     throw err;

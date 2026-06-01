@@ -177,7 +177,12 @@ export function PlanProvider({ children }: { children: React.ReactNode }) {
   const canUseWhatsApp      = true;
   const canUseBookingLink   = true;
   const canViewReports      = isBasico || isPremium || isTrialActive;
-  const canOverlap          = isPremium;
+  // ⚡ Citas simultáneas (empalme): habilitado para Premium (Basico) y Luxury
+  // (Premium), más sus equivalentes VIP. Gratuito NO. isBasico ya incluye
+  // VipBasico e isPremium ya incluye VipPremium, así que esto cubre los 4
+  // planes pagados. El segundo gate real (toggle allow_overlapping ON +
+  // validación server-side en utils/api.ts) sigue aplicando.
+  const canOverlap          = isBasico || isPremium;
   const canUseCollaborators = isPremium;
   const canRunCampaigns     = isPremium;
   const canExportCSV        = isPremium;
