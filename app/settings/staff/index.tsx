@@ -12,7 +12,9 @@ import { useTheme } from '@/contexts/ThemeContext';
 import { supabase } from '@/lib/supabase';
 import MaterialIcons from '@expo/vector-icons/MaterialIcons';
 
-const MAX_STAFF_PREMIUM = 5;
+// ⚡ Jun 2026: el límite de colaboradores dejó de estar hardcodeado. Ahora
+// viene de PlanContext.maxStaff (columna subscription_plans.max_staff,
+// editable por un admin desde el CRM). Default 5. Base para Enterprise.
 
 interface StaffMember {
   id: string;
@@ -27,7 +29,7 @@ interface StaffMember {
 export default function StaffListScreen() {
   const router = useRouter();
   const { user } = useAuth();
-  const { isPremium, canUseCollaborators } = usePlan();
+  const { isPremium, canUseCollaborators, maxStaff } = usePlan();
   const { colors: tc } = useTheme();
   const [staff, setStaff] = useState<StaffMember[]>([]);
   const [loading, setLoading] = useState(true);
@@ -72,13 +74,12 @@ export default function StaffListScreen() {
   };
 
   const handleAddNew = () => {
-    // Verificar límite de 5 colaboradores en Premium
-    const activeCount = staff.filter(s => s.is_active).length;
+    // Verificar límite de colaboradores (configurable por usuario)
     const totalCount  = staff.length;
-    if (totalCount >= MAX_STAFF_PREMIUM) {
+    if (totalCount >= maxStaff) {
       Alert.alert(
         'Límite alcanzado',
-        `El plan Premium permite hasta ${MAX_STAFF_PREMIUM} colaboradores. Desactiva o elimina uno para agregar otro.`
+        `Tu plan permite hasta ${maxStaff} colaboradores. Desactiva o elimina uno para agregar otro.`
       );
       return;
     }
@@ -87,7 +88,7 @@ export default function StaffListScreen() {
 
   const activeStaff   = staff.filter(s => s.is_active);
   const inactiveStaff = staff.filter(s => !s.is_active);
-  const atLimit       = staff.length >= MAX_STAFF_PREMIUM;
+  const atLimit       = staff.length >= maxStaff;
 
   const renderMember = (member: StaffMember) => (
     <TouchableOpacity
@@ -137,11 +138,11 @@ export default function StaffListScreen() {
           </View>
           <Text style={[st.paywallTitle, { color: tc.text }]}>Gestión de equipo</Text>
           <Text style={[st.paywallDesc, { color: tc.textMuted }]}>
-            Registra hasta {MAX_STAFF_PREMIUM} colaboradores, asigna citas a cada uno y gestiona sus horarios individuales desde el Plan Premium.
+            Registra hasta {maxStaff} colaboradores, asigna citas a cada uno y gestiona sus horarios individuales desde el Plan Premium.
           </Text>
           <View style={st.paywallFeatures}>
             {[
-              'Hasta 5 colaboradores activos',
+              `Hasta ${maxStaff} colaboradores activos`,
               'Horarios independientes por persona',
               'Filtro de agenda por colaborador',
               'Selección de colaborador en el link público',
@@ -173,7 +174,7 @@ export default function StaffListScreen() {
         <View style={st.headerMid}>
           <Text style={[st.title, { color: tc.text }]}>Mi equipo</Text>
           <Text style={[st.subtitle, { color: tc.textMuted }]}>
-            {activeStaff.length} activo{activeStaff.length !== 1 ? 's' : ''} de {MAX_STAFF_PREMIUM} máx.
+            {activeStaff.length} activo{activeStaff.length !== 1 ? 's' : ''} de {maxStaff} máx.
           </Text>
         </View>
         <TouchableOpacity
@@ -193,7 +194,7 @@ export default function StaffListScreen() {
           </View>
           <Text style={[st.emptyTitle, { color: tc.text }]}>Agrega tu equipo</Text>
           <Text style={[st.emptyDesc, { color: tc.textMuted }]}>
-            Registra hasta {MAX_STAFF_PREMIUM} colaboradores para asignarles citas y gestionar su agenda por separado.
+            Registra hasta {maxStaff} colaboradores para asignarles citas y gestionar su agenda por separado.
           </Text>
           <TouchableOpacity style={st.emptyBtn} onPress={handleAddNew}>
             <MaterialIcons name="add" size={18} color="#fff" />
@@ -208,14 +209,14 @@ export default function StaffListScreen() {
             <View style={st.limitBanner}>
               <MaterialIcons name="info" size={16} color="#92400E" />
               <Text style={st.limitBannerText}>
-                Has alcanzado el límite de {MAX_STAFF_PREMIUM} colaboradores del Plan Premium.
+                Has alcanzado el límite de {maxStaff} colaboradores de tu plan.
               </Text>
             </View>
           ) : (
             <View style={st.infoBanner}>
               <MaterialIcons name="info-outline" size={16} color="#3B82F6" />
               <Text style={st.infoText}>
-                {staff.length}/{MAX_STAFF_PREMIUM} colaboradores — Cada uno tiene su propio horario y agenda.
+                {staff.length}/{maxStaff} colaboradores — Cada uno tiene su propio horario y agenda.
               </Text>
             </View>
           )}

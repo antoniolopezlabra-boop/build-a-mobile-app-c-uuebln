@@ -11,12 +11,14 @@ interface PlanData {
   status: PlanStatus;
   trialEndsAt: string | null;
   price: string;
-  // ─── Campos VIP (May 2026) ───────────────────────
+  // ─── Campos VIP (May 2026) ──────────────────
   billingCycle: BillingCycle;
   isVip: boolean;
   vipExpiresAt: string | null;
   onboardingCallScheduledAt: string | null;
   onboardingCompletedAt: string | null;
+  // ⚡ Límite de colaboradores configurable (Jun 2026). Default 5.
+  maxStaff: number;
 }
 
 interface PlanContextType {
@@ -31,6 +33,8 @@ interface PlanContextType {
   canRunCampaigns: boolean;
   canExportCSV: boolean;
   canUseBookingLink: boolean;
+  // ⚡ Límite de colaboradores del usuario (subscription_plans.max_staff)
+  maxStaff: number;
   // Flags de plan (compat con código existente)
   isGratuito: boolean;
   isBasico: boolean;
@@ -60,6 +64,7 @@ const defaultPlan: PlanData = {
   vipExpiresAt: null,
   onboardingCallScheduledAt: null,
   onboardingCompletedAt: null,
+  maxStaff: 5,
 };
 
 function normalizePlanType(raw: string): string {
@@ -104,7 +109,22 @@ export function PlanProvider({ children }: { children: React.ReactNode }) {
       }
       if (!data) { setPlan(defaultPlan); return; }
       const normalized = normalizePlanType(data.plan_type);
-      logger.log('[PlanContext] Plan loaded:', normalized, '| status:', data.status, '| vip:', data.is_vip);
+
+      // ⚡ max_staff: lectura SEPARADA y defensiva. Si la columna no existe
+      // todavía (p. ej. antes de correr la migración) o si falla, usamos 5
+      // y NO afectamos el resto del gating del plan, que es crítico.
+      let maxStaff = 5;
+      try {
+        const { data: msData } = await supabase
+          .from('subscription_plans')
+          .select('max_staff')
+          .eq('user_id', userId)
+          .maybeSingle();
+        const v = (msData as any)?.max_staff;
+        if (typeof v === 'number' && v > 0) maxStaff = v;
+      } catch {}
+
+      logger.log('[PlanContext] Plan loaded:', normalized, '| status:', data.status, '| vip:', data.is_vip, '| maxStaff:', maxStaff);
       setPlan({
         planType: normalized,
         status: data.status as PlanStatus,
@@ -115,6 +135,7 @@ export function PlanProvider({ children }: { children: React.ReactNode }) {
         vipExpiresAt: data.vip_expires_at,
         onboardingCallScheduledAt: data.onboarding_call_scheduled_at,
         onboardingCompletedAt: data.onboarding_completed_at,
+        maxStaff,
       });
     } catch (e) {
       logger.error('[PlanContext] Error loading plan:', e);
@@ -137,7 +158,7 @@ export function PlanProvider({ children }: { children: React.ReactNode }) {
     loadPlan(user.id);
   }, [user?.id, authLoading]);
 
-  // ─── Plan derivados básicos ───────────────────────
+  // ─── Plan derivados básicos ──────────────────
   const isGratuito = plan.planType === 'Gratuito';
   const isVipBasico  = plan.planType === 'VipBasico';
   const isVipPremium = plan.planType === 'VipPremium';
@@ -151,19 +172,19 @@ export function PlanProvider({ children }: { children: React.ReactNode }) {
 
   const isPaidPlan = !isGratuito;
 
-  // ─── Trial ───────────────────────
+  // ─── Trial ──────────────────
   const daysLeftInTrial = plan.trialEndsAt
     ? Math.max(0, Math.ceil((new Date(plan.trialEndsAt).getTime() - Date.now()) / (1000 * 60 * 60 * 24)))
     : 0;
   const isTrialActive = plan.status === 'trial' && daysLeftInTrial > 0;
 
-  // ─── VIP expiry tracking ───────────────────────
+  // ─── VIP expiry tracking ──────────────────
   const daysUntilVipExpiry = plan.vipExpiresAt
     ? Math.max(0, Math.ceil((new Date(plan.vipExpiresAt).getTime() - Date.now()) / (1000 * 60 * 60 * 24)))
     : null;
   const hasScheduledOnboarding = !!plan.onboardingCallScheduledAt;
 
-  // ══════════════════════════════════════════════════════════
+  // ═════════════════════════════════════════════════════════
   // Permisos por plan — rebranding visual Abr 2026 (Camino A)
   // Los NOMBRES INTERNOS siguen igual (Gratuito/Basico/Premium)
   // pero ahora Gratuito tiene acceso a más funciones, limitado a 10 citas/mes
@@ -172,7 +193,7 @@ export function PlanProvider({ children }: { children: React.ReactNode }) {
   // Los VIP heredan los permisos de su contraparte mensual (ya integrado en
   // isBasico / isPremium arriba), pero además tienen flags adicionales para
   // mostrar widgets premium en la UI.
-  // ══════════════════════════════════════════════════════════
+  // ═════════════════════════════════════════════════════════
   const canSchedule         = true;
   const canUseWhatsApp      = true;
   const canUseBookingLink   = true;
@@ -193,6 +214,7 @@ export function PlanProvider({ children }: { children: React.ReactNode }) {
       canSchedule, canViewReports, canUseWhatsApp,
       canOverlap, canUseCollaborators,
       canRunCampaigns, canExportCSV, canUseBookingLink,
+      maxStaff: plan.maxStaff,
       isGratuito, isBasico, isPremium,
       isVip, isVipBasico, isVipPremium, isPaidPlan,
       daysUntilVipExpiry, hasScheduledOnboarding,
