@@ -11,6 +11,7 @@ import { ConfirmModal } from '@/components/button';
 import { useAuth } from '@/contexts/AuthContext';
 import { apiPut } from '@/utils/api';
 import * as ImagePicker from 'expo-image-picker';
+import * as FileSystem from 'expo-file-system/legacy';
 import {
   BUSINESS_TYPES,
   BUSINESS_TYPE_OTHER,
@@ -38,6 +39,14 @@ import { supabase } from '@/lib/supabase';
 //
 // Esto es defensa en profundidad: el context se sigue refrescando al
 // terminar el wizard, PERO el form ya no depende de eso para funcionar.
+//
+// ⚡ FIX LOGO (Jun 2026):
+// Usuarios en Android/iOS no podian actualizar el logo. La subida usaba
+// fetch(uri).blob() + FileReader.readAsDataURL(), patron inestable en React
+// Native: en iOS subia un archivo vacio/corrupto (guardaba sin error pero la
+// imagen no cargaba) y en Android fallaba la lectura. Ahora se lee el archivo
+// local con expo-file-system (readAsStringAsync base64), metodo confiable y
+// oficial para Supabase Storage en Expo, en ambas plataformas.
 // ═══════════════════════════════════════════════════════════════════════
 
 export default function BusinessSettingsScreen() {
@@ -156,10 +165,22 @@ export default function BusinessSettingsScreen() {
   }, [businessProfile?.id, (businessProfile as any)?.state]);
 
   const handlePickLogo = async () => {
+    // Pedir permiso explicito de galeria (en Android es necesario; si no se
+    // concede, expo lo maneja, pero damos un mensaje claro por si acaso).
+    try {
+      const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (!perm.granted) {
+        setErrorModal({ visible: true, message: 'Necesitamos permiso para acceder a tus fotos y poder seleccionar el logo. Actívalo desde los ajustes de tu teléfono.' });
+        return;
+      }
+    } catch {}
+
     const result = await ImagePicker.launchImageLibraryAsync({
       mediaTypes: ['images'], allowsEditing: true, aspect: [1,1], quality: 0.8,
     });
-    if (!result.canceled && result.assets[0]) await uploadLogo(result.assets[0].uri);
+    if (!result.canceled && result.assets && result.assets[0]) {
+      await uploadLogo(result.assets[0].uri);
+    }
   };
 
   const uploadLogo = async (uri: string) => {
@@ -167,24 +188,34 @@ export default function BusinessSettingsScreen() {
     try {
       const { getCurrentUserId } = await import('@/utils/api');
       const userId = await getCurrentUserId();
-      const response = await fetch(uri);
-      const blob = await response.blob();
-      const base64 = await new Promise<string>((res, rej) => {
-        const reader = new FileReader();
-        reader.onload  = () => res((reader.result as string).split(',')[1]);
-        reader.onerror = rej;
-        reader.readAsDataURL(blob);
-      });
-      const bytes = atob(base64);
-      const arr   = new Uint8Array(bytes.length);
-      for (let i = 0; i < bytes.length; i++) arr[i] = bytes.charCodeAt(i);
+
+      // Leer el archivo local como base64 de forma CONFIABLE en React Native.
+      // (fetch(uri).blob() + FileReader.readAsDataURL es inestable en Expo:
+      //  en iOS produce un archivo vacio/corrupto y en Android falla la lectura.)
+      const base64 = await FileSystem.readAsStringAsync(uri, { encoding: 'base64' });
+      if (!base64) throw new Error('No se pudo leer la imagen seleccionada.');
+
+      // base64 -> bytes (atob disponible en el runtime de RN/Hermes)
+      const binary = atob(base64);
+      const arr = new Uint8Array(binary.length);
+      for (let i = 0; i < binary.length; i++) arr[i] = binary.charCodeAt(i);
+
+      if (arr.length === 0) throw new Error('La imagen seleccionada esta vacia.');
+
       const fileName = `${userId}/logo_${Date.now()}.jpg`;
-      const { error: uploadError } = await supabase.storage.from('logos').upload(fileName, arr, { contentType: 'image/jpeg', upsert: true });
+      const { error: uploadError } = await supabase.storage
+        .from('logos')
+        .upload(fileName, arr, { contentType: 'image/jpeg', upsert: true });
       if (uploadError) throw uploadError;
+
       const { data: urlData } = supabase.storage.from('logos').getPublicUrl(fileName);
       setLogoUrl(urlData.publicUrl);
-    } catch {
-      setErrorModal({ visible: true, message: 'Error al subir el logo' });
+    } catch (e: any) {
+      console.error('[BusinessSettings] Error subiendo logo:', e);
+      setErrorModal({
+        visible: true,
+        message: e?.message ? `No se pudo subir el logo: ${e.message}` : 'No se pudo subir el logo. Intenta de nuevo.',
+      });
     } finally {
       setUploadingLogo(false);
     }
@@ -305,7 +336,7 @@ export default function BusinessSettingsScreen() {
         {/* ─── Sección de identidad del negocio ─── */}
         <View style={styles.logoSection}>
           <Text style={styles.fieldLabel}>Logo del negocio</Text>
-          <TouchableOpacity style={styles.logoContainer} onPress={handlePickLogo}>
+          <TouchableOpacity style={styles.logoContainer} onPress={handlePickLogo} disabled={uploadingLogo}>
             {logoUrl
               ? <Image source={{ uri: logoUrl }} style={styles.logoImage} />
               : <View style={styles.logoPlaceholder}><IconSymbol android_material_icon_name="store" size={40} color={colors.textSecondary} /></View>
@@ -314,8 +345,8 @@ export default function BusinessSettingsScreen() {
               <View style={styles.logoOverlay}><ActivityIndicator color="#FFFFFF" /></View>
             )}
           </TouchableOpacity>
-          <TouchableOpacity style={styles.changeLogoButton} onPress={handlePickLogo}>
-            <Text style={styles.changeLogoText}>Cambiar logo</Text>
+          <TouchableOpacity style={styles.changeLogoButton} onPress={handlePickLogo} disabled={uploadingLogo}>
+            <Text style={styles.changeLogoText}>{uploadingLogo ? 'Subiendo...' : 'Cambiar logo'}</Text>
           </TouchableOpacity>
         </View>
 
