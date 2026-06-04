@@ -114,6 +114,7 @@ export default function SettingsScreen() {
   const [timeBlocksCount, setTimeBlocksCount]   = useState(0);
 
   const canUseAISupport = isBasico || isPremium;
+  const canUseBlocks = isBasico || isPremium;
 
   useEffect(() => { loadSettings(); }, []);
 
@@ -245,6 +246,7 @@ export default function SettingsScreen() {
           <SettingRow iconName="group" iconColor={canUseCollaborators ? '#8B5CF6' : '#CBD5E1'} iconBg={canUseCollaborators ? '#F5F3FF' : '#F8FAFC'} label="Mi equipo" sublabel={staffSublabel} badge={!canUseCollaborators ? <View style={s.luxuryChip}><Text style={s.luxuryChipText}>LUXURY</Text></View> : undefined} disabled={!canUseCollaborators} onPress={() => { if (!canUseCollaborators) { router.push('/settings/subscription'); return; } router.push('/settings/staff' as any); }} />
           <SettingRow iconName="event-available" iconColor={canOverlap ? '#06B6D4' : '#CBD5E1'} iconBg={canOverlap ? '#ECFEFF' : '#F8FAFC'} label="Citas simultáneas" sublabel={canOverlap ? 'Permite atender más de una cita al mismo tiempo' : 'Solo disponible en Plan Luxury'} badge={!canOverlap ? <View style={s.luxuryChip}><Text style={s.luxuryChipText}>LUXURY</Text></View> : undefined} disabled={!canOverlap} right={<Switch value={allowOverlapping} onValueChange={canOverlap ? handleOverlappingToggle : () => router.push('/settings/subscription')} trackColor={{ false: '#E2E8F0', true: '#10B981' }} thumbColor="#fff" disabled={savingOverlap || !canOverlap} />} />
           <SettingRow iconName="lunch-dining" iconColor="#F59E0B" iconBg="#FFFBEB" label="Bloqueos de tiempo" sublabel={timeBlocksSublabel} onPress={() => router.push('/settings/time-blocks' as any)} />
+          <SettingRow iconName="view-week" iconColor={canUseBlocks ? '#06B6D4' : '#CBD5E1'} iconBg={canUseBlocks ? '#ECFEFF' : '#F8FAFC'} label="Recepción por bloques" sublabel={canUseBlocks ? 'Recibe citas solo en ventanas de tiempo fijas' : 'Disponible en Plan Premium'} badge={!canUseBlocks ? <View style={s.premiumChip}><Text style={s.premiumChipText}>PREMIUM</Text></View> : undefined} onPress={() => { if (!canUseBlocks) { router.push('/settings/subscription'); return; } router.push('/settings/booking-blocks' as any); }} />
         </SettingGroup>
 
         <SettingGroup title="CAPTACIÓN DE CLIENTES">
