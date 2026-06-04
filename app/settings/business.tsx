@@ -41,12 +41,16 @@ import { supabase } from '@/lib/supabase';
 // terminar el wizard, PERO el form ya no depende de eso para funcionar.
 //
 // ⚡ FIX LOGO (Jun 2026):
-// Usuarios en Android/iOS no podian actualizar el logo. La subida usaba
-// fetch(uri).blob() + FileReader.readAsDataURL(), patron inestable en React
-// Native: en iOS subia un archivo vacio/corrupto (guardaba sin error pero la
-// imagen no cargaba) y en Android fallaba la lectura. Ahora se lee el archivo
-// local con expo-file-system (readAsStringAsync base64), metodo confiable y
-// oficial para Supabase Storage en Expo, en ambas plataformas.
+// Usuarios en Android/iOS no podian actualizar el logo. Dos problemas:
+//   1) La subida usaba fetch(uri).blob() + FileReader.readAsDataURL(), patron
+//      inestable en RN. Ahora se lee con expo-file-system (readAsStringAsync
+//      base64), metodo confiable y oficial para Supabase Storage en Expo.
+//   2) (CAUSA RAIZ) El logo solo se persistia al tocar "Guardar cambios" y que
+//      el formulario completo pasara validacion. El archivo subia al bucket
+//      pero business_profiles.logo_url NO se actualizaba, por eso "subia pero
+//      el logo nunca cambiaba". Ahora el logo se PERSISTE de inmediato al
+//      elegir la foto (update directo a business_profiles.logo_url + refresh
+//      del context), sin depender del boton Guardar ni del resto del form.
 // ═══════════════════════════════════════════════════════════════════════
 
 export default function BusinessSettingsScreen() {
@@ -190,8 +194,7 @@ export default function BusinessSettingsScreen() {
       const userId = await getCurrentUserId();
 
       // Leer el archivo local como base64 de forma CONFIABLE en React Native.
-      // (fetch(uri).blob() + FileReader.readAsDataURL es inestable en Expo:
-      //  en iOS produce un archivo vacio/corrupto y en Android falla la lectura.)
+      // (fetch(uri).blob() + FileReader.readAsDataURL es inestable en Expo.)
       const base64 = await FileSystem.readAsStringAsync(uri, { encoding: 'base64' });
       if (!base64) throw new Error('No se pudo leer la imagen seleccionada.');
 
@@ -199,7 +202,6 @@ export default function BusinessSettingsScreen() {
       const binary = atob(base64);
       const arr = new Uint8Array(binary.length);
       for (let i = 0; i < binary.length; i++) arr[i] = binary.charCodeAt(i);
-
       if (arr.length === 0) throw new Error('La imagen seleccionada esta vacia.');
 
       const fileName = `${userId}/logo_${Date.now()}.jpg`;
@@ -209,7 +211,23 @@ export default function BusinessSettingsScreen() {
       if (uploadError) throw uploadError;
 
       const { data: urlData } = supabase.storage.from('logos').getPublicUrl(fileName);
-      setLogoUrl(urlData.publicUrl);
+      const publicUrl = urlData.publicUrl;
+
+      // ⚡ CAUSA RAIZ DEL BUG: persistir el logo INMEDIATAMENTE en la BD.
+      // Antes el logo solo se guardaba al tocar "Guardar cambios" (y si el form
+      // completo pasaba validacion). El archivo subia al bucket pero logo_url
+      // nunca se actualizaba -> "subia pero el logo nunca cambiaba". Ahora se
+      // guarda al instante, sin depender del boton Guardar ni del resto del form.
+      const { error: updateError } = await supabase
+        .from('business_profiles')
+        .update({ logo_url: publicUrl, updated_at: new Date().toISOString() })
+        .eq('user_id', userId);
+      if (updateError) throw updateError;
+
+      setLogoUrl(publicUrl);
+
+      // Refrescar el context para que Inicio y otras pantallas vean el nuevo logo.
+      try { if (refreshBusinessProfile) await refreshBusinessProfile(); } catch {}
     } catch (e: any) {
       console.error('[BusinessSettings] Error subiendo logo:', e);
       setErrorModal({
@@ -348,6 +366,7 @@ export default function BusinessSettingsScreen() {
           <TouchableOpacity style={styles.changeLogoButton} onPress={handlePickLogo} disabled={uploadingLogo}>
             <Text style={styles.changeLogoText}>{uploadingLogo ? 'Subiendo...' : 'Cambiar logo'}</Text>
           </TouchableOpacity>
+          <Text style={styles.fieldHint}>Se guarda automáticamente al elegir la foto.</Text>
         </View>
 
         <Text style={styles.fieldLabel}>Nombre del negocio *</Text>
