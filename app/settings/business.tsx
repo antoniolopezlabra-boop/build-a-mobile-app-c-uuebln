@@ -51,6 +51,8 @@ import { supabase } from '@/lib/supabase';
 //      el logo nunca cambiaba". Ahora el logo se PERSISTE de inmediato al
 //      elegir la foto (update directo a business_profiles.logo_url + refresh
 //      del context), sin depender del boton Guardar ni del resto del form.
+//   3) LIMPIEZA: al subir un logo nuevo se borran los anteriores del usuario
+//      en el bucket, para no acumular basura. Best-effort (no rompe la subida).
 // ═══════════════════════════════════════════════════════════════════════
 
 export default function BusinessSettingsScreen() {
@@ -225,6 +227,26 @@ export default function BusinessSettingsScreen() {
       if (updateError) throw updateError;
 
       setLogoUrl(publicUrl);
+
+      // LIMPIEZA: borrar los logos anteriores del usuario para no acumular basura
+      // en el Storage. Solo se conserva el recien subido. Es best-effort: si falla
+      // (p.ej. por RLS) NO rompe la actualizacion del logo (que ya quedo guardada
+      // arriba). public_business_profiles es una VIEW de business_profiles, asi que
+      // ningun otro registro referencia los archivos viejos: borrarlos es seguro.
+      try {
+        const keepName = fileName.split('/').pop();
+        const { data: files } = await supabase.storage.from('logos').list(userId, { limit: 100 });
+        if (files && files.length) {
+          const toRemove = files
+            .filter((f) => f.name !== keepName && f.name !== '.emptyFolderPlaceholder')
+            .map((f) => `${userId}/${f.name}`);
+          if (toRemove.length) {
+            await supabase.storage.from('logos').remove(toRemove);
+          }
+        }
+      } catch (cleanupErr) {
+        console.warn('[BusinessSettings] No se pudieron limpiar logos anteriores:', cleanupErr);
+      }
 
       // Refrescar el context para que Inicio y otras pantallas vean el nuevo logo.
       try { if (refreshBusinessProfile) await refreshBusinessProfile(); } catch {}
