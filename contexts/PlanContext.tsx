@@ -30,6 +30,7 @@ interface PlanContextType {
   canUseWhatsApp: boolean;
   canOverlap: boolean;
   canUseCollaborators: boolean;
+  canUseMultiService: boolean;
   canRunCampaigns: boolean;
   canExportCSV: boolean;
   canUseBookingLink: boolean;
@@ -204,6 +205,10 @@ export function PlanProvider({ children }: { children: React.ReactNode }) {
   // planes pagados. El segundo gate real (toggle allow_overlapping ON +
   // validación server-side en utils/api.ts) sigue aplicando.
   const canOverlap          = isBasico || isPremium;
+  // ⚡ Multi-servicio (Jun 2026): varios servicios en una misma cita, sumando
+  // duración y costo total. Premium (Basico) y Luxury (Premium) + equivalentes
+  // VIP. Gratuito NO. Mismo tier que las citas simultáneas.
+  const canUseMultiService  = isBasico || isPremium;
   const canUseCollaborators = isPremium;
   const canRunCampaigns     = isPremium;
   const canExportCSV        = isPremium;
@@ -212,7 +217,7 @@ export function PlanProvider({ children }: { children: React.ReactNode }) {
     <PlanContext.Provider value={{
       plan, loading,
       canSchedule, canViewReports, canUseWhatsApp,
-      canOverlap, canUseCollaborators,
+      canOverlap, canUseCollaborators, canUseMultiService,
       canRunCampaigns, canExportCSV, canUseBookingLink,
       maxStaff: plan.maxStaff,
       isGratuito, isBasico, isPremium,
