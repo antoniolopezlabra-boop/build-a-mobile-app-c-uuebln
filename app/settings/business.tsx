@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity,
-  TextInput, ActivityIndicator, Modal, Image,
+  TextInput, ActivityIndicator, Modal, Image, Platform,
 } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
@@ -21,7 +21,7 @@ import {
 import { MEXICO_STATES, isValidPostalCode } from '@/constants/mexicoStates';
 import { supabase } from '@/lib/supabase';
 
-// ═══════════════════════════════════════════════════════════════════════
+// ════════════════════════════════════════════════════════════════════════
 // app/settings/business.tsx — Información del negocio
 //
 // ⚡ FIX CRITICO (May 23 2026 - v2):
@@ -53,7 +53,18 @@ import { supabase } from '@/lib/supabase';
 //      del context), sin depender del boton Guardar ni del resto del form.
 //   3) LIMPIEZA: al subir un logo nuevo se borran los anteriores del usuario
 //      en el bucket, para no acumular basura. Best-effort (no rompe la subida).
-// ═══════════════════════════════════════════════════════════════════════
+//
+// ⚡ FIX LOGO MIUI/Xiaomi (Jun 2026 - v2):
+// Una clienta con POCO C40 (MIUI 13) podia ELEGIR la foto pero nunca le
+// aparecia el boton "Usar" ni los controles de recorte, por lo que el proceso
+// no concluia. CAUSA: allowsEditing:true en Android invoca la actividad de
+// recorte del sistema, que en MIUI/POCO (y otras capas OEM) se renderiza rota.
+// SOLUCION: allowsEditing solo en iOS (donde el recorte nativo funciona bien).
+// En Android se omite el recorte y la foto elegida se usa directo. El logo se
+// muestra siempre con resizeMode "cover" en un contenedor circular, asi que
+// una imagen no cuadrada se ve bien igual. Esto garantiza que el flujo concluya
+// en CUALQUIER Android, sin depender del recortador del fabricante.
+// ════════════════════════════════════════════════════════════════════════
 
 export default function BusinessSettingsScreen() {
   const router = useRouter();
@@ -181,8 +192,15 @@ export default function BusinessSettingsScreen() {
       }
     } catch {}
 
+    // ⚡ FIX MIUI: allowsEditing SOLO en iOS. En Android el recorte del sistema
+    // se rompe en MIUI/POCO (no aparece "Usar"), dejando al usuario atascado.
+    // Sin recorte, la foto se usa directo y el contenedor circular la recorta
+    // visualmente con resizeMode "cover".
     const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ['images'], allowsEditing: true, aspect: [1,1], quality: 0.8,
+      mediaTypes: ['images'],
+      allowsEditing: Platform.OS === 'ios',
+      aspect: [1, 1],
+      quality: 0.8,
     });
     if (!result.canceled && result.assets && result.assets[0]) {
       await uploadLogo(result.assets[0].uri);
