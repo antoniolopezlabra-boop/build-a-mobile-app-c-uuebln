@@ -96,7 +96,7 @@ serve(async (req) => {
   try {
     const {
       slug, clientName, clientPhone,
-      serviceName,
+      serviceName, serviceId, services,
       date, startTime, endTime,
       serviceCost, notes,
       staff_id,
@@ -107,14 +107,14 @@ serve(async (req) => {
       return json({ error: 'Faltan campos requeridos' }, 400)
     }
 
-    const phoneDigits = clientPhone.replace(/\D/g, '')
+    const phoneDigits = clientPhone.replace(/\\D/g, '')
     if (phoneDigits.length < 7) {
       return json({ error: 'Número de teléfono inválido' }, 400)
     }
 
     const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY)
 
-    // ── RATE LIMITING ──────────────────────────────────────────────────
+    // ── RATE LIMITING ─────────────────────────────────────
     // Aplicado ANTES de cualquier query de DB pesada para que un atacante
     // no pueda saturar la DB enviando requests masivos.
     //
@@ -143,7 +143,7 @@ serve(async (req) => {
         { 'Retry-After': String(rateCheck.retryAfterSeconds) }
       )
     }
-    // ────────────────────────────────────────────────────────────────────
+    // ─────────────────────────────────────────────────
 
     // Verificar que el link existe y está activo
     const { data: link, error: linkError } = await supabase
@@ -156,7 +156,7 @@ serve(async (req) => {
       return json({ error: 'Link no encontrado o inactivo' }, 404)
     }
 
-    // ── Verificar límite del plan Gratuito ──────────────────────────────
+    // ── Verificar límite del plan Gratuito ─────────────────────────
     //
     // ⚡ FIX BUG (May 19 2026): se eliminó el filtro
     //    .not('status', 'in', '("Cancelada","No asistió","Rechazada")')
@@ -199,7 +199,7 @@ serve(async (req) => {
         }, 403)
       }
     }
-    // ────────────────────────────────────────────────────────────────────
+    // ─────────────────────────────────────────────────
 
     // ── Verificar disponibilidad del slot vs citas existentes ──
     // NOTA: SÍ excluye canceladas — un slot cancelado SÍ libera el horario
@@ -284,7 +284,7 @@ serve(async (req) => {
         }
       }
     }
-    // ────────────────────────────────────────────────────────────────────
+    // ─────────────────────────────────────────────────
 
     const whatsappNotification = link.whatsapp_confirmation ?? true
     const status = link.require_approval ? 'Solicitud' : 'Confirmada'
@@ -318,6 +318,37 @@ serve(async (req) => {
         }, 409)
       }
       return json({ error: aptError.message }, 500)
+    }
+
+    // ⚡ MULTI-SERVICIO: guardar el desglose de servicios en appointment_services.
+    // Best-effort: la cita YA quedó creada con su resumen (service_name combinado,
+    // service_cost total y end_time). Si esto falla, solo lo registramos.
+    //
+    // El candado por plan vive en la UI (book.html): un negocio Gratuito solo
+    // puede mandar 1 servicio. Aquí persistimos lo que llegue para que el
+    // desglose quede UNIFORME con la app. Si no llega 'services' (link viejo),
+    // escribimos 1 renglón derivado del resumen.
+    try {
+      const list = (Array.isArray(services) && services.length > 0)
+        ? services
+        : [{
+            serviceId: serviceId || null,
+            name: serviceName,
+            price: serviceCost || 0,
+            durationMinutes: Math.max(1, timeToMin(endTime) - timeToMin(startTime)),
+          }]
+      const rows = list.map((s: any, i: number) => ({
+        appointment_id: appointment.id,
+        service_id: s.serviceId || null,
+        service_name: s.name,
+        price: Number(s.price) || 0,
+        duration_minutes: Math.max(1, Math.round(Number(s.durationMinutes) || 0)),
+        position: i,
+      }))
+      const { error: svcErr } = await supabase.from('appointment_services').insert(rows)
+      if (svcErr) console.warn('[create-booking-request] appointment_services insert error:', svcErr)
+    } catch (e) {
+      console.warn('[create-booking-request] appointment_services error:', e)
     }
 
     // ⚡ FEATURE (May 19 2026): notificar al dueño con push notification.
