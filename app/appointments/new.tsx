@@ -19,6 +19,7 @@ import { ConfirmModal } from '@/components/button';
 import { supabase } from '@/lib/supabase';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import MaterialIcons from '@expo/vector-icons/MaterialIcons';
+import { writeAppointmentServices, SelectedService } from '@/utils/appointmentServices';
 
 interface Client {
   id: string;
@@ -69,7 +70,7 @@ const NEW_CLIENT_KEY = 'vylta_new_appt_new_client';
 
 interface AppointmentDraft {
   serviceText: string;
-  selectedCatalogServiceId: string | null;
+  selectedServiceIds: string[];
   selectedStaffId: string | null;
   dateIso: string;
   time: string;
@@ -169,7 +170,7 @@ class ScreenErrorBoundary extends React.Component<
 function NewAppointmentInner() {
   const router = useRouter();
   const { user } = useAuth();
-  const { isGratuito } = usePlan();
+  const { isGratuito, canUseMultiService } = usePlan();
   const usage = useGratuitoUsage();
   const insets = useSafeAreaInsets(); // ⚡ Safe-area inferior (botones Android, home indicator iOS)
   const [loading, setLoading] = useState(false);
@@ -186,7 +187,7 @@ function NewAppointmentInner() {
   const [searchQuery, setSearchQuery] = useState('');
 
   const [service, setService] = useState('');
-  const [selectedCatalogService, setSelectedCatalogService] = useState<CatalogService | null>(null);
+  const [selectedServices, setSelectedServices] = useState<CatalogService[]>([]);
   const [catalogServices, setCatalogServices] = useState<CatalogService[]>([]);
   const [showServicePicker, setShowServicePicker] = useState(false);
   const [serviceSearchQuery, setServiceSearchQuery] = useState('');
@@ -212,6 +213,11 @@ function NewAppointmentInner() {
   const [timeBlocks, setTimeBlocks] = useState<TimeBlockData[]>([]);
   const [errorModal, setErrorModal] = useState({ visible: false, message: '' });
 
+  // ⚡ Multi-servicio: totales en vivo (suma de duraciones y precios de los
+  // servicios elegidos). Alimentan la auto-seleccion de bloques y el resumen.
+  const totalServiceDuration = selectedServices.reduce((sum, s) => sum + (s.durationMinutes || 0), 0);
+  const totalServiceCost = selectedServices.reduce((sum, s) => sum + (s.price || 0), 0);
+
   const serviceInputRef = useRef<TextInput>(null);
   const costInputRef    = useRef<TextInput>(null);
   const notesInputRef   = useRef<TextInput>(null);
@@ -236,23 +242,38 @@ function NewAppointmentInner() {
     if (_event.type === 'set' && selected) setDate(selected);
   };
 
-  const handleSelectCatalogService = (svc: CatalogService) => {
-    setSelectedCatalogService(svc);
-    setService(svc.name);
-    setServiceCost(svc.price.toString());
-    const blocks = Math.ceil(svc.durationMinutes / 30);
-    if (selectedBlocks.length > 0 && timeSlots.length > 0) {
+  // ⚡ Multi-servicio: agrega o quita un servicio del catalogo. En planes sin
+  // multi-servicio (Gratuito) se comporta como antes: un solo servicio.
+  const handleToggleService = (svc: CatalogService) => {
+    const exists = selectedServices.some(s => s.id === svc.id);
+    let next: CatalogService[];
+    if (exists) next = selectedServices.filter(s => s.id !== svc.id);
+    else if (canUseMultiService) next = [...selectedServices, svc];
+    else next = [svc];
+
+    setSelectedServices(next);
+
+    const totalDur  = next.reduce((sum, s) => sum + (s.durationMinutes || 0), 0);
+    const totalCost = next.reduce((sum, s) => sum + (s.price || 0), 0);
+    setServiceCost(totalCost > 0 ? String(totalCost) : '');
+    setService(next.length > 0 ? next.map(s => s.name).join(' + ') : '');
+
+    // Re-extender los bloques desde el primero seleccionado para cubrir la
+    // duracion TOTAL sumada (misma logica de slots, solo cambia el total).
+    if (selectedBlocks.length > 0 && timeSlots.length > 0 && totalDur > 0) {
+      const blocks   = Math.ceil(totalDur / 30);
       const firstIdx = timeSlots.findIndex(s => s.time === selectedBlocks[0]);
       if (firstIdx !== -1) {
         const range = timeSlots.slice(firstIdx, firstIdx + blocks);
-        if (range.length > 0 && range.every(s => s.available)) setSelectedBlocks(range.map(s => s.time));
+        if (range.length === blocks && range.every(s => s.available)) {
+          setSelectedBlocks(range.map(s => s.time));
+        }
       }
     }
-    setShowServicePicker(false);
-    setServiceSearchQuery('');
-  };
 
-  const clearCatalogService = () => { setSelectedCatalogService(null); setService(''); setServiceCost(''); };
+    // En planes sin multi-servicio, cerrar el modal al elegir (como antes).
+    if (!canUseMultiService) { setShowServicePicker(false); setServiceSearchQuery(''); }
+  };
 
   // ── Guarda snapshot del formulario y navega a crear cliente.
   //    Al regresar, useFocusEffect detectará el nuevo cliente y restaurará el form.
@@ -262,7 +283,7 @@ function NewAppointmentInner() {
     try {
       const draft: AppointmentDraft = {
         serviceText: service,
-        selectedCatalogServiceId: selectedCatalogService?.id ?? null,
+        selectedServiceIds: selectedServices.map(s => s.id),
         selectedStaffId: selectedStaff?.id ?? null,
         dateIso: date.toISOString(),
         time,
@@ -347,11 +368,11 @@ function NewAppointmentInner() {
                   const d = new Date(draft.dateIso);
                   if (!isNaN(d.getTime())) setDate(d);
                 }
-                // selectedCatalogService y selectedStaff: los reasignamos cuando las listas estén cargadas
-                if (draft.selectedCatalogServiceId) {
+                // selectedServices y selectedStaff: los reasignamos cuando las listas estén cargadas
+                if (Array.isArray(draft.selectedServiceIds) && draft.selectedServiceIds.length > 0) {
                   setCatalogServices(prev => {
-                    const found = prev.find(s => s.id === draft.selectedCatalogServiceId);
-                    if (found) setSelectedCatalogService(found);
+                    const found = prev.filter(s => draft.selectedServiceIds.includes(s.id));
+                    if (found.length > 0) setSelectedServices(found);
                     return prev;
                   });
                 }
@@ -395,7 +416,7 @@ function NewAppointmentInner() {
   useEffect(() => {
     if (initialLoading) return;
     checkAvailability();
-  }, [date, selectedStaff, timeBlocks, selectedCatalogService, initialLoading]);
+  }, [date, selectedStaff, timeBlocks, totalServiceDuration, initialLoading]);
 
   const loadCatalogServices = async () => {
     try {
@@ -595,7 +616,7 @@ function NewAppointmentInner() {
         });
       }
 
-      const durationMin = selectedCatalogService?.durationMinutes ?? 30;
+      const durationMin = totalServiceDuration > 0 ? totalServiceDuration : 30;
       const subBlocksNeeded = Math.ceil(durationMin / 30);
 
       if (subBlocksNeeded > 1) {
@@ -645,7 +666,7 @@ function NewAppointmentInner() {
 
     Keyboard.dismiss();
     if (!selectedClient) { setErrorModal({ visible: true, message: 'Por favor selecciona un cliente' }); return; }
-    if (!service.trim())  { setErrorModal({ visible: true, message: 'Por favor ingresa el servicio' }); return; }
+    if (!service.trim())  { setErrorModal({ visible: true, message: 'Por favor selecciona o ingresa al menos un servicio' }); return; }
     if (selectedBlocks.length === 0 || !time) { setErrorModal({ visible: true, message: 'Por favor selecciona un horario disponible' }); return; }
     const lastBlock = selectedBlocks.length > 0 ? selectedBlocks[selectedBlocks.length-1] : time;
     const [lh, lm] = lastBlock.split(':').map(Number);
@@ -661,7 +682,7 @@ function NewAppointmentInner() {
 
     try {
       const dateString = `${date.getFullYear()}-${String(date.getMonth()+1).padStart(2,'0')}-${String(date.getDate()).padStart(2,'0')}`;
-      await apiPost('/api/appointments', {
+      const created: any = await apiPost('/api/appointments', {
         clientId:   selectedClient.id,
         service:    service.trim(),
         date:       dateString,
@@ -673,6 +694,22 @@ function NewAppointmentInner() {
         staff_id:   selectedStaff?.id || null,
         isOverlapping: selectedBlocks.some(b => timeSlots.find(s => s.time === b)?.isOverlap),
       });
+
+      // ⚡ Multi-servicio: guardar el desglose en appointment_services.
+      // Best-effort: la cita ya quedó con su resumen (nombre combinado, costo
+      // total y hora fin); si esto fallara, la cita sigue siendo válida.
+      try {
+        const apptId = created?.id;
+        if (apptId) {
+          const servicesToWrite: SelectedService[] = selectedServices.length > 0
+            ? selectedServices.map(s => ({ serviceId: s.id, name: s.name, price: s.price, durationMinutes: s.durationMinutes }))
+            : [{ serviceId: null, name: service.trim(), price: serviceCost ? parseFloat(serviceCost) : 0, durationMinutes: Math.max(30, selectedBlocks.length * 30) }];
+          await writeAppointmentServices(apptId, servicesToWrite);
+        }
+      } catch (e) {
+        console.warn('[new-appointment] no se pudo guardar el desglose de servicios:', e);
+      }
+
       invalidateCache('dashboard_stats');
       invalidateCache('today_appointments');
       invalidateCache('appointments_list');
@@ -707,7 +744,7 @@ function NewAppointmentInner() {
     ? 'No puedes crear más citas este mes. Toca para mejorar a Premium.'
     : 'Plan Básico — Mejora a Premium para citas ilimitadas';
 
-  const hasInvalidByDuration = !!selectedCatalogService && timeSlots.some(s => s.unavailableReason);
+  const hasInvalidByDuration = totalServiceDuration > 0 && timeSlots.some(s => s.unavailableReason);
   const canSave = !!selectedClient && !!service.trim() && selectedBlocks.length > 0 && !dayIsClosed;
 
   // ⚡ Padding inferior dinámico para respetar zona de tolerancia.
@@ -800,31 +837,47 @@ function NewAppointmentInner() {
             </TouchableOpacity>
           </View>
 
-          {/* Servicio */}
+          {/* Servicios */}
           <View style={styles.section}>
             <View style={styles.labelRow}>
-              <Text style={styles.label}>Servicio *</Text>
+              <Text style={styles.label}>{canUseMultiService ? 'Servicios *' : 'Servicio *'}</Text>
               {hasCatalog && (
                 <TouchableOpacity style={styles.catalogBtn} onPress={() => { dismissKeyboard(); setShowServicePicker(true); }}>
                   <MaterialIcons name="menu-book" size={14} color="#10B981" />
-                  <Text style={styles.catalogBtnText}>Ver catálogo</Text>
+                  <Text style={styles.catalogBtnText}>{canUseMultiService && selectedServices.length > 0 ? 'Agregar' : 'Ver catálogo'}</Text>
                 </TouchableOpacity>
               )}
             </View>
-            {selectedCatalogService ? (
-              <View style={styles.catalogSelected}>
-                <View style={styles.catalogSelectedIcon}>
-                  <MaterialIcons name="content-cut" size={16} color="#10B981" />
-                </View>
-                <View style={styles.catalogSelectedInfo}>
-                  <Text style={styles.catalogSelectedName}>{selectedCatalogService.name}</Text>
-                  <Text style={styles.catalogSelectedMeta}>
-                    {durationLabel(selectedCatalogService.durationMinutes)} · ${selectedCatalogService.price.toLocaleString('es-MX')} MXN
-                  </Text>
-                </View>
-                <TouchableOpacity onPress={clearCatalogService} hitSlop={{ top:8, bottom:8, left:8, right:8 }}>
-                  <MaterialIcons name="close" size={18} color="#94A3B8" />
-                </TouchableOpacity>
+            {selectedServices.length > 0 ? (
+              <View style={styles.servicesBox}>
+                {selectedServices.map((svc) => (
+                  <View key={svc.id} style={styles.serviceChip}>
+                    <View style={styles.catalogSelectedIcon}>
+                      <MaterialIcons name="content-cut" size={16} color="#10B981" />
+                    </View>
+                    <View style={styles.catalogSelectedInfo}>
+                      <Text style={styles.catalogSelectedName}>{svc.name}</Text>
+                      <Text style={styles.catalogSelectedMeta}>
+                        {durationLabel(svc.durationMinutes)} · ${svc.price.toLocaleString('es-MX')} MXN
+                      </Text>
+                    </View>
+                    <TouchableOpacity onPress={() => handleToggleService(svc)} hitSlop={{ top:8, bottom:8, left:8, right:8 }}>
+                      <MaterialIcons name="close" size={18} color="#94A3B8" />
+                    </TouchableOpacity>
+                  </View>
+                ))}
+                {selectedServices.length > 1 && (
+                  <View style={styles.servicesTotalRow}>
+                    <Text style={styles.servicesTotalLabel}>{selectedServices.length} servicios · {durationLabel(totalServiceDuration)}</Text>
+                    <Text style={styles.servicesTotalValue}>${totalServiceCost.toLocaleString('es-MX')} MXN</Text>
+                  </View>
+                )}
+                {canUseMultiService && hasCatalog && (
+                  <TouchableOpacity style={styles.addMoreBtn} onPress={() => { dismissKeyboard(); setShowServicePicker(true); }}>
+                    <MaterialIcons name="add" size={16} color="#10B981" />
+                    <Text style={styles.addMoreBtnText}>Agregar otro servicio</Text>
+                  </TouchableOpacity>
+                )}
               </View>
             ) : (
               <TextInput
@@ -877,7 +930,7 @@ function NewAppointmentInner() {
           <View style={styles.section}>
             <Text style={styles.label}>
               Hora *{selectedStaff ? ` — ${selectedStaff.name}` : ''}
-              {selectedCatalogService ? ` (${durationLabel(selectedCatalogService.durationMinutes)})` : ''}
+              {totalServiceDuration > 0 ? ` (${durationLabel(totalServiceDuration)})` : ''}
             </Text>
             {dayIsClosed ? (
               <View style={styles.dayClosedContainer}>
@@ -926,11 +979,11 @@ function NewAppointmentInner() {
                           if (!slot.available) return;
                           Keyboard.dismiss();
                           if (selectedBlocks.length === 0) {
-                            if (selectedCatalogService) {
-                              const blocks = Math.ceil(selectedCatalogService.durationMinutes/30);
+                            if (totalServiceDuration > 0) {
+                              const blocks = Math.ceil(totalServiceDuration/30);
                               const thisIdx = timeSlots.findIndex(s => s.time === slot.time);
                               const range   = timeSlots.slice(thisIdx, thisIdx+blocks);
-                              if (range.length > 0 && range.every(s => s.available)) {
+                              if (range.length === blocks && range.every(s => s.available)) {
                                 setSelectedBlocks(range.map(s => s.time)); setTime(slot.time); return;
                               }
                             }
@@ -986,7 +1039,7 @@ function NewAppointmentInner() {
                       <View style={styles.legendItem}>
                         <View style={[styles.legendDot, { backgroundColor: '#FEE2E2', borderColor: '#FCA5A5' }]} />
                         <Text style={styles.legendText}>
-                          La duración del servicio ({durationLabel(selectedCatalogService!.durationMinutes)}) no alcanza antes del próximo bloqueo o cita
+                          La duración ({durationLabel(totalServiceDuration)}) no alcanza antes del próximo bloqueo o cita
                         </Text>
                       </View>
                     )}
@@ -1004,7 +1057,7 @@ function NewAppointmentInner() {
 
           {/* Costo */}
           <View style={styles.inputGroup}>
-            <Text style={styles.label}>Costo del servicio (MXN)</Text>
+            <Text style={styles.label}>Costo {selectedServices.length > 1 ? 'total ' : ''}(MXN)</Text>
             <TextInput
               ref={costInputRef}
               style={styles.input}
@@ -1151,10 +1204,13 @@ function NewAppointmentInner() {
           <View style={styles.modalContent}>
             <View style={styles.modalHeader}>
               <Text style={styles.modalTitle}>Catálogo de servicios</Text>
-              <TouchableOpacity onPress={() => setShowServicePicker(false)}>
+              <TouchableOpacity onPress={() => { setShowServicePicker(false); setServiceSearchQuery(''); }}>
                 <MaterialIcons name="close" size={24} color={colors.text} />
               </TouchableOpacity>
             </View>
+            {canUseMultiService && (
+              <Text style={styles.multiHint}>Puedes elegir varios servicios — se suman duración y precio. Toca para agregar o quitar.</Text>
+            )}
             <View style={styles.serviceSearch}>
               <MaterialIcons name="search" size={18} color="#94A3B8" />
               <TextInput
@@ -1185,15 +1241,17 @@ function NewAppointmentInner() {
                   )}
                 </View>
               ) : (
-                filteredCatalogServices.map((svc) => (
+                filteredCatalogServices.map((svc) => {
+                  const isPicked = selectedServices.some(s => s.id === svc.id);
+                  return (
                   <TouchableOpacity
                     key={svc.id}
-                    style={[styles.serviceItem, selectedCatalogService?.id === svc.id && styles.serviceItemSelected]}
-                    onPress={() => handleSelectCatalogService(svc)}
+                    style={[styles.serviceItem, isPicked && styles.serviceItemSelected]}
+                    onPress={() => handleToggleService(svc)}
                     activeOpacity={0.7}
                   >
                     <View style={styles.serviceItemIcon}>
-                      <MaterialIcons name="content-cut" size={18} color="#10B981" />
+                      <MaterialIcons name={isPicked ? 'check-circle' : 'content-cut'} size={18} color="#10B981" />
                     </View>
                     <View style={styles.serviceItemInfo}>
                       <Text style={styles.serviceItemName}>{svc.name}</Text>
@@ -1209,14 +1267,20 @@ function NewAppointmentInner() {
                       <Text style={styles.serviceItemPriceText}>${svc.price.toLocaleString('es-MX')}</Text>
                       <Text style={styles.serviceItemPriceSub}>MXN</Text>
                     </View>
-                    {selectedCatalogService?.id === svc.id && (
+                    {isPicked && (
                       <MaterialIcons name="check-circle" size={20} color="#10B981" style={{ marginLeft: 8 }} />
                     )}
                   </TouchableOpacity>
-                ))
+                  );
+                })
               )}
               <View style={{ height: 40 }} />
             </ScrollView>
+            {canUseMultiService && selectedServices.length > 0 && (
+              <TouchableOpacity style={styles.modalDoneBtn} onPress={() => { setShowServicePicker(false); setServiceSearchQuery(''); }}>
+                <Text style={styles.modalDoneBtnText}>Listo · {selectedServices.length} servicio{selectedServices.length !== 1 ? 's' : ''} · ${totalServiceCost.toLocaleString('es-MX')}</Text>
+              </TouchableOpacity>
+            )}
           </View>
         </View>
       </Modal>
@@ -1361,6 +1425,16 @@ const styles = StyleSheet.create({
   catalogSelectedInfo:    { flex: 1 },
   catalogSelectedName:    { fontSize: 15, fontWeight: '700', color: '#065F46' },
   catalogSelectedMeta:    { fontSize: 12, color: '#10B981', marginTop: 2, fontWeight: '500' },
+  servicesBox:            { gap: 8 },
+  serviceChip:            { flexDirection: 'row', alignItems: 'center', gap: 12, backgroundColor: '#F0FDF4', borderRadius: 12, padding: 14, borderWidth: 1, borderColor: '#BBF7D0' },
+  servicesTotalRow:       { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', backgroundColor: '#ECFDF5', borderRadius: 10, paddingHorizontal: 12, paddingVertical: 10, borderWidth: 1, borderColor: '#10B981' },
+  servicesTotalLabel:     { fontSize: 13, fontWeight: '700', color: '#065F46' },
+  servicesTotalValue:     { fontSize: 15, fontWeight: '800', color: '#10B981' },
+  addMoreBtn:             { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, paddingVertical: 11, borderRadius: 10, borderWidth: 1, borderColor: '#BBF7D0', borderStyle: 'dashed', backgroundColor: '#F8FEFB' },
+  addMoreBtnText:         { fontSize: 13, fontWeight: '700', color: '#10B981' },
+  multiHint:              { fontSize: 12, color: '#10B981', fontWeight: '600', paddingHorizontal: 20, paddingTop: 12 },
+  modalDoneBtn:           { backgroundColor: '#10B981', marginHorizontal: 16, marginBottom: 16, marginTop: 4, paddingVertical: 14, borderRadius: 12, alignItems: 'center' },
+  modalDoneBtnText:       { fontSize: 15, fontWeight: '700', color: '#ffffff' },
   staffPreview:           { flexDirection: 'row', alignItems: 'center', gap: 8, flex: 1 },
   staffDot:               { width: 10, height: 10, borderRadius: 5 },
   staffRoleInline:        { fontSize: 13, color: colors.textSecondary },
