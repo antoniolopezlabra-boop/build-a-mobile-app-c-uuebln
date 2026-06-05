@@ -8,6 +8,8 @@ import {
 import { colors } from '@/styles/commonStyles';
 import { invalidateCache } from '@/utils/cache';
 import { apiGet, apiPatch, apiDelete, apiPost } from '@/utils/api';
+import { fetchAppointmentServices } from '@/utils/appointmentServices';
+import type { SelectedService } from '@/utils/appointmentServices';
 import { getStatusColor } from '@/utils/appointmentUtils';
 import { formatDisplayDate } from '@/utils/dateUtils';
 import { logger } from '@/utils/logger';
@@ -110,6 +112,9 @@ export default function AppointmentDetailScreen() {
   const [changeServiceModal, setChangeServiceModal] = useState(false);
   const [changingService, setChangingService]       = useState(false);
 
+  // ⚡ Multi-servicio (Jun 2026): desglose de servicios de la cita (solo lectura aquí).
+  const [serviceBreakdown, setServiceBreakdown]     = useState<SelectedService[]>([]);
+
   // ⚡ FIX BUG (May 19 2026): useFocusEffect reemplaza al useEffect anterior.
   // Antes: useEffect(() => { if (id) loadAll(); }, [id])
   // Problema: al volver de reschedule.tsx con router.back(), el `id` no cambiaba,
@@ -129,7 +134,8 @@ export default function AppointmentDetailScreen() {
     try {
       // ⚡ FIX BUG (May 18 2026): cargar servicios junto con cita y staff
       // para que el modal "Cambiar servicio" tenga la lista lista al abrirlo.
-      const [data, staffData, servicesData] = await Promise.all([
+      // ⚡ Multi-servicio: cargamos también el desglose (appointment_services).
+      const [data, staffData, servicesData, breakdownData] = await Promise.all([
         apiGet<Appointment>(`/api/appointments/${id}`),
         supabase
           .from('staff_members')
@@ -139,6 +145,7 @@ export default function AppointmentDetailScreen() {
           .order('sort_order')
           .then(r => r.data || []),
         apiGet<Service[]>('/api/services'),
+        fetchAppointmentServices(id),
       ]);
       if (data) {
         setAppointment(data);
@@ -150,6 +157,7 @@ export default function AppointmentDetailScreen() {
       }
       setStaffMembers(staffData as StaffMember[]);
       setServices(servicesData || []);
+      setServiceBreakdown(breakdownData || []);
     } catch (error) {
       logger.error('[AppointmentDetail] Error loading:', error);
       router.back();
@@ -464,6 +472,14 @@ export default function AppointmentDetailScreen() {
   const canChangeService = !STATUSES_LOCKED_FOR_SERVICE_CHANGE.includes(appointment.status) && services.length > 0;
   const currentDuration = calcApptDuration(appointment.time, appointment.endTime || appointment.end_time);
 
+  // ⚡ Multi-servicio: mostramos el desglose solo si hay >1 servicio Y su nombre
+  // combinado coincide con el de la cita. Así se auto-corrige: si el servicio se
+  // cambió a uno solo (vía "Cambiar servicio"/reagendar), deja de mostrar el
+  // desglose viejo sin necesidad de tocar el flujo de edición.
+  const showServiceBreakdown =
+    serviceBreakdown.length > 1 &&
+    serviceBreakdown.map(s => s.name).join(' + ') === appointment.service;
+
   return (
     <SafeAreaView style={[styles.container, { backgroundColor: tc.bg }]} edges={['top']}>
 
@@ -536,6 +552,20 @@ export default function AppointmentDetailScreen() {
               <Text style={[styles.serviceMeta, { color: tc.textMuted }]}>
                 {currentDuration} min{appointment.service_cost ? ` · $${Number(appointment.service_cost).toLocaleString('es-MX')}` : ''}
               </Text>
+              {/* ⚡ Multi-servicio: desglose por servicio (precio y duración congelados). */}
+              {showServiceBreakdown && (
+                <View style={styles.svcBreakdown}>
+                  {serviceBreakdown.map((s, i) => (
+                    <View key={i} style={[styles.svcBreakdownRow, { borderTopColor: tc.border }]}>
+                      <View style={[styles.svcBreakdownDot, { backgroundColor: colors.primary }]} />
+                      <Text style={[styles.svcBreakdownName, { color: tc.text }]} numberOfLines={1}>{s.name}</Text>
+                      <Text style={[styles.svcBreakdownMeta, { color: tc.textMuted }]}>
+                        {s.durationMinutes} min · ${Number(s.price).toLocaleString('es-MX')}
+                      </Text>
+                    </View>
+                  ))}
+                </View>
+              )}
             </View>
           </View>
           {appointment.notes && (
@@ -958,6 +988,12 @@ const styles = StyleSheet.create({
   // ⚡ FIX BUG (May 18 2026): estilos para el botón "Cambiar" de servicio.
   serviceLabelRow:      { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 3 },
   serviceMeta:          { fontSize: 12, marginTop: 4 },
+  // ⚡ Multi-servicio: desglose por servicio bajo el resumen de la cita.
+  svcBreakdown:         { marginTop: 10 },
+  svcBreakdownRow:      { flexDirection: 'row', alignItems: 'center', gap: 8, paddingVertical: 7, borderTopWidth: 1 },
+  svcBreakdownDot:      { width: 5, height: 5, borderRadius: 3 },
+  svcBreakdownName:     { flex: 1, fontSize: 14, fontWeight: '600' },
+  svcBreakdownMeta:     { fontSize: 12 },
   changeServiceBtn:     { flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: '#8B5CF6', paddingHorizontal: 10, paddingVertical: 5, borderRadius: 8 },
   changeServiceBtnText: { fontSize: 11, fontWeight: '700', color: '#fff' },
   staffSectionHeader:   { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14 },
