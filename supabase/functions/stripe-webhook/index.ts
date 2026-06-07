@@ -311,6 +311,35 @@ Deno.serve(async (req: Request) => {
         .eq('stripe_customer_id', customerId);
     }
 
+    if (event.type === 'charge.refunded') {
+      // === Red de embajadores: CLAWBACK ===
+      // Si se reembolsa un cobro, marcamos el pago como reembolsado y revertimos su
+      // comision (si aún no fue pagada) para no pagar comision sobre dinero devuelto.
+      // Aditivo y blindado. Idempotente. Un reembolso posterior a un corte YA pagado
+      // requiere ajuste manual (raro: la ventana de clawback lo minimiza).
+      const charge = event.data.object;
+      const invoiceId = charge.invoice;
+      console.log(`[Webhook] Charge refunded, invoice: ${invoiceId}`);
+      try {
+        if (invoiceId) {
+          const { error: pagoErr } = await supabase
+            .from('pagos')
+            .update({ reembolsado: true })
+            .eq('stripe_invoice_id', invoiceId);
+          if (pagoErr) console.error(`[Webhook][clawback][pago] ${pagoErr.message}`);
+
+          const { error: comErr } = await supabase
+            .from('comisiones')
+            .update({ estatus: 'revertida', monto_comision: 0 })
+            .eq('stripe_invoice_id', invoiceId)
+            .neq('estatus', 'pagada');
+          if (comErr) console.error(`[Webhook][clawback][comision] ${comErr.message}`);
+        }
+      } catch (e: any) {
+        console.error(`[Webhook][clawback] ${e?.message ?? e}`);
+      }
+    }
+
     return new Response(JSON.stringify({ received: true }), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       status: 200,
