@@ -90,6 +90,15 @@ function calculateVipExpiry(): string {
   return expiry.toISOString();
 }
 
+/**
+ * Devuelve el periodo (primer día del mes actual, UTC) en formato YYYY-MM-01.
+ * Usado para agrupar los pagos por mes en la red de embajadores.
+ */
+function periodoActual(): string {
+  const ahora = new Date();
+  return `${ahora.getUTCFullYear()}-${String(ahora.getUTCMonth() + 1).padStart(2, '0')}-01`;
+}
+
 Deno.serve(async (req: Request) => {
   try {
     if (req.method !== 'POST') {
@@ -180,6 +189,30 @@ Deno.serve(async (req: Request) => {
       }
 
       console.log(`[Webhook] ✓ Success: Plan ${planInfo.planType} assigned to user ${userId}${planInfo.isVip ? ' (VIP)' : ''}`);
+
+      // === Red de embajadores: registra el pago REAL del alta (cobro inicial). ===
+      // Aditivo y blindado: cualquier fallo aquí NO afecta el cobro ni el alta del plan.
+      // Usa amount_total (lo realmente cobrado, post-descuento) para no comisionar dinero no cobrado.
+      // Idempotente por stripe_invoice_id (UNIQUE); el evento invoice.payment_succeeded de la
+      // misma factura quedará deduplicado.
+      try {
+        const montoMxn = (typeof amountTotal === 'number' ? amountTotal : 0) / 100;
+        const invoiceId = session.invoice;
+        if (montoMxn > 0 && invoiceId) {
+          const { error: pagoErr } = await supabase.from('pagos').insert({
+            business_user_id: userId,
+            stripe_invoice_id: invoiceId,
+            stripe_customer_id: customerId,
+            monto: montoMxn,
+            periodo: periodoActual(),
+          });
+          if (pagoErr && pagoErr.code !== '23505') {
+            console.error(`[Webhook][pagos][checkout] ${pagoErr.message}`);
+          }
+        }
+      } catch (e: any) {
+        console.error(`[Webhook][pagos][checkout] ${e?.message ?? e}`);
+      }
     }
 
     if (event.type === 'invoice.payment_succeeded') {
@@ -194,7 +227,7 @@ Deno.serve(async (req: Request) => {
       // Buscar el usuario por stripe_customer_id y, si es VIP, extender vip_expires_at
       const { data: currentSub } = await supabase
         .from('subscription_plans')
-        .select('is_vip, billing_cycle')
+        .select('is_vip, billing_cycle, user_id')
         .eq('stripe_customer_id', customerId)
         .single();
 
@@ -217,6 +250,28 @@ Deno.serve(async (req: Request) => {
             updated_at: new Date().toISOString(),
           })
           .eq('stripe_customer_id', customerId);
+      }
+
+      // === Red de embajadores: registra el pago REAL de la renovación. ===
+      // Aditivo y blindado: cualquier fallo aquí NO afecta el cobro ni la renovación.
+      // Usa invoice.amount_paid (lo realmente cobrado este mes). Idempotente por
+      // stripe_invoice_id (UNIQUE). Cubre TODOS los pagos mensuales (ciclos 1-6).
+      try {
+        const montoMxn = (typeof invoice.amount_paid === 'number' ? invoice.amount_paid : 0) / 100;
+        if (currentSub?.user_id && montoMxn > 0 && invoice.id) {
+          const { error: pagoErr } = await supabase.from('pagos').insert({
+            business_user_id: currentSub.user_id,
+            stripe_invoice_id: invoice.id,
+            stripe_customer_id: customerId,
+            monto: montoMxn,
+            periodo: periodoActual(),
+          });
+          if (pagoErr && pagoErr.code !== '23505') {
+            console.error(`[Webhook][pagos][invoice] ${pagoErr.message}`);
+          }
+        }
+      } catch (e: any) {
+        console.error(`[Webhook][pagos][invoice] ${e?.message ?? e}`);
       }
     }
 
