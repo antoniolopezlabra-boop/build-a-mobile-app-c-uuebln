@@ -20,8 +20,9 @@ import {
 import { MEXICO_STATES, isValidPostalCode } from '@/constants/mexicoStates';
 import { generateSlug, ensureUniqueSlug } from '@/utils/slugGenerator';
 import { logger } from '@/utils/logger';
+import AmbassadorCodeField from '@/components/setup/AmbassadorCodeField';
 
-// ═════════════════════════════════════════════════════════════════
+// ══════════════════════════════════════════════════
 // SETUP WIZARD — Onboarding post-registro (v3 — May 23 2026)
 //
 // ⚡ FIX CRITICO (May 23 2026 - v3):
@@ -47,14 +48,14 @@ import { logger } from '@/utils/logger';
 //   3. Servicio   (nombre + precio + duracion)
 //   4. Horarios   (dias + apertura + cierre)
 //   5. Link       (booking_link generado automaticamente)
-// ═════════════════════════════════════════════════════════════════
+// ══════════════════════════════════════════════════
 
 const DAYS_OF_WEEK = ['L', 'M', 'M', 'J', 'V', 'S', 'D'];
 const DAY_NAMES = ['Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado', 'Domingo'];
 
 const TOTAL_STEPS = 5;
 
-// ═════════════════════════════════════════════════════════════════
+// ══════════════════════════════════════════════════
 // upsertBusinessProfile — Helper defensivo (v3 May 23 2026)
 //
 // Garantiza que los campos que SI vienen en el objeto se persisten en
@@ -68,7 +69,7 @@ const TOTAL_STEPS = 5;
 // Las dos llamadas son completamente independientes y NO se interfieren
 // entre si, lo cual elimina el riesgo de "sobrescribir con NULL" de un
 // upsert mal usado.
-// ═════════════════════════════════════════════════════════════════
+// ══════════════════════════════════════════════════
 async function upsertBusinessProfile(
   userId: string,
   fields: Record<string, any>
@@ -267,9 +268,9 @@ export default function SetupWizard() {
         phone: phone.trim(),
       });
 
-      // ─────────────────────────────────────────────────────────────────
+      // ──────────────────────────────────────────────────────────────
       // AUTO-CREACION DEL BOOKING_LINK (sin cambios)
-      // ─────────────────────────────────────────────────────────────────
+      // ──────────────────────────────────────────────────────────────
       if (!isStaffAccount) {
         try {
           const { data: existing } = await supabase
@@ -528,6 +529,9 @@ export default function SetupWizard() {
                   maxLength={15}
                 />
                 <Text style={s.fieldHint}>Tus clientes verán este teléfono en el link público para contactarte.</Text>
+
+                {/* Red de embajadores: codigo opcional */}
+                <AmbassadorCodeField />
               </>
             )}
 
