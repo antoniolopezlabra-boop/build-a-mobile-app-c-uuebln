@@ -15,7 +15,7 @@
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "lat.vylta.app",
-      "buildNumber": "13",
+      "buildNumber": "16",
       "infoPlist": {
         "ITSAppUsesNonExemptEncryption": false,
         "NSCameraUsageDescription": "VYLTA usa la cámara para que puedas tomar la foto del logo de tu negocio.",
