@@ -30,7 +30,7 @@
       },
       "edgeToEdgeEnabled": true,
       "package": "lat.vylta.app",
-      "versionCode": 40,
+      "versionCode": 41,
       "googleServicesFile": "./google-services.json",
       "permissions": [
         "android.permission.INTERNET",
