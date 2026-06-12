@@ -853,7 +853,7 @@ function NewAppointmentInner() {
                 {selectedServices.map((svc) => (
                   <View key={svc.id} style={styles.serviceChip}>
                     <View style={styles.catalogSelectedIcon}>
-                      <MaterialIcons name="content-cut" size={16} color="#10B981" />
+                      <MaterialIcons name="work-outline" size={16} color="#10B981" />
                     </View>
                     <View style={styles.catalogSelectedInfo}>
                       <Text style={styles.catalogSelectedName}>{svc.name}</Text>
@@ -1230,7 +1230,7 @@ function NewAppointmentInner() {
             <ScrollView style={styles.serviceList}>
               {filteredCatalogServices.length === 0 ? (
                 <View style={styles.serviceEmpty}>
-                  <MaterialIcons name="content-cut" size={40} color="#CBD5E1" />
+                  <MaterialIcons name="work-outline" size={40} color="#CBD5E1" />
                   <Text style={styles.serviceEmptyText}>
                     {serviceSearchQuery ? 'Sin resultados' : 'No tienes servicios en el catálogo'}
                   </Text>
@@ -1251,7 +1251,7 @@ function NewAppointmentInner() {
                     activeOpacity={0.7}
                   >
                     <View style={styles.serviceItemIcon}>
-                      <MaterialIcons name={isPicked ? 'check-circle' : 'content-cut'} size={18} color="#10B981" />
+                      <MaterialIcons name={isPicked ? 'check-circle' : 'work-outline'} size={18} color="#10B981" />
                     </View>
                     <View style={styles.serviceItemInfo}>
                       <Text style={styles.serviceItemName}>{svc.name}</Text>

@@ -127,7 +127,7 @@ export default function ServicesScreen() {
         <View style={s.loading}><ActivityIndicator size="large" color={colors.primary} /></View>
       ) : services.length === 0 ? (
         <View style={s.empty}>
-          <MaterialIcons name="content-cut" size={56} color="#CBD5E1" />
+          <MaterialIcons name="work-outline" size={56} color="#CBD5E1" />
           <Text style={s.emptyTitle}>Sin servicios aún</Text>
           <Text style={s.emptyDesc}>Agrega los servicios que ofreces con su precio y duración</Text>
           <TouchableOpacity style={s.emptyBtn} onPress={openNew}>
@@ -139,7 +139,7 @@ export default function ServicesScreen() {
           {services.map(service => (
             <TouchableOpacity key={service.id} style={s.card} onPress={() => openEdit(service)} activeOpacity={0.75}>
               <View style={s.cardLeft}>
-                <View style={s.cardIcon}><MaterialIcons name="content-cut" size={20} color="#10B981" /></View>
+                <View style={s.cardIcon}><MaterialIcons name="work-outline" size={20} color="#10B981" /></View>
                 <View style={s.cardInfo}>
                   <Text style={s.cardName}>{service.name}</Text>
                   {service.description ? <Text style={s.cardDesc}>{service.description}</Text> : null}

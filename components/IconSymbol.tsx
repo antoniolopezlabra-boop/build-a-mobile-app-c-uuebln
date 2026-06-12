@@ -33,6 +33,7 @@ const iconMap: { [key: string]: string } = {
   "error": "❌",
   "visibility": "👁",
   "visibility-off": "🙈",
+  "work-outline": "💼",
 };
 
 export function IconSymbol({

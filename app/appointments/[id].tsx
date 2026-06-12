@@ -531,7 +531,7 @@ export default function AppointmentDetailScreen() {
             </View>
           </View>
           <View style={styles.infoRow}>
-            <IconSymbol ios_icon_name="scissors" android_material_icon_name="content-cut" size={22} color={colors.primary} />
+            <IconSymbol ios_icon_name="briefcase" android_material_icon_name="work-outline" size={22} color={colors.primary} />
             <View style={styles.infoContent}>
               <View style={styles.serviceLabelRow}>
                 <Text style={[styles.infoLabel, { color: tc.textMuted }]}>Servicio</Text>
@@ -853,7 +853,7 @@ export default function AppointmentDetailScreen() {
             <ScrollView showsVerticalScrollIndicator={false}>
               {services.length === 0 ? (
                 <View style={styles.emptyServicesWrap}>
-                  <MaterialIcons name="content-cut" size={32} color={tc.border} />
+                  <MaterialIcons name="work-outline" size={32} color={tc.border} />
                   <Text style={[styles.emptyServicesText, { color: tc.textMuted }]}>
                     No tienes servicios activos. Configúralos en Ajustes &gt; Servicios.
                   </Text>
@@ -874,7 +874,7 @@ export default function AppointmentDetailScreen() {
                     activeOpacity={0.7}
                   >
                     <View style={[styles.serviceOptionIcon, { backgroundColor: colors.primary + '18' }]}>
-                      <MaterialIcons name="content-cut" size={20} color={colors.primary} />
+                      <MaterialIcons name="work-outline" size={20} color={colors.primary} />
                     </View>
                     <View style={{ flex: 1 }}>
                       <Text style={[styles.serviceOptionName, { color: tc.text }]} numberOfLines={1}>{svc.name}</Text>
