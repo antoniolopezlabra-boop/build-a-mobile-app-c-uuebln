@@ -1,6 +1,7 @@
 import { getTodayString, getTomorrowString, getDateStringDaysFromNow, toLocalDateString, addDays, getMonthStartString, getMonthEndString } from '@/utils/dateUtils';
 import { supabase } from '@/lib/supabase';
 import { logger } from '@/utils/logger';
+import { getCacheUserId } from '@/utils/cache';
 
 // Estados que NO cuentan como "cita del día/semana/mes" (citas descartadas)
 // USO: validateNoTimeConflict (slot disponible si se canceló), KPIs de
@@ -17,8 +18,32 @@ const ACTIVE_STATUSES = ['Pendiente', 'Confirmada', 'Completada', 'Pagado', 'Rea
 //   • supabase/functions/create-booking-request/index.ts (link público)
 const GRATUITO_MONTHLY_LIMIT = 10;
 
+/**
+ * Devuelve el userId actual SIN colgar la UI.
+ *
+ * FIX (cuelgue al volver de background, jun 2026):
+ * Antes usaba `supabase.auth.getUser()` — una llamada de RED al servidor de Auth
+ * que corre en CADA apiGet/apiPost/apiPut. Tras una noche en background, con el
+ * access token expirado y el auto-refresh suspendido, esa llamada se quedaba
+ * colgada para siempre → spinner infinito en toda pantalla.
+ *
+ * Ahora:
+ *   1) Usa el userId ya cacheado en memoria (AuthContext lo registra en cada
+ *      cambio de sesión vía setCacheUserId) → instantáneo, sin red.
+ *   2) Si no está, lee la sesión LOCAL (getSession, desde almacenamiento) con un
+ *      tope duro de 4s vía Promise.race, de modo que NUNCA pueda colgar la UI.
+ */
 export async function getCurrentUserId(): Promise<string> {
-  const { data: { user } } = await supabase.auth.getUser();
+  const cachedId = getCacheUserId();
+  if (cachedId) return cachedId;
+
+  // Fallback acotado: lectura local de sesión con timeout duro (nunca cuelga).
+  const res = await Promise.race([
+    supabase.auth.getSession(),
+    new Promise<null>((resolve) => setTimeout(() => resolve(null), 4000)),
+  ]);
+  const user = (res as { data?: { session?: { user?: { id: string } | null } } } | null)
+    ?.data?.session?.user;
   if (!user) throw new Error('No authenticated user');
   return user.id;
 }

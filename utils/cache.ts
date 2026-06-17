@@ -46,6 +46,16 @@ export function setCacheUserId(userId: string | null): void {
   }
 }
 
+/**
+ * Lee el usuario activo registrado (sincrónico, SIN red).
+ * Lo usa getCurrentUserId() en utils/api.ts para resolver el userId al instante
+ * sin llamar a supabase.auth.getUser() (que es una llamada de red que puede
+ * colgarse tras una noche en background). AuthContext mantiene esto al día.
+ */
+export function getCacheUserId(): string | null {
+  return currentUserId;
+}
+
 function buildKey(key: string): string {
   // Si no hay usuario registrado (ej. antes de login), usar prefijo anónimo.
   // No debería cachearse nada relevante sin usuario, pero no rompemos.

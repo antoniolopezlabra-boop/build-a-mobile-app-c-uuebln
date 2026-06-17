@@ -43,6 +43,15 @@ const FULL_REFRESH_TIMEOUT_MS = 10_000;         // soft timeout: 10 seg max por 
 const WATCHDOG_TIMEOUT_MS = 15_000;             // ⚡ CAPA 1: watchdog universal 15s
 const ESCAPE_BUTTON_DELAY_MS = 8_000;           // ⚡ CAPA 4: botón "Reiniciar" a los 8s
 
+// ⚡ FIX (cuelgue de ausencia larga, jun 2026) — CONFIGURABLE.
+// Si la app estuvo en background MÁS de esto (ej. toda la noche), en vez de
+// intentar resucitar una sesión potencialmente muerta (lo que dejaba la app
+// "pensando" infinito), se hace un refresh DECISIVO: si la sesión no se confirma
+// viva rápido, se cierra sesión limpia y se manda a login.
+//   • Súbelo (ej. 24h) si prefieres re-login menos frecuente.
+//   • Bájalo si quieres forzar re-login antes.
+const SESSION_MAX_BACKGROUND_MS = 8 * 60 * MINUTES; // 8 horas
+
 // ──────────────────────────────────────────────────────────────────
 // Sistema de listeners para que pantallas escuchen el evento de refresh
 // ──────────────────────────────────────────────────────────────────
@@ -340,7 +349,10 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
    * Conserva las 4 capas de defensa: watchdog universal, sin disconnect
    * destructivo, detección de token muerto y botón de escape.
    */
-  const performFullRefreshWithSplash = async () => {
+  const performFullRefreshWithSplash = async (opts?: { forceReauthOnDoubt?: boolean }) => {
+    // forceReauthOnDoubt: en ausencias largas, si el refresh es ambiguo (timeout)
+    // tratamos la sesión como NO confiable → re-login limpio (no resucitar muerta).
+    const forceReauthOnDoubt = opts?.forceReauthOnDoubt ?? false;
     // Generación única de este refresh — para que callbacks viejos no afecten estado nuevo
     const myGeneration = ++refreshGenerationRef.current;
 
@@ -380,10 +392,17 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
     let tokenAlive = true;
     try {
       const result = await withTimeout(fullRefresh(), FULL_REFRESH_TIMEOUT_MS);
-      tokenAlive = result === null ? true : result.tokenAlive;
+      if (result === null) {
+        // Timeout/ambiguo: en ausencia larga lo tratamos como sesión muerta
+        // (re-login limpio); en el caso normal asumimos viva (evita logout por
+        // un glitch de red transitorio).
+        tokenAlive = !forceReauthOnDoubt;
+      } else {
+        tokenAlive = result.tokenAlive;
+      }
     } catch (error) {
       logger.error('[AppState] Unexpected refresh error:', error);
-      tokenAlive = true;
+      tokenAlive = !forceReauthOnDoubt;
     }
 
     // Si esto ya no es el refresh activo (otro arrancó), no hacer nada
@@ -432,7 +451,15 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
       return;
     }
 
-    // > 30 min: refresh COMPLETO con splash
+    // > tope de ausencia larga (ej. toda la noche): refresh con splash pero
+    // DECISIVO — si la sesión no se confirma viva, cierra sesión y manda a login
+    // (en vez de quedarse "pensando" intentando resucitar una sesión muerta).
+    if (backgroundDurationMs > SESSION_MAX_BACKGROUND_MS) {
+      await performFullRefreshWithSplash({ forceReauthOnDoubt: true });
+      return;
+    }
+
+    // > 30 min (y < tope largo): refresh COMPLETO con splash
     await performFullRefreshWithSplash();
   };
   /**
