@@ -44,13 +44,11 @@ serve(async (req) => {
       .eq('user_id', u.user.id).eq('is_active', true).maybeSingle()
     if (!adminRow) return json({ success: false, error: 'Se requiere una cuenta de administrador.' })
 
-    // 2. Validar input.
+    // 2. Validar input. La contrasena SOLO se exige al crear un usuario nuevo;
+    //    si el correo ya pertenece a un usuario, NUNCA se toca su contrasena.
     const { embajadorId, email, password } = await req.json()
-    if (!embajadorId || !email || !password) {
-      return json({ success: false, error: 'Faltan datos (embajador, correo o contraseña).' })
-    }
-    if (String(password).length < 6) {
-      return json({ success: false, error: 'La contraseña debe tener al menos 6 caracteres.' })
+    if (!embajadorId || !email) {
+      return json({ success: false, error: 'Faltan datos (embajador o correo).' })
     }
     const cleanEmail = String(email).trim().toLowerCase()
 
@@ -60,7 +58,31 @@ serve(async (req) => {
     if (ee || !emb) return json({ success: false, error: 'No se encontró el embajador.' })
     if (emb.user_id) return json({ success: false, error: 'Este embajador ya tiene una cuenta de acceso.' })
 
-    // 4. Crear la cuenta de acceso (confirmada, con metadata de embajador).
+    // 4. ¿El correo ya pertenece a un usuario existente? (tipicamente un negocio
+    //    que TAMBIEN quiere ser embajador). Lookup via RPC service-role.
+    const { data: existingUserId, error: lookErr } = await admin
+      .rpc('ambassador_lookup_user_id', { p_email: cleanEmail })
+    if (lookErr) return json({ success: false, error: 'No se pudo verificar el correo. Intenta de nuevo.' })
+
+    // 4a. EXISTE -> NO crear cuenta, NO tocar su contrasena, NO borrar sus datos
+    //     de negocio. Solo vincularlo: entra al portal de embajador con SUS
+    //     credenciales actuales y conserva intacto su acceso de negocio.
+    if (existingUserId) {
+      const { data: other } = await admin
+        .from('embajadores').select('id').eq('user_id', existingUserId).maybeSingle()
+      if (other) return json({ success: false, error: 'Ese correo ya pertenece a otro embajador.' })
+
+      const { error: le } = await admin
+        .from('embajadores').update({ user_id: existingUserId }).eq('id', emb.id)
+      if (le) return json({ success: false, error: 'No se pudo vincular la cuenta existente. Intenta de nuevo.' })
+
+      return json({ success: true, mode: 'linked_existing', nombre: emb.nombre, email: cleanEmail })
+    }
+
+    // 4b. USUARIO NUEVO -> exige contrasena y crea la cuenta (confirmada).
+    if (!password || String(password).length < 6) {
+      return json({ success: false, error: 'La contraseña debe tener al menos 6 caracteres.' })
+    }
     const { data: created, error: ce } = await admin.auth.admin.createUser({
       email: cleanEmail,
       password: String(password),
@@ -70,13 +92,14 @@ serve(async (req) => {
     if (ce || !created?.user) {
       const msg = String(ce?.message || '')
       if (/already.*regist|been regist|already exist|duplicate/i.test(msg)) {
-        return json({ success: false, error: 'Ese correo ya tiene una cuenta en VYLTA (de un negocio o de otro embajador). Usa un correo distinto para la cuenta del embajador.' })
+        // Carrera: el correo se registro entre el lookup y el create.
+        return json({ success: false, error: 'Ese correo acaba de registrarse. Vuelve a intentar para vincularlo.' })
       }
       return json({ success: false, error: msg || 'No se pudo crear la cuenta de acceso.' })
     }
     const newUserId = created.user.id
 
-    // 5. El embajador NO es un negocio: limpiar lo que el signup creo por defecto.
+    // 5. El embajador NUEVO no es un negocio: limpiar lo que el signup creo por defecto.
     await admin.from('business_profiles').delete().eq('user_id', newUserId)
     await admin.from('whatsapp_config').delete().eq('user_id', newUserId)
     await admin.from('subscription_plans').delete().eq('user_id', newUserId)
@@ -88,7 +111,7 @@ serve(async (req) => {
       return json({ success: false, error: 'No se pudo vincular la cuenta. Intenta de nuevo.' })
     }
 
-    return json({ success: true, nombre: emb.nombre, email: cleanEmail })
+    return json({ success: true, mode: 'created', nombre: emb.nombre, email: cleanEmail })
   } catch (e: any) {
     return json({ success: false, error: e?.message ?? 'Error interno del servidor' }, 500)
   }
