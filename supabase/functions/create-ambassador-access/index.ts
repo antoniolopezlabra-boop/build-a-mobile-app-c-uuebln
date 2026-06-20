@@ -68,7 +68,11 @@ serve(async (req) => {
       user_metadata: { is_ambassador: true, embajador_id: emb.id, full_name: emb.nombre },
     })
     if (ce || !created?.user) {
-      return json({ success: false, error: ce?.message || 'No se pudo crear la cuenta de acceso.' })
+      const msg = String(ce?.message || '')
+      if (/already.*regist|been regist|already exist|duplicate/i.test(msg)) {
+        return json({ success: false, error: 'Ese correo ya tiene una cuenta en VYLTA (de un negocio o de otro embajador). Usa un correo distinto para la cuenta del embajador.' })
+      }
+      return json({ success: false, error: msg || 'No se pudo crear la cuenta de acceso.' })
     }
     const newUserId = created.user.id
 
