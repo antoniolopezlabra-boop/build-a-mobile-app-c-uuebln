@@ -2,7 +2,7 @@
 import React, { useState, useEffect } from 'react';
 import {
   View, Text, StyleSheet, ScrollView,
-  TouchableOpacity, ActivityIndicator,
+  TouchableOpacity, ActivityIndicator, Platform,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
@@ -140,6 +140,11 @@ export default function SubscriptionScreen() {
   const priceLabel = PLAN_PRICE[currentPlan] || '$0 MXN';
   const emoji = PLAN_EMOJI[currentPlan] || '🌱';
   const hasPaidPlan = isBasico || isPremium;
+
+  // App Store Guideline 3.1.1: en iOS no se permite vender ni enlazar a la
+  // compra externa (Stripe) de suscripciones digitales. Ocultamos toda la UI
+  // de compra/portal SOLO en iOS; web y Android conservan el flujo completo.
+  const isIOS = Platform.OS === 'ios';
 
   useEffect(() => {
     if (user?.id && hasPaidPlan) loadSubscriptionDetails();
@@ -379,15 +384,15 @@ export default function SubscriptionScreen() {
             </View>
           )}
 
-          {/* Botón Gestionar suscripción */}
-          {hasPaidPlan && (
+          {/* Botón Gestionar suscripción — oculto en iOS (Guideline 3.1.1) */}
+          {!isIOS && hasPaidPlan && (
             <TouchableOpacity style={s.manageBtn} onPress={handleOpenPortal} disabled={portalLoading}>
               {portalLoading ? <ActivityIndicator size="small" color="#6366F1" /> : <MaterialIcons name="settings" size={18} color="#6366F1" />}
               <Text style={s.manageBtnText}>{portalLoading ? 'Abriendo portal...' : 'Gestionar suscripción'}</Text>
               {!portalLoading && <MaterialIcons name="open-in-new" size={14} color="#94A3B8" />}
             </TouchableOpacity>
           )}
-          {hasPaidPlan && (
+          {!isIOS && hasPaidPlan && (
             <Text style={s.manageHint}>Cambiar método de pago, ver facturas o cancelar tu suscripción</Text>
           )}
 
@@ -432,7 +437,7 @@ export default function SubscriptionScreen() {
               return (<View key={i} style={s.featureRow}><MaterialIcons name="check" size={16} color={isAI ? '#10B981' : colors.primary} /><Text style={[s.featureText, isAI && s.featureAI]}>{f}</Text>{isAI && (<View style={s.aiChip}><MaterialIcons name="auto-awesome" size={10} color="#10B981" /><Text style={s.aiChipText}>IA</Text></View>)}</View>);
             })}
           </View>
-          {isGratuito && (<TouchableOpacity style={s.ctaBtn} onPress={() => handleActivatePlan('basico')}><MaterialIcons name="lock-open" size={18} color="#fff" /><Text style={s.ctaBtnText}>Activar Plan Premium</Text></TouchableOpacity>)}
+          {!isIOS && isGratuito && (<TouchableOpacity style={s.ctaBtn} onPress={() => handleActivatePlan('basico')}><MaterialIcons name="lock-open" size={18} color="#fff" /><Text style={s.ctaBtnText}>Activar Plan Premium</Text></TouchableOpacity>)}
         </View>
 
         {/* Plan Luxury ($799) */}
@@ -450,7 +455,7 @@ export default function SubscriptionScreen() {
               return (<View key={i} style={s.featureRow}><MaterialIcons name="check" size={16} color="#6366F1" /><Text style={[s.featureText, isAI && s.featureAIPremium]}>{f}</Text>{isAI && (<View style={[s.aiChip, { backgroundColor: '#EEF2FF', borderColor: '#6366F1' }]}><MaterialIcons name="auto-awesome" size={10} color="#6366F1" /><Text style={[s.aiChipText, { color: '#6366F1' }]}>IA</Text></View>)}</View>);
             })}
           </View>
-          {!isPremium && !isVipPremium && (<TouchableOpacity style={[s.ctaBtn, { backgroundColor: '#6366F1' }]} onPress={() => handleActivatePlan('premium')}><MaterialIcons name="lock-open" size={18} color="#fff" /><Text style={s.ctaBtnText}>Activar Plan Luxury</Text></TouchableOpacity>)}
+          {!isIOS && !isPremium && !isVipPremium && (<TouchableOpacity style={[s.ctaBtn, { backgroundColor: '#6366F1' }]} onPress={() => handleActivatePlan('premium')}><MaterialIcons name="lock-open" size={18} color="#fff" /><Text style={s.ctaBtnText}>Activar Plan Luxury</Text></TouchableOpacity>)}
         </View>
 
         {/* ═════════════════════════════════════════════════════════ */}
@@ -504,7 +509,7 @@ export default function SubscriptionScreen() {
             <Text style={s.vipIncludesText}>+ los 8 beneficios VIP exclusivos arriba</Text>
           </View>
 
-          {!isVipBasico && !isVipPremium && (
+          {!isIOS && !isVipBasico && !isVipPremium && (
             <TouchableOpacity style={s.vipPurchaseBtn} onPress={() => handleActivatePlan('vip_basico')}>
               <MaterialIcons name="workspace-premium" size={18} color={VIP_COLORS.gold} />
               <Text style={s.vipPurchaseBtnText}>Activar VIP Premium</Text>
@@ -537,7 +542,7 @@ export default function SubscriptionScreen() {
             <Text style={s.vipIncludesText}>+ los 8 beneficios VIP exclusivos arriba</Text>
           </View>
 
-          {!isVipPremium && (
+          {!isIOS && !isVipPremium && (
             <TouchableOpacity style={s.vipPurchaseBtn} onPress={() => handleActivatePlan('vip_premium')}>
               <MaterialIcons name="workspace-premium" size={18} color={VIP_COLORS.gold} />
               <Text style={s.vipPurchaseBtnText}>Activar VIP Luxury</Text>
@@ -545,10 +550,24 @@ export default function SubscriptionScreen() {
           )}
         </View>
 
-        <View style={s.secureNote}>
-          <MaterialIcons name="lock" size={14} color="#94A3B8" />
-          <Text style={s.secureNoteText}>Pago seguro procesado por Stripe. Puedes cancelar tu suscripción en cualquier momento desde "Gestionar suscripción".</Text>
-        </View>
+        {!isIOS && (
+          <View style={s.secureNote}>
+            <MaterialIcons name="lock" size={14} color="#94A3B8" />
+            <Text style={s.secureNoteText}>Pago seguro procesado por Stripe. Puedes cancelar tu suscripción en cualquier momento desde "Gestionar suscripción".</Text>
+          </View>
+        )}
+
+        {/* iOS (Guideline 3.1.1): nota informativa, sin compra ni enlaces externos */}
+        {isIOS && (
+          <View style={s.secureNote}>
+            <MaterialIcons name="info-outline" size={14} color="#94A3B8" />
+            <Text style={s.secureNoteText}>
+              {isGratuito
+                ? 'Tu plan actual es Gratuito. Para activar Premium o Luxury, administra tu suscripción desde tu cuenta de VYLTA en vylta.lat.'
+                : 'Administra o cancela tu suscripción desde tu cuenta de VYLTA en vylta.lat.'}
+            </Text>
+          </View>
+        )}
       </ScrollView>
     </SafeAreaView>
   );

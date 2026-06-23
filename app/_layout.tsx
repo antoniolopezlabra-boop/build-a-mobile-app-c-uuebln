@@ -1,6 +1,4 @@
 import { Stack, useRouter, useSegments } from 'expo-router';
-import { StripeProvider } from '@stripe/stripe-react-native';
-import { STRIPE_PUBLISHABLE_KEY } from '@/services/stripe';
 import { LogBox, View, ActivityIndicator, Image, StyleSheet, Text } from 'react-native';
 import { useEffect, useState, useRef } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -273,17 +271,15 @@ export default function RootLayout() {
   return (
     <ThemeProvider>
       <NetworkProvider>
-        <StripeProvider publishableKey={STRIPE_PUBLISHABLE_KEY} merchantIdentifier="merchant.com.vylta">
-          <AuthProvider>
-            <AppStateProvider>
-              <PlanProvider>
-                <AdminProvider>
-                  <AppShell />
-                </AdminProvider>
-              </PlanProvider>
-            </AppStateProvider>
-          </AuthProvider>
-        </StripeProvider>
+        <AuthProvider>
+          <AppStateProvider>
+            <PlanProvider>
+              <AdminProvider>
+                <AppShell />
+              </AdminProvider>
+            </PlanProvider>
+          </AppStateProvider>
+        </AuthProvider>
       </NetworkProvider>
     </ThemeProvider>
   );
