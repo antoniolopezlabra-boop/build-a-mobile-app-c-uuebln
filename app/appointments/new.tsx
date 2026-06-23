@@ -155,7 +155,9 @@ class ScreenErrorBoundary extends React.Component<
             <Text style={errorStyles.desc}>
               Ocurrió un error al preparar el formulario de cita. Por favor intenta de nuevo.
             </Text>
-            <Text style={errorStyles.errorMsg} numberOfLines={2}>{this.state.errorMsg}</Text>
+            <Text style={errorStyles.errorMsg} numberOfLines={2}>
+              {__DEV__ ? this.state.errorMsg : 'Algo salió mal. Intenta de nuevo.'}
+            </Text>
             <TouchableOpacity style={errorStyles.backBtn} onPress={this.props.onBack}>
               <Text style={errorStyles.backBtnText}>Volver</Text>
             </TouchableOpacity>

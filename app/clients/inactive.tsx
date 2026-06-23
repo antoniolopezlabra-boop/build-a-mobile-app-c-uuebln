@@ -7,6 +7,7 @@ import {
   ScrollView,
   TouchableOpacity,
   ActivityIndicator,
+  Linking,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
@@ -65,6 +66,13 @@ export default function InactiveClientsScreen() {
     if (days < 30) return `${days} días`;
     if (days < 365) return `${Math.floor(days / 30)} meses`;
     return `${Math.floor(days / 365)} años`;
+  };
+
+  const openWhatsApp = (phone: string) => {
+    const digits = (phone || '').replace(/\D/g, '');
+    if (!digits) return;
+    const mx = digits.startsWith('52') ? digits : `52${digits}`;
+    Linking.openURL(`https://wa.me/${mx}`);
   };
 
   if (loading) {
@@ -155,7 +163,7 @@ export default function InactiveClientsScreen() {
                   style={styles.messageButton}
                   onPress={(e) => {
                     e.stopPropagation();
-                    console.log('User tapped send message to:', client.id);
+                    openWhatsApp(client.phone);
                   }}
                 >
                   <IconSymbol android_material_icon_name="message" size={20} color={colors.primary} />

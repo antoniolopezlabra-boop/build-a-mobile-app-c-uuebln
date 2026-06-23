@@ -34,7 +34,7 @@ export default function LegalScreen() {
             <Text style={styles.arrow}>›</Text>
           </TouchableOpacity>
         ))}
-        <Text style={styles.footer}>VYLTA es un producto de Antonio López Labra. Para dudas legales escríbenos a legal@vylta.com</Text>
+        <Text style={styles.footer}>VYLTA es un producto de Antonio López Labra. Para dudas legales escríbenos a legal@vylta.lat</Text>
       </ScrollView>
     </SafeAreaView>
   );

@@ -43,5 +43,12 @@ module.exports = function (api) {
       "@babel/plugin-proposal-export-namespace-from",
       "react-native-worklets/plugin", // react-native-worklets/plugin must be listed last!
     ],
+    env: {
+      production: {
+        // Strip all console.* (incl. logs of push tokens / user PII) from the
+        // production bundle, keeping console.error for crash diagnostics.
+        plugins: [["transform-remove-console", { exclude: ["error"] }]],
+      },
+    },
   };
 };

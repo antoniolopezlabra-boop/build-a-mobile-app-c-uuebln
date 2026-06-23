@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import {
   View, Text, StyleSheet, ScrollView,
-  TouchableOpacity, ActivityIndicator, Alert,
+  TouchableOpacity, ActivityIndicator, Alert, Linking,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useLocalSearchParams } from 'expo-router';
@@ -171,6 +171,14 @@ export default function ClientDetailScreen() {
     } as any);
   };
 
+  const openWhatsApp = (phone: string) => {
+    const digits = phone.replace(/\D/g, '');
+    const mx = digits.startsWith('52') ? digits : `52${digits}`;
+    Linking.openURL(`https://wa.me/${mx}`);
+  };
+
+  const hasPhone = !!client.phone && client.phone.replace(/\D/g, '').length > 0;
+
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
       <ConfirmModal
@@ -245,7 +253,11 @@ export default function ClientDetailScreen() {
             <IconSymbol android_material_icon_name="calendar-today" size={20} color="#FFFFFF" />
             <Text style={styles.actionButtonText}>Agendar cita</Text>
           </TouchableOpacity>
-          <TouchableOpacity style={[styles.actionButton, styles.actionButtonSecondary]} onPress={() => {}}>
+          <TouchableOpacity
+            style={[styles.actionButton, styles.actionButtonSecondary, !hasPhone && styles.actionButtonDisabled]}
+            onPress={() => openWhatsApp(client.phone)}
+            disabled={!hasPhone}
+          >
             <IconSymbol android_material_icon_name="message" size={20} color={colors.primary} />
             <Text style={[styles.actionButtonText, styles.actionButtonTextSecondary]}>Enviar mensaje</Text>
           </TouchableOpacity>
@@ -291,7 +303,9 @@ export default function ClientDetailScreen() {
             <View style={styles.emptyState}>
               <IconSymbol android_material_icon_name="message" size={48} color={colors.textSecondary} />
               <Text style={styles.emptyStateText}>Sin mensajes de WhatsApp</Text>
-              <Text style={styles.emptyStateSubtext}>Configura WhatsApp Business para enviar mensajes</Text>
+              <TouchableOpacity onPress={() => router.push('/settings/whatsapp')}>
+                <Text style={[styles.emptyStateSubtext, styles.emptyStateLink]}>Configura WhatsApp Business para enviar mensajes</Text>
+              </TouchableOpacity>
             </View>
           </View>
         )}
@@ -355,6 +369,7 @@ const styles = StyleSheet.create({
   actionButtons: { flexDirection: 'row', gap: 12, marginBottom: 24 },
   actionButton: { flex: 1, backgroundColor: colors.primary, borderRadius: 12, padding: 14, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8 },
   actionButtonSecondary: { backgroundColor: colors.card, borderWidth: 1, borderColor: colors.primary },
+  actionButtonDisabled: { opacity: 0.5 },
   actionButtonText: { color: '#FFFFFF', fontSize: 15, fontWeight: '600' },
   actionButtonTextSecondary: { color: colors.primary },
   tabsContainer: { flexDirection: 'row', backgroundColor: colors.card, borderRadius: 12, padding: 4, marginBottom: 20 },
@@ -366,6 +381,7 @@ const styles = StyleSheet.create({
   emptyState: { alignItems: 'center', paddingVertical: 40 },
   emptyStateText: { fontSize: 16, color: colors.textSecondary, marginTop: 12 },
   emptyStateSubtext: { fontSize: 14, color: colors.textSecondary, marginTop: 4, textAlign: 'center' },
+  emptyStateLink: { color: colors.primary, fontWeight: '600', textDecorationLine: 'underline' },
   appointmentCard: { backgroundColor: colors.card, borderRadius: 12, padding: 16, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12, shadowColor: '#000', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.05, shadowRadius: 4, elevation: 1 },
   appointmentInfo: { flex: 1 },
   appointmentService: { fontSize: 16, fontWeight: '600', color: colors.text, marginBottom: 4 },

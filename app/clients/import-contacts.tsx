@@ -363,8 +363,12 @@ export default function ImportContactsScreen() {
 
       {filteredContacts.length === 0 ? (
         <View style={s.centeredWrap}>
-          <MaterialIcons name="person-search" size={44} color={tc.border} />
-          <Text style={[s.centeredDesc, { color: tc.textMuted }]}>Sin resultados para "{search}"</Text>
+          <MaterialIcons name={search ? 'person-search' : 'contacts'} size={44} color={tc.border} />
+          <Text style={[s.centeredDesc, { color: tc.textMuted }]}>
+            {search
+              ? `Sin resultados para "${search}"`
+              : 'No encontramos contactos con teléfono en tu agenda'}
+          </Text>
         </View>
       ) : (
         <FlatList

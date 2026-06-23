@@ -135,7 +135,13 @@ export default function AppointmentDetailScreen() {
       // ⚡ FIX BUG (May 18 2026): cargar servicios junto con cita y staff
       // para que el modal "Cambiar servicio" tenga la lista lista al abrirlo.
       // ⚡ Multi-servicio: cargamos también el desglose (appointment_services).
-      const [data, staffData, servicesData, breakdownData] = await Promise.all([
+      // ⚡ FIX Guideline 5.6 (cuenta nueva): allSettled en vez de all. En una
+      // cuenta recién creada /api/services puede venir vacío o 404; con
+      // Promise.all eso rechazaba TODO y caía al catch → router.back(), así que
+      // tocar una cita rebotaba en silencio. Ahora una falla de servicios/staff/
+      // desglose NUNCA aborta el render de la cita. Solo si la CITA no existe
+      // hacemos back().
+      const [apptRes, staffRes, servicesRes, breakdownRes] = await Promise.allSettled([
         apiGet<Appointment>(`/api/appointments/${id}`),
         supabase
           .from('staff_members')
@@ -147,6 +153,11 @@ export default function AppointmentDetailScreen() {
         apiGet<Service[]>('/api/services'),
         fetchAppointmentServices(id),
       ]);
+
+      // La cita es lo único que puede provocar back(): si su fetch falló o vino
+      // vacía, no hay nada que mostrar.
+      if (apptRes.status === 'rejected') throw apptRes.reason;
+      const data = apptRes.value;
       if (data) {
         setAppointment(data);
         if (data.source === 'public_link') {
@@ -154,10 +165,17 @@ export default function AppointmentDetailScreen() {
         }
       } else {
         router.back();
+        return;
       }
-      setStaffMembers(staffData as StaffMember[]);
-      setServices(servicesData || []);
-      setServiceBreakdown(breakdownData || []);
+
+      // El resto es auxiliar: si falla, lo registramos y seguimos con defaults
+      // seguros para no romper el render de la cita.
+      setStaffMembers(staffRes.status === 'fulfilled' ? (staffRes.value as StaffMember[]) : []);
+      setServices(servicesRes.status === 'fulfilled' ? (servicesRes.value || []) : []);
+      setServiceBreakdown(breakdownRes.status === 'fulfilled' ? (breakdownRes.value || []) : []);
+      if (staffRes.status === 'rejected')    logger.error('[AppointmentDetail] staff load failed:', staffRes.reason);
+      if (servicesRes.status === 'rejected') logger.error('[AppointmentDetail] services load failed:', servicesRes.reason);
+      if (breakdownRes.status === 'rejected') logger.error('[AppointmentDetail] breakdown load failed:', breakdownRes.reason);
     } catch (error) {
       logger.error('[AppointmentDetail] Error loading:', error);
       router.back();

@@ -95,7 +95,7 @@ function AppSplash() {
     <View style={splashStyles.container} pointerEvents="auto">
       <View style={splashStyles.logoWrap}>
         <Image
-          source={require('@/assets/images/app-icon-hkt.png')}
+          source={require('@/assets/images/adaptive-icon.png')}
           style={splashStyles.logo}
           resizeMode="contain"
         />

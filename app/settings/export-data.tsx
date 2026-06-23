@@ -357,14 +357,14 @@ export default function ExportDataScreen() {
 
   if (loading) {
     return (
-      <SafeAreaView style={[s.container, { backgroundColor: tc.background }]}>
+      <SafeAreaView style={[s.container, { backgroundColor: tc.bg }]}>
         <View style={s.loadingWrap}><ActivityIndicator size="large" color={colors.primary} /></View>
       </SafeAreaView>
     );
   }
 
   return (
-    <SafeAreaView style={[s.container, { backgroundColor: tc.background }]}>
+    <SafeAreaView style={[s.container, { backgroundColor: tc.bg }]}>
       <View style={[s.header, { backgroundColor: tc.card, borderBottomColor: tc.border }]}>
         <TouchableOpacity onPress={() => router.back()} style={s.back}>
           <IconSymbol android_material_icon_name="arrow-back" size={24} color={tc.text} />

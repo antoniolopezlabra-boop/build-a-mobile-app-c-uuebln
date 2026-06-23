@@ -405,42 +405,63 @@ export default function HomeScreen() {
                 <Text style={[s.dayPillText, { color: colors.primary }]}>{todayTotal} {todayTotal === 1 ? 'cita' : 'citas'}</Text>
               </View>
             </View>
-            <View style={s.dayMain}>
-              <View style={s.ring}>
-                <Svg width={112} height={112}>
-                  <Circle cx={56} cy={56} r={RING_R} stroke={isDark ? '#243049' : '#E5E7EB'} strokeWidth={11} fill="none" />
-                  <Circle
-                    cx={56} cy={56} r={RING_R}
-                    stroke={colors.primary} strokeWidth={11} fill="none"
-                    strokeLinecap="round"
-                    strokeDasharray={RING_CIRC}
-                    strokeDashoffset={ringOffset}
-                    transform="rotate(-90 56 56)"
-                  />
-                </Svg>
-                <View style={s.ringCenter}>
-                  <Text style={[s.ringBig, { color: tc.text }]}>{todayTotal}</Text>
-                  <Text style={[s.ringCap, { color: tc.textMuted }]}>{todayTotal === 1 ? 'cita' : 'citas'}</Text>
+            {todayTotal === 0 ? (
+              /* ⚡ FIX Guideline 5.6 (cuenta nueva): tres ceros apilados
+                 (0 Confirmadas / 0 Por confirmar / 0 Total) se veían como un
+                 bug. Cuando no hay citas hoy mostramos un estado amable y
+                 mantenemos el anillo (vacío) como elemento visual. */
+              <View style={s.dayMain}>
+                <View style={s.ring}>
+                  <Svg width={112} height={112}>
+                    <Circle cx={56} cy={56} r={RING_R} stroke={isDark ? '#243049' : '#E5E7EB'} strokeWidth={11} fill="none" />
+                  </Svg>
+                  <View style={s.ringCenter}>
+                    <MaterialIcons name="event-available" size={30} color={colors.primary} />
+                  </View>
+                </View>
+                <View style={s.dayEmptyText}>
+                  <Text style={[s.dayEmptyTitle, { color: tc.text }]}>Sin citas hoy</Text>
+                  <Text style={[s.dayEmptyDesc, { color: tc.textMuted }]}>Tu agenda está libre. Toca el botón + para agendar una cita.</Text>
                 </View>
               </View>
-              <View style={s.breakdown}>
-                <View style={s.bdRow}>
-                  <View style={[s.bdSwatch, { backgroundColor: colors.primary }]} />
-                  <Text style={[s.bdNum, { color: tc.text }]}>{todayConfirmed}</Text>
-                  <Text style={[s.bdLabel, { color: tc.textMuted }]}>Confirmadas</Text>
+            ) : (
+              <View style={s.dayMain}>
+                <View style={s.ring}>
+                  <Svg width={112} height={112}>
+                    <Circle cx={56} cy={56} r={RING_R} stroke={isDark ? '#243049' : '#E5E7EB'} strokeWidth={11} fill="none" />
+                    <Circle
+                      cx={56} cy={56} r={RING_R}
+                      stroke={colors.primary} strokeWidth={11} fill="none"
+                      strokeLinecap="round"
+                      strokeDasharray={RING_CIRC}
+                      strokeDashoffset={ringOffset}
+                      transform="rotate(-90 56 56)"
+                    />
+                  </Svg>
+                  <View style={s.ringCenter}>
+                    <Text style={[s.ringBig, { color: tc.text }]}>{todayTotal}</Text>
+                    <Text style={[s.ringCap, { color: tc.textMuted }]}>{todayTotal === 1 ? 'cita' : 'citas'}</Text>
+                  </View>
                 </View>
-                <View style={s.bdRow}>
-                  <View style={[s.bdSwatch, { backgroundColor: '#3B82F6' }]} />
-                  <Text style={[s.bdNum, { color: tc.text }]}>{stats.unconfirmedToday}</Text>
-                  <Text style={[s.bdLabel, { color: tc.textMuted }]}>Por confirmar</Text>
-                </View>
-                <View style={s.bdRow}>
-                  <View style={[s.bdSwatch, { backgroundColor: tc.textMuted }]} />
-                  <Text style={[s.bdNum, { color: tc.text }]}>{todayTotal}</Text>
-                  <Text style={[s.bdLabel, { color: tc.textMuted }]}>Total del día</Text>
+                <View style={s.breakdown}>
+                  <View style={s.bdRow}>
+                    <View style={[s.bdSwatch, { backgroundColor: colors.primary }]} />
+                    <Text style={[s.bdNum, { color: tc.text }]}>{todayConfirmed}</Text>
+                    <Text style={[s.bdLabel, { color: tc.textMuted }]}>Confirmadas</Text>
+                  </View>
+                  <View style={s.bdRow}>
+                    <View style={[s.bdSwatch, { backgroundColor: '#3B82F6' }]} />
+                    <Text style={[s.bdNum, { color: tc.text }]}>{stats.unconfirmedToday}</Text>
+                    <Text style={[s.bdLabel, { color: tc.textMuted }]}>Por confirmar</Text>
+                  </View>
+                  <View style={s.bdRow}>
+                    <View style={[s.bdSwatch, { backgroundColor: tc.textMuted }]} />
+                    <Text style={[s.bdNum, { color: tc.text }]}>{todayTotal}</Text>
+                    <Text style={[s.bdLabel, { color: tc.textMuted }]}>Total del día</Text>
+                  </View>
                 </View>
               </View>
-            </View>
+            )}
           </View>
         )}
 
@@ -513,20 +534,30 @@ export default function HomeScreen() {
             <View style={s.sectionRow}>
               <Text style={[s.sectionTitle, { color: tc.text }]}>Esta semana</Text>
             </View>
-            <View style={s.weekRow}>
-              <View style={[s.weekCard, { backgroundColor: tc.surface, borderColor: tc.border }]}>
-                <Text style={[s.weekNum, { color: tc.text }]}>{stats.weekAppointments}</Text>
-                <Text style={[s.weekLabel, { color: tc.textMuted }]}>Citas</Text>
+            {stats.weekAppointments === 0 ? (
+              /* ⚡ FIX Guideline 5.6 (cuenta nueva): "0 Citas / 0 Confirmadas /
+                 0% Confirmación" se leía como un error. Mostramos un estado
+                 sutil en su lugar. */
+              <View style={[s.weekEmptyCard, { backgroundColor: tc.surface, borderColor: tc.border }]}>
+                <MaterialIcons name="insights" size={18} color={tc.textMuted} />
+                <Text style={[s.weekEmptyText, { color: tc.textMuted }]}>Aún sin actividad esta semana</Text>
               </View>
-              <View style={[s.weekCard, { backgroundColor: tc.surface, borderColor: tc.border }]}>
-                <Text style={[s.weekNum, { color: tc.text }]}>{stats.confirmedWeek}</Text>
-                <Text style={[s.weekLabel, { color: tc.textMuted }]}>Confirmadas</Text>
+            ) : (
+              <View style={s.weekRow}>
+                <View style={[s.weekCard, { backgroundColor: tc.surface, borderColor: tc.border }]}>
+                  <Text style={[s.weekNum, { color: tc.text }]}>{stats.weekAppointments}</Text>
+                  <Text style={[s.weekLabel, { color: tc.textMuted }]}>Citas</Text>
+                </View>
+                <View style={[s.weekCard, { backgroundColor: tc.surface, borderColor: tc.border }]}>
+                  <Text style={[s.weekNum, { color: tc.text }]}>{stats.confirmedWeek}</Text>
+                  <Text style={[s.weekLabel, { color: tc.textMuted }]}>Confirmadas</Text>
+                </View>
+                <View style={[s.weekCard, { backgroundColor: tc.surface, borderColor: tc.border }]}>
+                  <Text style={[s.weekNum, { color: colors.primary }]}>{weekConfirmRate}%</Text>
+                  <Text style={[s.weekLabel, { color: tc.textMuted }]}>Confirmación</Text>
+                </View>
               </View>
-              <View style={[s.weekCard, { backgroundColor: tc.surface, borderColor: tc.border }]}>
-                <Text style={[s.weekNum, { color: colors.primary }]}>{weekConfirmRate}%</Text>
-                <Text style={[s.weekLabel, { color: tc.textMuted }]}>Confirmación</Text>
-              </View>
-            </View>
+            )}
           </>
         )}
 
@@ -698,6 +729,9 @@ const s = StyleSheet.create({
   bdSwatch:        { width: 9, height: 9, borderRadius: 3 },
   bdNum:           { fontSize: 18, fontWeight: '800', letterSpacing: -0.5, minWidth: 22 },
   bdLabel:         { fontSize: 12.5, fontWeight: '500' },
+  dayEmptyText:    { flex: 1, gap: 4 },
+  dayEmptyTitle:   { fontSize: 17, fontWeight: '800', letterSpacing: -0.4 },
+  dayEmptyDesc:    { fontSize: 13, fontWeight: '500', lineHeight: 18 },
 
   heroCard:        { borderRadius: 20, padding: 20, marginBottom: 16, flexDirection: 'row', alignItems: 'center', borderWidth: 1 },
   heroLeft:        { flex: 1 },
@@ -718,6 +752,8 @@ const s = StyleSheet.create({
   weekCard:        { flex: 1, borderRadius: 16, paddingVertical: 14, paddingHorizontal: 12, borderWidth: 1, alignItems: 'flex-start' },
   weekNum:         { fontSize: 22, fontWeight: '900', letterSpacing: -0.8 },
   weekLabel:       { fontSize: 11, fontWeight: '500', marginTop: 2 },
+  weekEmptyCard:   { flexDirection: 'row', alignItems: 'center', gap: 10, borderRadius: 16, paddingVertical: 18, paddingHorizontal: 16, borderWidth: 1, marginBottom: 16 },
+  weekEmptyText:   { fontSize: 13, fontWeight: '500' },
 
   unpaidCard:      { flexDirection: 'row', alignItems: 'center', borderRadius: 14, padding: 14, marginBottom: 8, borderWidth: 1, borderLeftWidth: 3, borderLeftColor: '#F97316' },
   unpaidLeft:      { flex: 1, marginRight: 10 },

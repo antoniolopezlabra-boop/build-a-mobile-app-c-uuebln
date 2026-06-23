@@ -155,7 +155,9 @@ export default function StaffFormScreen({ mode, staffId, onSaved, onCancel, rend
   const getHour = (dow: number) => hours.find(h => h.day_of_week === dow)!;
 
   const fmt = (t: string) => {
-    const [hh, mm] = t.split(':'); const h = parseInt(hh);
+    // Guard: en modo edición un staff_hours puede traer start/end nulo o
+    // malformado. Sin esto t.split(':') reventaba y dejaba la pantalla en blanco.
+    const [hh, mm] = (t || '09:00').split(':'); const h = parseInt(hh);
     return `${h % 12 || 12}:${mm} ${h >= 12 ? 'PM' : 'AM'}`;
   };
 

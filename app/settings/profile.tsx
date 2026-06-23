@@ -9,7 +9,6 @@ import { colors } from '@/styles/commonStyles';
 import { IconSymbol } from '@/components/IconSymbol';
 import { ConfirmModal } from '@/components/button';
 import { useAuth } from '@/contexts/AuthContext';
-import { BACKEND_URL, getBearerToken } from '@/utils/api';
 
 export default function ProfileSettingsScreen() {
   const router = useRouter();
@@ -36,16 +35,11 @@ export default function ProfileSettingsScreen() {
     saveLockRef.current = true;
     setSaving(true);
     try {
-      const token = await getBearerToken();
-      const response = await fetch(`${BACKEND_URL}/api/auth/update-user`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) },
-        body: JSON.stringify({ name: name.trim() }),
+      const { supabase } = await import('@/lib/supabase');
+      const { error: updateError } = await supabase.auth.updateUser({
+        data: { name: name.trim() },
       });
-      if (!response.ok) {
-        const errData = await response.json().catch(() => ({}));
-        throw new Error(errData?.message || errData?.error || `Error ${response.status}`);
-      }
+      if (updateError) throw updateError;
       await fetchUser();
       setSuccessModal(true);
     } catch (error: any) {

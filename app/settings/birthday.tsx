@@ -214,7 +214,7 @@ export default function BirthdayScreen() {
             {/* Asunto del email */}
             <Text style={s.sectionLabel}>ASUNTO DEL EMAIL</Text>
             <View style={s.card}>
-              <Text style={s.fieldLabel}>Subject line</Text>
+              <Text style={s.fieldLabel}>Asunto del email</Text>
               <TextInput
                 style={s.input}
                 value={subject}

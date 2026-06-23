@@ -320,49 +320,72 @@ export default function BookingLinkScreen() {
           </TouchableOpacity>
         )}
 
-        <View style={st.heroCard}>
-          <View style={st.heroRow}>
-            <View style={st.heroIconWrap}>
-              <MaterialIcons name="link" size={20} color="#10B981" />
+        {/* ⚡ FIX Guideline 5.6 (cuenta nueva): antes, sin link creado, esta
+            tarjeta mostraba una URL colgante "https://book.vylta.lat/" con un
+            pill verde "Activo" y un botón "Ver página" que daba 404. En cuentas
+            nuevas mostramos un onboarding y NO mostramos el pill ni la URL hasta
+            que exista un link real. */}
+        {hasLink ? (
+          <View style={st.heroCard}>
+            <View style={st.heroRow}>
+              <View style={st.heroIconWrap}>
+                <MaterialIcons name="link" size={20} color="#10B981" />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={st.heroLabel}>Tu link de citas</Text>
+                <Text style={st.heroUrl} numberOfLines={1}>{publicUrl}</Text>
+              </View>
+              <View style={[st.activePill, { backgroundColor: isActive ? '#ECFDF5' : '#1E293B' }]}>
+                <View style={[st.activeDot, { backgroundColor: isActive ? '#10B981' : '#475569' }]} />
+                <Text style={[st.activeText, { color: isActive ? '#10B981' : '#64748B' }]}>{isActive ? 'Activo' : 'Inactivo'}</Text>
+              </View>
             </View>
-            <View style={{ flex: 1 }}>
-              <Text style={st.heroLabel}>Tu link de citas</Text>
-              <Text style={st.heroUrl} numberOfLines={1}>{publicUrl}</Text>
-            </View>
-            <View style={[st.activePill, { backgroundColor: isActive ? '#ECFDF5' : '#1E293B' }]}>
-              <View style={[st.activeDot, { backgroundColor: isActive ? '#10B981' : '#475569' }]} />
-              <Text style={[st.activeText, { color: isActive ? '#10B981' : '#64748B' }]}>{isActive ? 'Activo' : 'Inactivo'}</Text>
-            </View>
-          </View>
 
-          <View style={st.actionRow}>
-            <TouchableOpacity
-              style={[st.actionBtn, copied && st.actionBtnSuccess]}
-              onPress={handleCopy}
-              activeOpacity={0.75}
-            >
-              <MaterialIcons name={copied ? 'check' : 'content-copy'} size={16} color={copied ? '#10B981' : '#F8FAFC'} />
-              <Text style={[st.actionBtnText, copied && { color: '#10B981' }]}>
-                {copied ? '¡Copiado!' : 'Copiar'}
+            <View style={st.actionRow}>
+              <TouchableOpacity
+                style={[st.actionBtn, copied && st.actionBtnSuccess]}
+                onPress={handleCopy}
+                activeOpacity={0.75}
+              >
+                <MaterialIcons name={copied ? 'check' : 'content-copy'} size={16} color={copied ? '#10B981' : '#F8FAFC'} />
+                <Text style={[st.actionBtnText, copied && { color: '#10B981' }]}>
+                  {copied ? '¡Copiado!' : 'Copiar'}
+                </Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={st.actionBtn} onPress={handleShare} activeOpacity={0.75}>
+                <MaterialIcons name="share" size={16} color="#F8FAFC" />
+                <Text style={st.actionBtnText}>Compartir</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={st.actionBtn} onPress={handleOpenLink} activeOpacity={0.75}>
+                <MaterialIcons name="open-in-browser" size={16} color="#F8FAFC" />
+                <Text style={st.actionBtnText}>Ver página</Text>
+              </TouchableOpacity>
+            </View>
+
+            {copied && (
+              <View style={st.copiedHint}>
+                <MaterialIcons name="check-circle" size={13} color="#10B981" />
+                <Text style={st.copiedHintText}>Link copiado al portapapeles — pégalo donde quieras</Text>
+              </View>
+            )}
+          </View>
+        ) : (
+          <View style={st.onboardCard}>
+            <View style={st.onboardIconWrap}>
+              <MaterialIcons name="link" size={26} color="#10B981" />
+            </View>
+            <Text style={st.onboardTitle}>Aún no tienes tu link de citas</Text>
+            <Text style={st.onboardDesc}>
+              Crea tu link público para que tus clientes agenden en línea. Elige el nombre de tu link abajo y actívalo — quedará así:
+            </Text>
+            <View style={st.onboardUrlPreview}>
+              <MaterialIcons name="link" size={13} color="#10B981" />
+              <Text style={st.onboardUrlText} numberOfLines={1}>
+                {BASE_URL}/<Text style={st.onboardUrlSlug}>{slug || 'tu-negocio'}</Text>
               </Text>
-            </TouchableOpacity>
-            <TouchableOpacity style={st.actionBtn} onPress={handleShare} activeOpacity={0.75}>
-              <MaterialIcons name="share" size={16} color="#F8FAFC" />
-              <Text style={st.actionBtnText}>Compartir</Text>
-            </TouchableOpacity>
-            <TouchableOpacity style={st.actionBtn} onPress={handleOpenLink} activeOpacity={0.75}>
-              <MaterialIcons name="open-in-browser" size={16} color="#F8FAFC" />
-              <Text style={st.actionBtnText}>Ver página</Text>
-            </TouchableOpacity>
-          </View>
-
-          {copied && (
-            <View style={st.copiedHint}>
-              <MaterialIcons name="check-circle" size={13} color="#10B981" />
-              <Text style={st.copiedHintText}>Link copiado al portapapeles — pégalo donde quieras</Text>
             </View>
-          )}
-        </View>
+          </View>
+        )}
 
         <TouchableOpacity
           style={st.qrCard}
@@ -639,6 +662,13 @@ const st = StyleSheet.create({
   actionBtnText:    { fontSize: 12, fontWeight: '600', color: '#F8FAFC' },
   copiedHint:       { flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 10, paddingHorizontal: 4 },
   copiedHintText:   { fontSize: 11, color: '#10B981', fontWeight: '500' },
+  onboardCard:      { backgroundColor: '#1E293B', borderRadius: 18, padding: 20, borderWidth: 1, borderColor: '#334155', alignItems: 'center' },
+  onboardIconWrap:  { width: 52, height: 52, borderRadius: 16, backgroundColor: '#0F3D2E', justifyContent: 'center', alignItems: 'center', marginBottom: 14, borderWidth: 1, borderColor: '#065F46' },
+  onboardTitle:     { fontSize: 17, fontWeight: '800', color: '#F8FAFC', textAlign: 'center', marginBottom: 6 },
+  onboardDesc:      { fontSize: 13, color: '#94A3B8', textAlign: 'center', lineHeight: 19, marginBottom: 14 },
+  onboardUrlPreview: { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: '#0F172A', borderRadius: 10, paddingHorizontal: 12, paddingVertical: 9, borderWidth: 1, borderColor: '#334155', maxWidth: '100%' },
+  onboardUrlText:   { fontSize: 12, color: '#64748B', fontFamily: 'monospace', flexShrink: 1 },
+  onboardUrlSlug:   { color: '#10B981' },
   section:          { gap: 10 },
   sectionTitleRow:  { flexDirection: 'row', alignItems: 'center', gap: 8 },
   sectionTitle:     { fontSize: 13, fontWeight: '700', color: '#64748B', textTransform: 'uppercase', letterSpacing: 0.6 },

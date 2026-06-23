@@ -54,7 +54,7 @@ export default function StaffHomeScreen() {
   const myStaffId = staffMemberData?.id ?? '';
 
   const loadAppointments = useCallback(async (isPull = false) => {
-    if (!orgUserId) return;
+    if (!orgUserId) { setLoading(false); return; }
     if (isPull) setRefreshing(true); else setLoading(true);
     try {
       const dateStr = toDateStr(selectedDate);

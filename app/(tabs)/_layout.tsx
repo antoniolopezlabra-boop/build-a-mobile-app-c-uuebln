@@ -173,7 +173,6 @@ export default function TabLayout() {
         <Tabs.Screen name="clients" />
         <Tabs.Screen name="reports" />
         <Tabs.Screen name="settings" />
-        <Tabs.Screen name="profile" options={{ href: null }} />
       </Tabs>
       <FloatingTabBar tabs={tabs} />
     </>

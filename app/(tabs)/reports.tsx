@@ -630,7 +630,7 @@ export default function ReportsScreen() {
   const formatDate = (d: string) =>
     new Date(d + 'T12:00:00').toLocaleDateString('es-MX', { weekday: 'short', day: 'numeric', month: 'short' });
 
-  const firstName = businessProfile?.businessName?.split(' ')[0] || user?.user_metadata?.full_name?.split(' ')[0] || user?.email?.split('@')[0] || 'Antonio';
+  const firstName = businessProfile?.businessName?.split(' ')[0] || user?.user_metadata?.full_name?.split(' ')[0] || user?.email?.split('@')[0] || 'tú';
 
   const revenueChange     = stats ? calcChange(stats.monthRevenue, stats.lastMonthRevenue) : null;
   const aptsChange        = stats ? calcChange(stats.monthAppointments, stats.lastMonthAppointments) : null;

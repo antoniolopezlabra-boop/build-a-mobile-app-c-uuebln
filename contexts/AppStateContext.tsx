@@ -526,7 +526,7 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
         >
           <View style={styles.logoWrap}>
             <Image
-              source={require('@/assets/images/app-icon-hkt.png')}
+              source={require('@/assets/images/adaptive-icon.png')}
               style={styles.logo}
               resizeMode="contain"
             />

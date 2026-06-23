@@ -365,14 +365,14 @@ export default function StaffAppointmentDetail() {
 
             <TouchableOpacity
               style={[s.actionBtn, { backgroundColor: '#FFF7ED', borderColor: '#FED7AA' }]}
-              onPress={() => Alert.alert('Confirmar', '¿Marcar como no show?', [
+              onPress={() => Alert.alert('Confirmar', '¿Marcar como no asistió?', [
                 { text: 'Cancelar', style: 'cancel' },
                 { text: 'Sí', onPress: () => updateStatus('No asistió') },
               ])}
               disabled={saving} activeOpacity={0.7}
             >
               <MaterialIcons name="person-off" size={20} color="#F97316" />
-              <Text style={[s.actionText, { color: '#F97316' }]}>No show</Text>
+              <Text style={[s.actionText, { color: '#F97316' }]}>No asistió</Text>
             </TouchableOpacity>
           </>
         )}

@@ -35,7 +35,7 @@ export default function ResetPasswordScreen() {
         <TouchableOpacity onPress={() => router.back()}>
           <Text style={styles.back}>← Volver</Text>
         </TouchableOpacity>
-        <Text style={styles.title}>🔑 Reset Password</Text>
+        <Text style={styles.title}>🔑 Restablecer contraseña</Text>
         <View style={{ width: 60 }} />
       </View>
 

@@ -169,8 +169,8 @@ export default function RegisterScreen() {
 
             <Text style={styles.disclaimer}>
               Al continuar aceptas nuestros{' '}
-              <Text style={styles.disclaimerLink}>Términos</Text> y{' '}
-              <Text style={styles.disclaimerLink}>Aviso de Privacidad</Text>.
+              <Text style={styles.disclaimerLink} onPress={() => router.push('/legal/terms')}>Términos</Text> y{' '}
+              <Text style={styles.disclaimerLink} onPress={() => router.push('/legal/privacy')}>Aviso de Privacidad</Text>.
             </Text>
 
             <TouchableOpacity

@@ -103,7 +103,17 @@ export default function NewClientScreen() {
       router.back();
     } catch (error: any) {
       saveLockRef.current = false;
-      setErrorModal({ visible: true, message: error?.message || 'Error al crear el cliente' });
+      // Traducimos errores conocidos a mensajes claros en español, evitando
+      // exponer detalles crudos de la BD (p. ej. "duplicate key ... clients_phone_key").
+      const rawMsg = (error?.message || '').toLowerCase();
+      const isDuplicatePhone =
+        error?.code === '23505' ||
+        rawMsg.includes('clients_phone_key') ||
+        ((rawMsg.includes('duplicate') || rawMsg.includes('unique')) && rawMsg.includes('phone'));
+      const friendlyMessage = isDuplicatePhone
+        ? 'Ya existe un cliente con ese teléfono.'
+        : 'No se pudo guardar el cliente. Intenta de nuevo.';
+      setErrorModal({ visible: true, message: friendlyMessage });
     } finally {
       setSaving(false);
     }

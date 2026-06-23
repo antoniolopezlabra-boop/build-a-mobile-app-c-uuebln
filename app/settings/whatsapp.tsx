@@ -16,14 +16,16 @@ import { logger } from '@/utils/logger';
 import MaterialIcons from '@expo/vector-icons/MaterialIcons';
 
 // ─── Burbuja de WhatsApp simulada ─────────────────────────────────────
-function WaBubble({ text }: { text: string }) {
+function WaBubble({ text, businessName }: { text: string; businessName?: string }) {
+  // Usamos el nombre real del negocio; si aún no carga, una etiqueta neutral.
+  const fromLabel = businessName?.trim() ? `VYLTA • ${businessName.trim()}` : 'VYLTA • Tu negocio';
   return (
     <View style={wb.container}>
       <View style={wb.header}>
         <View style={wb.avatar}>
           <MaterialIcons name="storefront" size={14} color="#fff" />
         </View>
-        <Text style={wb.from}>VYLTA • Tu Negocio</Text>
+        <Text style={wb.from}>{fromLabel}</Text>
       </View>
       <View style={wb.bubble}>
         <Text style={wb.text}>{text}</Text>
@@ -51,7 +53,8 @@ function ActiveScreen({ isGratuito, canFollowUp }: {
   canFollowUp: boolean;
 }) {
   const router = useRouter();
-  const { user } = useAuth();
+  const { user, businessProfile } = useAuth();
+  const businessName = businessProfile?.businessName;
 
   // ─── Toggle: seguimiento automático al marcar "No asistió" ───
   // Vive en whatsapp_config.no_show_followup (ON por defecto: opt-out).
@@ -127,6 +130,7 @@ function ActiveScreen({ isGratuito, canFollowUp }: {
       <Text style={s.sectionLabel}>ASÍ LO VEN TUS CLIENTES</Text>
       <View style={s.bubbleWrap}>
         <WaBubble
+          businessName={businessName}
           text={'Hola 👋 Te recordamos tu cita mañana a las 10:00 AM.\nServicio: Uñas acrílicas\n\n¿Confirmas tu asistencia?'}
         />
       </View>

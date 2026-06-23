@@ -27,11 +27,17 @@ export default function PendingPaymentsScreen() {
 
   const loadPending = async () => {
     try {
+      // ⚡ FIX (cuenta nueva / Guideline 5.6): esta pantalla es "Por cobrar",
+      // pero antes contaba TODAS las citas Completada sin importar si ya estaban
+      // pagadas → el total inflaba la deuda con citas ya cobradas. Filtramos solo
+      // las NO pagadas. Igual que el dashboard, incluimos paid NULL (cita recién
+      // completada que aún no tiene el flag) además de paid=false.
       const { data, error } = await supabase
         .from('appointments')
         .select('id, service_name, date, service_cost, client:clients(name, phone)')
         .eq('user_id', user?.id)
         .eq('status', 'Completada')
+        .or('paid.is.null,paid.eq.false')
         .order('date', { ascending: false });
 
       if (error) throw error;
@@ -64,14 +70,17 @@ export default function PendingPaymentsScreen() {
         <ActivityIndicator size="large" color="#F59E0B" style={{ flex: 1 }} />
       ) : (
         <ScrollView contentContainerStyle={styles.scroll}>
-          {/* Total */}
-          <View style={styles.totalCard}>
-            <Text style={styles.totalLabel}>Total pendiente de cobro</Text>
-            <Text style={styles.totalValue}>
-              ${total.toLocaleString('es-MX', { minimumFractionDigits: 2 })}
-            </Text>
-            <Text style={styles.totalSub}>{payments.length} servicio{payments.length !== 1 ? 's' : ''} completado{payments.length !== 1 ? 's' : ''} sin pagar</Text>
-          </View>
+          {/* Total — solo cuando hay algo por cobrar. Mostrar un hero de $0.00
+              encima de "¡Todo cobrado!" se veía contradictorio y roto. */}
+          {payments.length > 0 && (
+            <View style={styles.totalCard}>
+              <Text style={styles.totalLabel}>Total pendiente de cobro</Text>
+              <Text style={styles.totalValue}>
+                ${total.toLocaleString('es-MX', { minimumFractionDigits: 2 })}
+              </Text>
+              <Text style={styles.totalSub}>{payments.length} servicio{payments.length !== 1 ? 's' : ''} completado{payments.length !== 1 ? 's' : ''} sin pagar</Text>
+            </View>
+          )}
 
           {payments.length === 0 ? (
             <View style={styles.emptyState}>

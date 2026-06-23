@@ -225,11 +225,11 @@ export default function AdminDashboard() {
                    de mostrar el onboarding solo si el dispositivo nunca ha visto la app.
           */}
           <TouchableOpacity onPress={async () => { await signOut(); router.replace('/auth/login'); }} style={s.exitBtn}>
-            <Text style={s.exitText}>EXIT</Text>
+            <Text style={s.exitText}>SALIR</Text>
           </TouchableOpacity>
           <View style={s.headerCenter}>
             <Text style={s.headerTitle}>VYLTA</Text>
-            <Text style={s.headerSub}>CONTROL CENTER</Text>
+            <Text style={s.headerSub}>CENTRO DE CONTROL</Text>
           </View>
           <View style={s.headerRight}>
             <Text style={s.headerTime}>{timeStr}</Text>

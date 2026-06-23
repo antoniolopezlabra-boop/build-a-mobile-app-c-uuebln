@@ -96,7 +96,7 @@ export default function MarketingScreen() {
           <MaterialIcons name="arrow-back" size={24} color="#0F172A" />
         </TouchableOpacity>
         <View style={s.headerMid}>
-          <Text style={s.title}>Email Marketing</Text>
+          <Text style={s.title}>Campañas de correo</Text>
           <Text style={s.subtitle}>Campañas a tus clientes</Text>
         </View>
         <TouchableOpacity style={s.newBtn} onPress={() => router.push('/marketing/new')}>

@@ -109,6 +109,17 @@ interface SubscriptionDetails {
   status: string | null;
 }
 
+// Traducción de los estados crudos de Stripe a etiquetas en español
+const STRIPE_STATUS_LABELS: Record<string, string> = {
+  active: 'Activa',
+  past_due: 'Pago pendiente',
+  canceled: 'Cancelada',
+  trialing: 'Prueba',
+  unpaid: 'Sin pagar',
+  incomplete: 'Incompleta',
+  incomplete_expired: 'Expirada',
+};
+
 export default function SubscriptionScreen() {
   const router = useRouter();
   const {
@@ -359,7 +370,7 @@ export default function SubscriptionScreen() {
                     <View style={[s.statusBadge, { backgroundColor: subDetails.status === 'active' ? '#ECFDF5' : '#FEF3C7' }]}>
                       <View style={[s.statusDot, { backgroundColor: subDetails.status === 'active' ? '#10B981' : '#F59E0B' }]} />
                       <Text style={[s.statusBadgeText, { color: subDetails.status === 'active' ? '#065F46' : '#92400E' }]}>
-                        {subDetails.status === 'active' ? 'Activa' : subDetails.status || 'Desconocido'}
+                        {(subDetails.status ? STRIPE_STATUS_LABELS[subDetails.status] : undefined) ?? 'Desconocido'}
                       </Text>
                     </View>
                   </View>
