@@ -12,20 +12,25 @@ Deno.serve(async (req: Request) => {
       return new Response('Method not allowed', { status: 405, headers: corsHeaders });
     }
 
-    const { user_id } = await req.json();
-
-    if (!user_id) {
-      return new Response(
-        JSON.stringify({ error: 'user_id is required' }),
-        { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-      );
-    }
-
     // Get stripe_customer_id from subscription_plans
     const supabase = createClient(
       Deno.env.get('SUPABASE_URL') ?? '',
       Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
     );
+
+    // verify_jwt=true: el gateway ya validó la firma del JWT. Derivamos la
+    // identidad del token (NO se confía en el body) para evitar IDOR: que un
+    // usuario abra el portal de Stripe de otro pasando un user_id ajeno.
+    const authHeader = req.headers.get('Authorization') ?? '';
+    const jwt = authHeader.replace('Bearer ', '').trim();
+    const { data: { user }, error: authError } = await supabase.auth.getUser(jwt);
+    if (authError || !user) {
+      return new Response(
+        JSON.stringify({ error: 'No autorizado.' }),
+        { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
+    }
+    const user_id = user.id;
 
     const { data: plan, error: planError } = await supabase
       .from('subscription_plans')

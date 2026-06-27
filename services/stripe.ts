@@ -1,4 +1,5 @@
 import { Linking } from 'react-native';
+import { supabase } from '@/lib/supabase';
 
 // CLAVE PUBLICABLE DE PRODUCCIÓN (segura para frontend)
 // NO confundir con sk_live_ ni whsec_ (esas SÍ son secretas)
@@ -103,10 +104,18 @@ export const openStripePortal = async (userId: string): Promise<{ success: boole
   }
 
   try {
+    // El edge function tiene verify_jwt=true: el gateway de Supabase exige un
+    // JWT válido en Authorization, o devuelve 401 antes de ejecutar la función.
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session?.access_token) {
+      return { success: false, error: 'Tu sesión expiró. Vuelve a iniciar sesión.' };
+    }
+
     const response = await fetch(`${SUPABASE_URL}/functions/v1/create-portal-session`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
+        'Authorization': `Bearer ${session.access_token}`,
       },
       body: JSON.stringify({ user_id: userId }),
     });
