@@ -11,7 +11,10 @@ import { supabase } from '@/lib/supabase';
 import { IconSymbol } from '@/components/IconSymbol';
 import MaterialIcons from '@expo/vector-icons/MaterialIcons';
 import * as Sharing from 'expo-sharing';
-import * as FileSystem from 'expo-file-system';
+// expo-file-system v19 (SDK 54) movió la API clásica (documentDirectory,
+// writeAsStringAsync, EncodingType) a /legacy. Sin esto, writeAsStringAsync es
+// undefined en runtime y la exportación falla con "No se pudieron exportar...".
+import * as FileSystem from 'expo-file-system/legacy';
 import { colors } from '@/styles/commonStyles';
 
 // ══════════════════════════════════════════════════════════════
