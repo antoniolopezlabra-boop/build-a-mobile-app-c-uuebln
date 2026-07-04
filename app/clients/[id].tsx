@@ -116,9 +116,11 @@ export default function ClientDetailScreen() {
   };
 
   const getInitials = (name: string) => {
-    const parts = name.trim().split(' ');
+    // ⚡ FIX BUG (jul 2026): split robusto (antes "MUNDEFINED" con doble espacio).
+    const parts = (name || '').trim().split(/\s+/).filter(Boolean);
     if (parts.length >= 2) return (parts[0][0] + parts[1][0]).toUpperCase();
-    return name.substring(0, 2).toUpperCase();
+    if (parts.length === 1) return parts[0].substring(0, 2).toUpperCase();
+    return '?';
   };
 
   const formatDate = (dateStr: string) => {

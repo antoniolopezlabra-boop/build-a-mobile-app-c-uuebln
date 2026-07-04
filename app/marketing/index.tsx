@@ -7,6 +7,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import MaterialIcons from '@expo/vector-icons/MaterialIcons';
 import { useAuth } from '@/contexts/AuthContext';
+import { usePlan } from '@/contexts/PlanContext';
 import { colors } from '@/styles/commonStyles';
 
 interface Campaign {
@@ -35,10 +36,17 @@ const SEGMENT_LABELS: Record<string, string> = {
 export default function MarketingScreen() {
   const router = useRouter();
   const { user } = useAuth();
+  const { isPremium } = usePlan();
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [campaigns, setCampaigns] = useState<Campaign[]>([]);
   const [stats, setStats] = useState({ total: 0, sent: 0, recipients: 0 });
+
+  // ⚡ FIX BUG (jul 2026): Email Marketing es feature de plan Luxury, pero esta pantalla
+  // (lista) no tenía candado de plan — solo la de crear campaña. Redirigimos si no aplica.
+  useEffect(() => {
+    if (!isPremium) { router.replace('/settings/subscription'); }
+  }, [isPremium]);
 
   useEffect(() => { loadCampaigns(); }, []);
 

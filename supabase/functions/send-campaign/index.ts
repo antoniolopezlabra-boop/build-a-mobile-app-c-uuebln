@@ -93,6 +93,17 @@ serve(async (req) => {
     const payload = await req.json()
     const supabase = createClient(SUPABASE_URL, SUPABASE_KEY)
 
+    // ⚡ FIX SEGURIDAD (jul 2026): derivar identidad del JWT. Antes se confiaba en
+    // payload.userId/campaignId sin verificar quién llama → IDOR: enviar correo a la
+    // lista de clientes de otro negocio desde el dominio verificado de VYLTA
+    // (spam/phishing cross-tenant + quema de créditos de Resend).
+    const authHeader = req.headers.get('Authorization') ?? ''
+    const jwt = authHeader.replace('Bearer ', '').trim()
+    const { data: { user: caller }, error: authError } = await supabase.auth.getUser(jwt)
+    if (authError || !caller) {
+      return json({ error: 'No autorizado' }, 401)
+    }
+
     let campaignId: string
     let userId: string
     let subject: string
@@ -122,6 +133,18 @@ serve(async (req) => {
       campaignId = newCampaign.id
     } else {
       throw new Error('Parámetros requeridos: campaignId O (userId + subject + body)')
+    }
+
+    // ⚡ FIX SEGURIDAD (jul 2026): el caller debe ser el DUEÑO de la campaña/segmento.
+    if (caller.id !== userId) {
+      return json({ error: 'No autorizado' }, 403)
+    }
+    // ⚡ FIX SEGURIDAD (jul 2026): Email Marketing es feature de plan Luxury — validar
+    // el plan en el SERVIDOR (antes el gate era solo client-side → usable gratis).
+    const { data: emSub } = await supabase.from('subscription_plans').select('plan_type').eq('user_id', userId).single()
+    const emPlan = (emSub?.plan_type ?? '').toLowerCase()
+    if (emPlan !== 'premium' && emPlan !== 'vippremium') {
+      return json({ error: 'Email Marketing está disponible en el plan Luxury.', code: 'PLAN_REQUIRED' }, 403)
     }
 
     const spamCheck = checkSpamScore(subject, body)

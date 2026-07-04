@@ -3,9 +3,14 @@ import { Platform } from 'react-native';
 import * as Notifications from 'expo-notifications';
 import * as Device from 'expo-device';
 import Constants from 'expo-constants';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { supabase } from '@/lib/supabase';
 import { useAuth } from '@/contexts/AuthContext';
 import { logger } from '@/utils/logger';
+
+// Estado del permiso de notificaciones, persistido para que la pantalla de
+// recordatorios (WhatsApp) pueda avisar al usuario si lo negó. Ver useNotifPermission.
+export const PUSH_PERM_KEY = 'vylta_push_permission';
 
 // ══════════════════════════════════════════════════════════════════
 // usePushToken — Pide permiso de notificaciones y guarda el Expo Push
@@ -163,8 +168,13 @@ async function registerForPushNotifications(userId: string): Promise<boolean> {
 
   if (finalStatus !== 'granted') {
     console.error('[VYLTA-PUSH] Step 4 FAIL: Usuario no concedió permiso, final status:', finalStatus);
+    // ⚡ FIX BUG (jul 2026): persistir el estado para que la pantalla de recordatorios
+    // avise al usuario que no recibirá notificaciones (antes el fallo era silencioso:
+    // el dueño creía que le llegarían recordatorios y nunca llegaban).
+    try { await AsyncStorage.setItem(PUSH_PERM_KEY, 'denied'); } catch {}
     return false;
   }
+  try { await AsyncStorage.setItem(PUSH_PERM_KEY, 'granted'); } catch {}
 
   // 5. Obtener Expo Push Token
   // El projectId viene del app.json (extra.eas.projectId)

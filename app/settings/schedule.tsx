@@ -62,6 +62,14 @@ export default function ScheduleSettingsScreen() {
     setSchedule(prev => prev.map(day => day.dayOfWeek === dayOfWeek ? { ...day, [field]: time } : day));
 
   const handleSave = async () => {
+    // ⚡ FIX BUG (jul 2026): validar que el cierre sea posterior a la apertura en los
+    // días abiertos. Antes se podía guardar 18:00→09:00 y el día quedaba sin horarios
+    // en el link público sin aviso. (El server también lo rechaza; esto da mejor UX.)
+    const invalidDay = schedule.find(d => d.isOpen && d.endTime <= d.startTime);
+    if (invalidDay) {
+      setErrorModal({ visible: true, message: 'Revisa tus horarios: la hora de cierre debe ser posterior a la de apertura.' });
+      return;
+    }
     setSaving(true);
     try {
       await Promise.all(schedule.map(day =>

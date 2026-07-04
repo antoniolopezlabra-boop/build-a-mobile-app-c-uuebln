@@ -101,7 +101,7 @@ function extractIdFromPath(path: string): string {
 //      infinitamente sin tocar la cuota mensual.
 //   3. ESTÁNDAR SaaS: la mayoría de SaaS cuentan recursos creados, no
 //      devuelven crédito por cancelaciones.
-async function enforceGratuitoMonthlyLimit(userId: string): Promise<void> {
+async function enforceGratuitoMonthlyLimit(userId: string, appointmentDate: string): Promise<void> {
   const { data: sub } = await supabase
     .from('subscription_plans')
     .select('plan_type')
@@ -111,17 +111,29 @@ async function enforceGratuitoMonthlyLimit(userId: string): Promise<void> {
   const planType = sub?.plan_type?.toLowerCase() ?? 'gratuito';
   if (planType !== 'gratuito') return;
 
-  const now = new Date();
-  const monthStart = getMonthStartString(now.getFullYear(), now.getMonth());
-  const monthEnd   = getMonthEndString(now.getFullYear(), now.getMonth());
+  // ⚡ FIX BUG (jul 2026): el límite se cuenta por el MES DE LA CITA, no por el mes
+  // actual del calendario. Antes usaba new Date() → un usuario Gratuito podía crear
+  // citas ilimitadas fechándolas a meses futuros (bypass total del tope), y a la vez
+  // se le bloqueaba agendar en un mes futuro vacío si el mes en curso estaba lleno.
+  const [ay, am] = appointmentDate.split('-').map(Number);
+  const monthStart = getMonthStartString(ay, am - 1); // am es 1-based; getMonth() es 0-based
+  const monthEnd   = getMonthEndString(ay, am - 1);
 
   // NOTA: Sin filtro de status — TODAS las citas del mes cuentan
-  const { count } = await supabase
+  const { count, error } = await supabase
     .from('appointments')
     .select('id', { count: 'exact', head: true })
     .eq('user_id', userId)
     .gte('date', monthStart)
     .lte('date', monthEnd);
+
+  // ⚡ FIX BUG (jul 2026): fail-closed. Antes se ignoraba el error y count quedaba
+  // null → el límite "fallaba abierto" (dejaba crear estando al tope si la query
+  // fallaba por red/RLS).
+  if (error) {
+    logger.error('[enforceGratuitoMonthlyLimit] DB error:', error);
+    throw new Error('No se pudo validar tu límite de citas. Intenta de nuevo.');
+  }
 
   if ((count ?? 0) >= GRATUITO_MONTHLY_LIMIT) {
     // iOS (Guideline 3.1.1): sin invitación a comprar/actualizar plan.
@@ -194,7 +206,7 @@ async function validateOverlappingPermission(userId: string, isOverlapping: bool
 // NOTA: SÍ excluye citas canceladas — un slot cancelado SÍ está libre
 // para volver a reservarse.
 // ────────────────────────────────────────────────────────────────────
-async function validateNoTimeConflict(
+export async function validateNoTimeConflict(
   userId: string,
   date: string,
   startTime: string,
@@ -216,8 +228,18 @@ async function validateNoTimeConflict(
     query = query.neq('id', excludeAppointmentId);
   }
 
-  if (allowOverlap && staffId) {
+  // ⚡ FIX BUG (jul 2026): lógica de conflicto corregida.
+  //   • Con colaborador asignado → solo conflictúa con citas del MISMO colaborador
+  //     (dos colaboradores distintos SÍ pueden atender en paralelo). Antes, sin
+  //     empalme, una cita de un staff chocaba con la de cualquier otro staff.
+  //   • Sin colaborador + empalme permitido (plan de pago + toggle) → se permite el
+  //     solapamiento general. Antes la UI ofrecía slots ⚡ que el server SIEMPRE
+  //     rechazaba con SLOT_TAKEN (la feature de pago era inutilizable).
+  //   • Sin colaborador + sin empalme → cualquier cita del negocio ocupa el slot.
+  if (staffId) {
     query = query.eq('staff_id', staffId);
+  } else if (allowOverlap) {
+    return; // empalme general permitido: no hay conflicto que bloquear
   }
 
   const { data: conflicts, error } = await query.limit(1);
@@ -250,7 +272,7 @@ async function validateNoTimeConflict(
 // IMPORTANTE: La convención de day_of_week en el proyecto es: 0=Lunes ... 6=Domingo.
 // JS getDay() devuelve 0=Domingo ... 6=Sábado, así que convertimos.
 // ────────────────────────────────────────────────────────────────────
-async function validateNoTimeBlock(
+export async function validateNoTimeBlock(
   userId: string,
   date: string,
   startTime: string,
@@ -320,7 +342,7 @@ function timeToMin(t: string): number {
   return h * 60 + m;
 }
 
-async function getAllowOverlapping(userId: string): Promise<boolean> {
+export async function getAllowOverlapping(userId: string): Promise<boolean> {
   const { data } = await supabase
     .from('business_profiles')
     .select('allow_overlapping')
@@ -468,7 +490,21 @@ export async function apiGet<T>(path: string): Promise<T> {
     const ninetyDaysAgoStr = getDateStringDaysFromNow(-90);
     const { data, error } = await supabase.from('clients').select('*').eq('user_id', userId).lt('last_visit', ninetyDaysAgoStr);
     if (error) throw error;
-    return (data || []) as T;
+    // ⚡ FIX BUG (jul 2026): antes se devolvían las filas CRUDAS (snake_case) sin
+    // mapear, así que la pantalla leía client.daysSinceLastVisit = undefined y
+    // mostraba "Sin visita hace NaN años". Ahora se mapea y se calculan los días.
+    const nowMs = Date.now();
+    return ((data || []).map((c: any) => ({
+      id: c.id,
+      name: c.name,
+      phone: c.phone,
+      email: c.email,
+      lastVisit: c.last_visit,
+      totalVisits: c.total_visits ?? 0,
+      daysSinceLastVisit: c.last_visit
+        ? Math.floor((nowMs - new Date(c.last_visit + 'T12:00:00').getTime()) / 86400000)
+        : 999,
+    }))) as T;
   }
 
   const statsMatch = path.match(/^\/api\/clients\/([^/]+)\/stats$/);
@@ -538,8 +574,8 @@ export async function apiPost<T>(path: string, body: any): Promise<T> {
   const userId = await getCurrentUserId();
 
   if (path === '/api/appointments') {
-    // ── 1. Validar límite del plan Gratuito ──
-    await enforceGratuitoMonthlyLimit(userId);
+    // ── 1. Validar límite del plan Gratuito (por el mes de la cita) ──
+    await enforceGratuitoMonthlyLimit(userId, body.date);
 
     const startTime = body.time;
     const endTime = body.endTime || calcEndTime(startTime, 30);
@@ -609,23 +645,10 @@ export async function apiPost<T>(path: string, body: any): Promise<T> {
 export async function apiPatch<T>(path: string, body: any): Promise<T> {
   const userId = await getCurrentUserId();
 
-  if (path.includes('/reschedule')) {
-    const parts = path.split('/');
-    const id = parts[3];
-    if (!id) throw new Error(`Invalid path: missing ID in ${path}`);
-    const { data, error } = await supabase.from('appointments').update({ date: body.date, start_time: body.time, status: 'Reagendada', updated_at: new Date().toISOString() }).eq('id', id).eq('user_id', userId).select().single();
-    if (error) throw error;
-    return data as T;
-  }
-
-  if (path.includes('/status')) {
-    const parts = path.split('/');
-    const id = parts[3];
-    if (!id) throw new Error(`Invalid path: missing ID in ${path}`);
-    const { data, error } = await supabase.from('appointments').update({ status: body.status, updated_at: new Date().toISOString() }).eq('id', id).eq('user_id', userId).select().single();
-    if (error) throw error;
-    return data as T;
-  }
+  // NOTA (jul 2026): se eliminaron las ramas muertas '/reschedule' y '/status' de
+  // apiPatch. No tenían callers (reagendar usa apiPut; cambiar estado/servicio usa
+  // la rama genérica '/api/appointments/:id' de abajo). La de '/reschedule' además
+  // era peligrosa: escribía start_time sin recalcular end_time → end_time < start_time.
 
   if (path.startsWith('/api/appointments/')) {
     const id = extractIdFromPath(path);
@@ -696,18 +719,20 @@ export async function apiDelete<T>(path: string): Promise<T> {
   throw new Error(`Unknown API path: ${path}`);
 }
 
-export async function getBearerToken(): Promise<string | null> {
-  const { data: { session } } = await supabase.auth.getSession();
-  return session?.access_token || null;
-}
-
-export const BACKEND_URL = 'https://nhjmwmkaduiaifgztymi.supabase.co';
-
 export async function apiPut<T>(path: string, body: any): Promise<T> {
   const userId = await getCurrentUserId();
 
   if (path.startsWith('/api/business-hours/')) {
     const dayOfWeek = parseInt(path.split('/').pop() || '0');
+    // ⚡ FIX BUG (jul 2026): validar que el cierre sea posterior a la apertura.
+    // Antes se guardaba un rango invertido (ej. 18:00→09:00) sin error; el generador
+    // de slots lo interpretaba como "día cerrado" y el link público no ofrecía
+    // horarios, sin avisarle al negocio.
+    if (body.isOpen && body.startTime && body.endTime && body.endTime <= body.startTime) {
+      const err: any = new Error('La hora de cierre debe ser posterior a la de apertura.');
+      err.code = 'INVALID_HOURS';
+      throw err;
+    }
     const { data: existing } = await supabase.from('business_hours').select('id').eq('user_id', userId).eq('day_of_week', dayOfWeek).single();
     if (existing) {
       const { data, error } = await supabase.from('business_hours').update({ start_time: body.startTime, end_time: body.endTime, is_open: body.isOpen, updated_at: new Date().toISOString() }).eq('user_id', userId).eq('day_of_week', dayOfWeek).select().single();

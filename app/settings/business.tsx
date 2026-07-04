@@ -203,11 +203,11 @@ export default function BusinessSettingsScreen() {
       quality: 0.8,
     });
     if (!result.canceled && result.assets && result.assets[0]) {
-      await uploadLogo(result.assets[0].uri);
+      await uploadLogo(result.assets[0].uri, result.assets[0].mimeType);
     }
   };
 
-  const uploadLogo = async (uri: string) => {
+  const uploadLogo = async (uri: string, mimeType?: string) => {
     setUploadingLogo(true);
     try {
       const { getCurrentUserId } = await import('@/utils/api');
@@ -224,10 +224,15 @@ export default function BusinessSettingsScreen() {
       for (let i = 0; i < binary.length; i++) arr[i] = binary.charCodeAt(i);
       if (arr.length === 0) throw new Error('La imagen seleccionada esta vacia.');
 
-      const fileName = `${userId}/logo_${Date.now()}.jpg`;
+      // ⚡ FIX BUG (jul 2026): usar el mime/extensión reales del asset. Antes se subía
+      // SIEMPRE como .jpg con contentType image/jpeg; un PNG/HEIC/WebP quedaba mal
+      // etiquetado y podía no renderizar en el link público (sobre todo en Android).
+      const mime = mimeType || 'image/jpeg';
+      const ext = mime === 'image/png' ? 'png' : mime === 'image/webp' ? 'webp' : 'jpg';
+      const fileName = `${userId}/logo_${Date.now()}.${ext}`;
       const { error: uploadError } = await supabase.storage
         .from('logos')
-        .upload(fileName, arr, { contentType: 'image/jpeg', upsert: true });
+        .upload(fileName, arr, { contentType: mime, upsert: true });
       if (uploadError) throw uploadError;
 
       const { data: urlData } = supabase.storage.from('logos').getPublicUrl(fileName);

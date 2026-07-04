@@ -297,13 +297,12 @@ export default function RescheduleAppointmentScreen() {
 
       setTimeSlots(slots);
     } catch {
-      const slots: TimeSlot[] = [];
-      for (let h = 9; h < 19; h++) {
-        for (let m = 0; m < 60; m += 30) {
-          slots.push({ time: `${h.toString().padStart(2,'0')}:${m.toString().padStart(2,'0')}`, available: true });
-        }
-      }
-      setTimeSlots(slots);
+      // ⚡ FIX BUG (jul 2026): si falla la carga de disponibilidad, NO marcar todos
+      // los horarios como libres. Antes se generaban 9:00-18:30 todos available →
+      // el usuario podía reagendar sobre otra cita, a un día cerrado o al pasado.
+      // Dejamos la lista vacía; el usuario ve "sin horarios" y no reagenda a ciegas.
+      setTimeSlots([]);
+      setErrorModal({ visible: true, message: 'No se pudo cargar la disponibilidad. Revisa tu conexión e intenta de nuevo.' });
     } finally {
       setLoadingSlots(false);
     }

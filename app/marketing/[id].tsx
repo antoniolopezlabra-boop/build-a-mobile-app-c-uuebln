@@ -7,6 +7,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import MaterialIcons from '@expo/vector-icons/MaterialIcons';
 import { useAuth } from '@/contexts/AuthContext';
+import { usePlan } from '@/contexts/PlanContext';
 import { ConfirmModal } from '@/components/button';
 
 interface Campaign {
@@ -38,12 +39,19 @@ export default function CampaignDetailScreen() {
   const params = useLocalSearchParams();
   const id = Array.isArray(params.id) ? params.id[0] : params.id;
   const { user, businessProfile } = useAuth();
+  const { isPremium } = usePlan();
 
   const [loading, setLoading] = useState(true);
   const [campaign, setCampaign] = useState<Campaign | null>(null);
   const [deleting, setDeleting] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [errorModal, setErrorModal] = useState({ visible: false, message: '' });
+
+  // ⚡ FIX BUG (jul 2026): candado de plan Luxury también en el detalle de campaña
+  // (antes solo la pantalla de crear lo tenía).
+  useEffect(() => {
+    if (!isPremium) { router.replace('/settings/subscription'); }
+  }, [isPremium]);
 
   useEffect(() => {
     if (id) loadCampaign();

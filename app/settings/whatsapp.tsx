@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity,
-  ActivityIndicator, Switch, Alert, Platform,
+  ActivityIndicator, Switch, Alert, Platform, Linking,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
@@ -13,6 +13,8 @@ import { useAuth } from '@/contexts/AuthContext';
 import { useTheme } from '@/contexts/ThemeContext';
 import { supabase } from '@/lib/supabase';
 import { logger } from '@/utils/logger';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { PUSH_PERM_KEY } from '@/hooks/usePushToken';
 import MaterialIcons from '@expo/vector-icons/MaterialIcons';
 
 // ─── Burbuja de WhatsApp simulada ─────────────────────────────────────
@@ -271,6 +273,7 @@ export default function WhatsAppSettingsScreen() {
   const { colors: tc } = useTheme();
   const [loading, setLoading] = useState(true);
   const [errorModal, setErrorModal] = useState({ visible: false, message: '' });
+  const [pushDenied, setPushDenied] = useState(false);
 
   // Seguimiento de "No asistió": solo planes pagados (Premium/Luxury en UI).
   const canFollowUp = isBasico || isPremium;
@@ -278,6 +281,9 @@ export default function WhatsAppSettingsScreen() {
   useEffect(() => {
     // Carga rápida — la pantalla es informativa, no requiere config del backend
     setLoading(false);
+    // ⚡ FIX (jul 2026): avisar si el permiso de notificaciones fue denegado, para que
+    // el dueño sepa que no recibirá recordatorios (antes el fallo era silencioso).
+    AsyncStorage.getItem(PUSH_PERM_KEY).then(v => setPushDenied(v === 'denied')).catch(() => {});
   }, []);
 
   if (loading) {
@@ -309,6 +315,21 @@ export default function WhatsAppSettingsScreen() {
         </View>
         <View style={{ width: 32 }} />
       </View>
+
+      {pushDenied && (
+        <TouchableOpacity
+          onPress={() => Linking.openSettings()}
+          activeOpacity={0.85}
+          style={{ flexDirection: 'row', alignItems: 'center', gap: 10, margin: 16, marginBottom: 0, padding: 14, borderRadius: 12, backgroundColor: '#FEF3C7', borderWidth: 1, borderColor: '#FCD34D' }}
+        >
+          <MaterialIcons name="notifications-off" size={20} color="#B45309" />
+          <View style={{ flex: 1 }}>
+            <Text style={{ fontSize: 13, fontWeight: '700', color: '#92400E' }}>Notificaciones desactivadas</Text>
+            <Text style={{ fontSize: 12, color: '#B45309', marginTop: 2 }}>No recibirás recordatorios de citas. Toca para activarlas en Ajustes.</Text>
+          </View>
+          <MaterialIcons name="chevron-right" size={20} color="#B45309" />
+        </TouchableOpacity>
+      )}
 
       {/* Todos los planes tienen acceso a la pantalla informativa.
           isGratuito se pasa solo para mostrar el aviso del límite de 10 citas/mes.

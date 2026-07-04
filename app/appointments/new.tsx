@@ -670,6 +670,14 @@ function NewAppointmentInner() {
     if (!selectedClient) { setErrorModal({ visible: true, message: 'Por favor selecciona un cliente' }); return; }
     if (!service.trim())  { setErrorModal({ visible: true, message: 'Por favor selecciona o ingresa al menos un servicio' }); return; }
     if (selectedBlocks.length === 0 || !time) { setErrorModal({ visible: true, message: 'Por favor selecciona un horario disponible' }); return; }
+    // ⚡ FIX BUG (jul 2026): asegurar que los bloques seleccionados cubren la duración
+    // total de los servicios. Antes, si el rango contiguo no estaba libre, quedaba una
+    // selección más corta → la cita se guardaba con end_time menor que la duración real
+    // y el motor de conflictos permitía reservar sobre el tramo final (doble-booking).
+    if (totalServiceDuration > 0 && selectedBlocks.length * 30 < totalServiceDuration) {
+      setErrorModal({ visible: true, message: 'Los horarios seleccionados no cubren la duración total del servicio. Elige un inicio con suficientes espacios libres consecutivos.' });
+      return;
+    }
     const lastBlock = selectedBlocks.length > 0 ? selectedBlocks[selectedBlocks.length-1] : time;
     const [lh, lm] = lastBlock.split(':').map(Number);
     const endMinutes = lh*60+lm+30;

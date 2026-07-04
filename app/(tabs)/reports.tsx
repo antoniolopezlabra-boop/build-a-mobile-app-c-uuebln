@@ -469,8 +469,11 @@ export default function ReportsScreen() {
         }
       }
 
+      // ⚡ FIX (jul 2026): umbral 60→90 días para coincidir con la pantalla
+      // "Clientes inactivos" (/api/clients/inactive usa 90 y su texto dice 90).
+      // Antes el aviso contaba 60 días y la lista 90 → cifras que no cuadraban.
       const sixtyDaysAgo = new Date();
-      sixtyDaysAgo.setDate(sixtyDaysAgo.getDate() - 60);
+      sixtyDaysAgo.setDate(sixtyDaysAgo.getDate() - 90);
       const sixtyDaysAgoStr = toLocalDateString(sixtyDaysAgo);
 
       const { count: inactiveCount } = await supabase
@@ -493,18 +496,18 @@ export default function ReportsScreen() {
         .gte('date', lastMonthStartStr)
         .lte('date', lastMonthEndStr);
 
+      // ⚡ FIX BUG (jul 2026): el ticket promedio dividía los ingresos de citas
+      // COBRADAS entre TODAS las completadas (incluidas las no cobradas) → ticket
+      // artificialmente bajo mientras hubiera cobros pendientes. Ahora se divide
+      // entre las citas que realmente generaron ese ingreso (las pagadas).
       const completedThisMonth = (mA || []).filter((a: any) => ['Completada', 'Pagado'].includes(a.status)).length;
-      const avgTicket = completedThisMonth > 0 ? Math.round(monthRevenue / completedThisMonth) : 0;
+      const paidCount = paidAppointments.length;
+      const avgTicket = paidCount > 0 ? Math.round(monthRevenue / paidCount) : 0;
 
-      const { data: lastMonthCompletedData } = await supabase
-        .from('appointments')
-        .select('id')
-        .eq('user_id', userId)
-        .in('status', ['Completada', 'Pagado'])
-        .gte('date', lastMonthStartStr)
-        .lte('date', lastMonthEndStr);
-      const lastMonthCompleted = lastMonthCompletedData?.length || 0;
-      const avgTicketLastMonth = lastMonthCompleted > 0 ? Math.round(lastMonthRevenue / lastMonthCompleted) : 0;
+      // ⚡ FIX BUG (jul 2026): dividir el ingreso del mes anterior entre las citas
+      // PAGADAS que lo generaron (no entre todas las completadas), igual que avgTicket.
+      const lastMonthPaidCount = (revLegacyPrev || []).length + (revNewPrev || []).length;
+      const avgTicketLastMonth = lastMonthPaidCount > 0 ? Math.round(lastMonthRevenue / lastMonthPaidCount) : 0;
 
       const { count: clientsThisMonth } = await supabase.from('clients').select('*', { count: 'exact', head: true }).eq('user_id', userId).gte('created_at', monthStartStr).lte('created_at', monthEndStr + 'T23:59:59');
       const { count: clientsLastMonth } = await supabase.from('clients').select('*', { count: 'exact', head: true }).eq('user_id', userId).gte('created_at', lastMonthStartStr).lte('created_at', lastMonthEndStr + 'T23:59:59');

@@ -10,6 +10,7 @@ import DateTimePicker from '@react-native-community/datetimepicker';
 import { useTheme } from '@/contexts/ThemeContext';
 import { supabase } from '@/lib/supabase';
 import { getStatusColor } from '@/utils/appointmentUtils';
+import { validateNoTimeConflict, validateNoTimeBlock, getAllowOverlapping } from '@/utils/api';
 
 function toDateStr(d: Date) {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
@@ -17,6 +18,7 @@ function toDateStr(d: Date) {
 
 interface AppointmentDetail {
   id: string;
+  user_id: string;
   date: string;
   start_time: string;
   end_time: string | null;
@@ -69,7 +71,7 @@ export default function StaffAppointmentDetail() {
     try {
       const { data, error } = await supabase
         .from('appointments')
-        .select('id, date, start_time, end_time, service_name, service_cost, status, paid, notes, staff_id, client_name_temp, client_phone_temp, client:clients(id, name, phone), staff:staff_members(name, color)')
+        .select('id, user_id, date, start_time, end_time, service_name, service_cost, status, paid, notes, staff_id, client_name_temp, client_phone_temp, client:clients(id, name, phone), staff:staff_members(name, color)')
         .eq('id', id)
         .single();
       if (error) throw error;
@@ -193,6 +195,14 @@ export default function StaffAppointmentDetail() {
       }
       const endMin = h * 60 + m + durationMin;
       const endTime = `${Math.floor(endMin/60).toString().padStart(2,'0')}:${(endMin%60).toString().padStart(2,'0')}`;
+
+      // ⚡ FIX BUG (jul 2026): validar conflicto de horario y bloqueos ANTES de escribir.
+      // Antes la staff-app reagendaba directo a la BD sin ninguna validación → doble-
+      // booking en la agenda del dueño y reagendados a horas de comida / días cerrados.
+      // Se valida contra el negocio (appt.user_id) reusando la lógica canónica de la app.
+      const allowOverlap = await getAllowOverlapping(appt.user_id);
+      await validateNoTimeConflict(appt.user_id, dateStr, rescheduleTime, endTime, appt.staff_id ?? null, allowOverlap, appt.id);
+      await validateNoTimeBlock(appt.user_id, dateStr, rescheduleTime, endTime, appt.staff_id ?? null);
 
       const { error } = await supabase
         .from('appointments')

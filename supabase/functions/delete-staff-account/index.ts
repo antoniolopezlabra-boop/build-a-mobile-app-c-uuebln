@@ -27,6 +27,19 @@ serve(async (req) => {
 
     const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY)
 
+    // ⚡ FIX SEGURIDAD (jul 2026): derivar identidad del JWT y exigir que quien llama
+    // sea el dueño de la organización (antes se confiaba en el body → IDOR destructivo:
+    // revocar el acceso de un colaborador de otro negocio).
+    const authHeader = req.headers.get('Authorization') ?? ''
+    const jwt = authHeader.replace('Bearer ', '').trim()
+    const { data: { user: caller }, error: authError } = await supabase.auth.getUser(jwt)
+    if (authError || !caller) {
+      return json({ error: 'No autorizado' }, 401)
+    }
+    if (caller.id !== organizationUserId) {
+      return json({ error: 'No autorizado para esta organización' }, 403)
+    }
+
     // Buscar la cuenta del colaborador verificando que pertenece a esta organización
     const { data: account, error: selectError } = await supabase
       .from('staff_accounts')

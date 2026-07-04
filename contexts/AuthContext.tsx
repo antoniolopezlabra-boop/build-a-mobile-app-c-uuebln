@@ -79,7 +79,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
       if (!mounted) return;
       logger.log("[Auth] State change:", event);
-      if (event === "USER_UPDATED") return;
+
+      // ⚡ FIX BUG (jul 2026): antes se hacía `if (USER_UPDATED) return;` y se
+      // descartaba el evento por completo → cambiar nombre/email/contraseña vía
+      // updateUser no refrescaba el usuario en la app hasta reiniciar. Ahora, en
+      // USER_UPDATED con sesión válida, forzamos la recarga del usuario limpiando
+      // el guard de "ya cargado".
+      if (event === "USER_UPDATED" && session?.user) {
+        loadedUserIdRef.current = null;
+      }
 
       if (session?.user) {
         if (loadedUserIdRef.current === session.user.id) return;
@@ -330,6 +338,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const signOut = async () => {
     try {
       setAuthLoading(true);
+      // ⚡ FIX BUG (jul 2026): borrar los tokens de notificación de este usuario
+      // ANTES de cerrar sesión. En un teléfono compartido (dueño↔colaborador), si
+      // no se borra, el token del dispositivo queda ligado también al siguiente
+      // usuario que inicie sesión → los recordatorios con datos de clientes de un
+      // negocio llegaban al teléfono del otro. Se re-registra solo al reabrir la app.
+      const signingOutUserId = loadedUserIdRef.current;
+      if (signingOutUserId) {
+        try {
+          await supabase.from('notification_tokens').delete().eq('user_id', signingOutUserId);
+        } catch (e) {
+          logger.warn('[Auth] No se pudo limpiar el push token en signOut:', e);
+        }
+      }
       invalidateCache();
       setCacheUserId(null);
       loadedUserIdRef.current = null;

@@ -248,7 +248,10 @@ export default function ExportDataScreen() {
         }
         return sum;
       }, 0);
-      csv += `Ingresos cobrados:,$${totalRevenue.toLocaleString('es-MX')}\r\n`;
+      // ⚡ FIX BUG (jul 2026): entrecomillar el monto. toLocaleString('es-MX') mete
+      // comas de miles ($12,500) que, en un campo CSV sin comillas, rompían la columna
+      // al abrir en Excel/Sheets (el importe se partía en dos celdas).
+      csv += `Ingresos cobrados:,"$${totalRevenue.toLocaleString('es-MX')}"\r\n`;
 
       const cancelledCount = (appointments || []).filter((a: any) => a.status === 'Cancelada').length;
       csv += `Citas canceladas:,${cancelledCount}\r\n`;

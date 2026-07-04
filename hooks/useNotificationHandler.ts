@@ -2,6 +2,7 @@ import { useEffect, useRef } from 'react';
 import * as Notifications from 'expo-notifications';
 import { useRouter } from 'expo-router';
 import { logger } from '@/utils/logger';
+import { supabase } from '@/lib/supabase';
 
 // ══════════════════════════════════════════════════════════════════
 // useNotificationHandler — Maneja interacciones con notificaciones push
@@ -62,7 +63,7 @@ export function useNotificationHandler() {
 }
 
 // ──────────────────────────────────────────────────────────────────
-function handleNotificationTap(
+async function handleNotificationTap(
   response: Notifications.NotificationResponse,
   router: ReturnType<typeof useRouter>,
   lastHandledRef: React.MutableRefObject<string | null>
@@ -84,7 +85,16 @@ function handleNotificationTap(
 
     // Si la notificación trae appointmentId → abrir esa cita
     if (data.appointmentId && typeof data.appointmentId === 'string') {
-      // Pequeo delay para asegurarnos que el router esté listo si la app
+      // ⚡ FIX BUG (jul 2026): validar que haya sesión activa antes de navegar.
+      // En cold-start el tap puede correr antes de que el guard de auth redirija;
+      // sin sesión no abrimos el detalle (además la pantalla filtra por user_id,
+      // así que una cita de otro negocio nunca cargaría — defensa en profundidad).
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session?.user) {
+        logger.log('[Notifications] Tap sin sesión activa, se ignora la navegación.');
+        return;
+      }
+      // Pequeño delay para asegurarnos que el router esté listo si la app
       // está arrancando desde cold start
       setTimeout(() => {
         router.push(`/appointments/${data.appointmentId}` as any);

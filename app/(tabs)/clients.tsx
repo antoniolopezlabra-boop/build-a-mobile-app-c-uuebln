@@ -53,9 +53,13 @@ const getAvatarColor = (name: string, dark: boolean) => {
 };
 
 const getInitials = (name: string) => {
-  const parts = name.trim().split(' ');
+  // ⚡ FIX BUG (jul 2026): split(/\s+/).filter(Boolean) — antes split(' ') generaba
+  // un token vacío con nombres de doble espacio ("María  López") → parts[1][0] era
+  // undefined → el avatar mostraba "MUNDEFINED". Común al importar contactos.
+  const parts = (name || '').trim().split(/\s+/).filter(Boolean);
   if (parts.length >= 2) return (parts[0][0] + parts[1][0]).toUpperCase();
-  return name.substring(0, 2).toUpperCase();
+  if (parts.length === 1) return parts[0].substring(0, 2).toUpperCase();
+  return '?';
 };
 
 const formatLastVisit = (lastVisit: string | null | undefined) => {

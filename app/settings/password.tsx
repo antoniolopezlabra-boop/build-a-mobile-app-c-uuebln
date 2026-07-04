@@ -15,7 +15,6 @@ import { useRouter } from 'expo-router';
 import { colors } from '@/styles/commonStyles';
 import { IconSymbol } from '@/components/IconSymbol';
 import { ConfirmModal } from '@/components/button';
-import { BACKEND_URL, getBearerToken } from '@/utils/api';
 
 export default function PasswordSettingsScreen() {
   const router = useRouter();

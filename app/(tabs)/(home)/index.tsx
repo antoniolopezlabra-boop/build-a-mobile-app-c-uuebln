@@ -25,7 +25,11 @@ import Svg, { Circle } from 'react-native-svg';
 
 function getReportsCacheKey() {
   const n = new Date();
-  return 'reports_stats_' + n.getFullYear() + '_' + (n.getMonth() + 1);
+  // ⚡ FIX BUG (jul 2026): usar el mes en base 0 (getMonth()) para que la clave
+  // coincida con la que escribe reports.tsx (getReportsCacheKey(year, now.getMonth())).
+  // Antes el home invalidaba `_${mes+1}` mientras reports guardaba `_${mes}` → la
+  // invalidación nunca acertaba y Reportes mostraba ingresos/por-cobrar viejos ≤60s.
+  return 'reports_stats_' + n.getFullYear() + '_' + n.getMonth();
 }
 
 interface DashboardStats {

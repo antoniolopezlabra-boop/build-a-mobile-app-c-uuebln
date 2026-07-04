@@ -390,13 +390,23 @@ export default function SetupWizard() {
     try {
       const rows = Array.from({ length: 7 }, (_, dayIdx) => ({
         user_id: user.id,
-        day_of_week: dayIdx,
+        // ⚡ FIX BUG (jul 2026): convertir el índice del wizard (0=Lunes) a la
+        // convención de business_hours que leen new.tsx/reschedule/staff-app
+        // (0=Domingo, vía date.getDay()). Antes se guardaba dayIdx directo → los
+        // horarios quedaban corridos un día en el link público de reservas.
+        day_of_week: (dayIdx + 1) % 7,
         start_time: openTime,
         end_time: closeTime,
         is_open: openDays.includes(dayIdx),
       }));
-      await supabase.from('business_hours').delete().eq('user_id', user.id);
-      await supabase.from('business_hours').insert(rows);
+      // ⚡ FIX BUG (jul 2026): verificar el error de ambas operaciones. supabase-js
+      // no lanza en fallo lógico (RLS/constraint): devuelve { error }. Antes, si el
+      // insert fallaba tras el delete, el negocio quedaba SIN horarios y el wizard
+      // avanzaba como si hubiera guardado.
+      const { error: delErr } = await supabase.from('business_hours').delete().eq('user_id', user.id);
+      if (delErr) throw delErr;
+      const { error: insErr } = await supabase.from('business_hours').insert(rows);
+      if (insErr) throw insErr;
       animateStepChange(4);
     } catch (err: any) {
       Alert.alert('Error', 'No se pudieron guardar los horarios.');

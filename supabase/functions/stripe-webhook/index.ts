@@ -7,6 +7,43 @@ import { corsForWebhook } from '../_shared/cors.ts';
 // la firma del webhook (Stripe-Signature), no de CORS.
 const corsHeaders = corsForWebhook();
 
+// ⚡ FIX SEGURIDAD (jul 2026): validación de la firma de Stripe (HMAC-SHA256).
+// Antes la función aceptaba CUALQUIER evento con JSON.parse sin verificar la firma
+// ("// Para test, aceptamos el evento sin validación estricta") → cualquiera con la
+// anon key podía forjar un checkout.session.completed y autoasignarse VIP Luxury gratis
+// (o inflar comisiones de embajadores / degradar a otro negocio). Ahora validamos con
+// STRIPE_WEBHOOK_SECRET (ya configurado en Supabase Secrets).
+async function verifyStripeSignature(payload: string, sigHeader: string, secret: string): Promise<boolean> {
+  const parts: Record<string, string> = {};
+  for (const kv of sigHeader.split(',')) {
+    const [k, v] = kv.split('=');
+    if (k && v) parts[k.trim()] = v.trim();
+  }
+  const timestamp = parts['t'];
+  const v1 = parts['v1'];
+  if (!timestamp || !v1) return false;
+
+  // Rechazar timestamps muy viejos (protección anti-replay > 5 min).
+  const nowSec = Math.floor(Date.now() / 1000);
+  if (Math.abs(nowSec - Number(timestamp)) > 300) return false;
+
+  const key = await crypto.subtle.importKey(
+    'raw',
+    new TextEncoder().encode(secret),
+    { name: 'HMAC', hash: 'SHA-256' },
+    false,
+    ['sign'],
+  );
+  const sigBuf = await crypto.subtle.sign('HMAC', key, new TextEncoder().encode(`${timestamp}.${payload}`));
+  const expected = Array.from(new Uint8Array(sigBuf)).map((b) => b.toString(16).padStart(2, '0')).join('');
+
+  // Comparación en tiempo constante.
+  if (expected.length !== v1.length) return false;
+  let diff = 0;
+  for (let i = 0; i < expected.length; i++) diff |= expected.charCodeAt(i) ^ v1.charCodeAt(i);
+  return diff === 0;
+}
+
 /**
  * Determina el plan y sus metadatos según el monto cobrado.
  *
@@ -113,9 +150,19 @@ Deno.serve(async (req: Request) => {
 
     const body = await req.text();
 
-    // Validación manual de firma (sin usar stripe library que causa problemas en Deno)
-    // Para test, aceptamos el evento sin validación estricta
-    // TODO(security): implementar validación HMAC SHA256 de stripe-signature.
+    // ⚡ FIX SEGURIDAD (jul 2026): validar la firma de Stripe con HMAC-SHA256 ANTES de
+    // procesar el evento. Sin esto, cualquiera podía forjar eventos de pago.
+    const webhookSecret = Deno.env.get('STRIPE_WEBHOOK_SECRET') ?? '';
+    if (!webhookSecret) {
+      console.error('[Webhook] STRIPE_WEBHOOK_SECRET no configurado');
+      return new Response('Webhook secret not configured', { status: 500, headers: corsHeaders });
+    }
+    const validSig = await verifyStripeSignature(body, signature, webhookSecret);
+    if (!validSig) {
+      console.error('[Webhook] Firma inválida — evento rechazado');
+      return new Response('Invalid signature', { status: 400, headers: corsHeaders });
+    }
+
     let event;
     try {
       event = JSON.parse(body);

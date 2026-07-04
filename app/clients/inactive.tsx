@@ -55,11 +55,12 @@ export default function InactiveClientsScreen() {
   };
 
   const getInitials = (name: string) => {
-    const parts = name.trim().split(' ');
-    if (parts.length >= 2) {
-      return (parts[0][0] + parts[1][0]).toUpperCase();
-    }
-    return name.substring(0, 2).toUpperCase();
+    // ⚡ FIX BUG (jul 2026): split robusto contra nombres con espacios múltiples
+    // (antes "MUNDEFINED" en el avatar).
+    const parts = (name || '').trim().split(/\s+/).filter(Boolean);
+    if (parts.length >= 2) return (parts[0][0] + parts[1][0]).toUpperCase();
+    if (parts.length === 1) return parts[0].substring(0, 2).toUpperCase();
+    return '?';
   };
 
   const formatDaysSince = (days: number) => {

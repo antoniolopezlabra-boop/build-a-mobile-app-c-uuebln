@@ -20,8 +20,24 @@ serve(async (req) => {
   if (preflight) return preflight
 
   try {
+    // ⚡ FIX SEGURIDAD (jul 2026): esta función usa service role (salta RLS) y creaba
+    // cupones de Stripe sin verificar que quien llama sea admin → cualquiera con la anon
+    // key podía crear un cupón 100% "para siempre" (VYLTA gratis). Ahora exigimos que el
+    // JWT sea de un admin activo (vylta_admins), igual que admin-business-action.
+    const authClient = createClient(SUPABASE_URL, SUPABASE_KEY)
+    const authHeader = req.headers.get('Authorization') ?? ''
+    const jwt = authHeader.replace('Bearer ', '').trim()
+    const { data: { user: caller }, error: authError } = await authClient.auth.getUser(jwt)
+    if (authError || !caller) {
+      return new Response(JSON.stringify({ error: 'No autorizado' }), { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } })
+    }
+    const { data: adminRow } = await authClient.from('vylta_admins').select('id').eq('user_id', caller.id).eq('is_active', true).single()
+    if (!adminRow) {
+      return new Response(JSON.stringify({ error: 'Solo administradores pueden crear códigos promocionales' }), { status: 403, headers: { ...corsHeaders, 'Content-Type': 'application/json' } })
+    }
+
     // durationMonths viene directo del panel — ya no se convierte desde días
-    const { code, discountType, discountValue, durationMonths, maxUses, notes, createdBy } = await req.json()
+    const { code, discountType, discountValue, durationMonths, maxUses, notes } = await req.json()
 
     if (!code) throw new Error('Código requerido')
     if (!STRIPE_SECRET_KEY) throw new Error('STRIPE_SECRET_KEY no configurada')
@@ -71,7 +87,7 @@ serve(async (req) => {
       duration_days: durationMonths || null, // columna se reutiliza para meses
       max_uses: maxUses || 1,
       notes: notes || '',
-      created_by: createdBy,
+      created_by: caller.id,
       stripe_coupon_id: coupon.id,
       stripe_promo_code_id: promoCode.id,
       is_active: true,
