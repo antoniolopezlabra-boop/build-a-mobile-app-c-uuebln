@@ -23,6 +23,8 @@
 //   }
 // ══════════════════════════════════════════════════════════════════════
 
+import { Platform } from 'react-native';
+
 export interface FriendlyError {
   /** Título corto del Alert (4-6 palabras max) */
   title: string;
@@ -49,6 +51,14 @@ export function translateError(error: any): FriendlyError {
   // ── Códigos de error de la API ────────────────────────────────────
 
   if (code === 'PLAN_LIMIT_REACHED') {
+    // iOS (Guideline 3.1.1): mensaje neutro, sin CTA ni lenguaje de venta.
+    if (Platform.OS === 'ios') {
+      return {
+        title: 'Límite alcanzado',
+        message: 'Llegaste al tope de citas de tu plan este mes.',
+        code,
+      };
+    }
     return {
       title: 'Límite alcanzado',
       message: 'Llegaste al tope de citas de tu Plan Básico este mes. Actualiza a Premium para citas ilimitadas y WhatsApp automático.',

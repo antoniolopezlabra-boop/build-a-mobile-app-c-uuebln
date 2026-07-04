@@ -193,7 +193,10 @@ export default function SupportChatScreen() {
     if (!res.ok) {
       const err = await res.json().catch(() => ({}));
       if (err.code === 'PLAN_REQUIRED') {
-        throw new Error('El asistente IA está disponible en Plan Premium y Luxury. Actualiza tu plan en Ajustes > Plan y Suscripción.');
+        // iOS (Guideline 3.1.1): sin invitación a comprar/actualizar plan.
+        throw new Error(Platform.OS === 'ios'
+          ? 'El asistente IA no está incluido en tu plan actual.'
+          : 'El asistente IA está disponible en Plan Premium y Luxury. Actualiza tu plan en Ajustes > Plan y Suscripción.');
       }
       if (err.code === 'RATE_LIMITED') {
         throw new Error(err.error || 'Has alcanzado el límite de mensajes hoy. Intenta de nuevo mañana.');

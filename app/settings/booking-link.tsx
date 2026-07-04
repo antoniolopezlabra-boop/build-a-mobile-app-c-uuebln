@@ -2,7 +2,7 @@ import React, { useState, useCallback, useRef } from 'react';
 import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity,
   TextInput, Switch, ActivityIndicator, Share, Linking, Alert, Modal,
-  Clipboard,
+  Clipboard, Platform,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
@@ -301,9 +301,13 @@ export default function BookingLinkScreen() {
                     : `${usage.used}/${usage.limit} citas usadas este mes`}
                 </Text>
                 <Text style={st.usageDesc}>
-                  {usage.isAtLimit
-                    ? 'Tu link no aceptará nuevas citas hasta el próximo mes. Toca para mejorar.'
-                    : 'Plan Básico — Toca para ver Premium con citas ilimitadas'}
+                  {Platform.OS === 'ios'
+                    ? (usage.isAtLimit
+                        ? 'Tu link no aceptará nuevas citas hasta el próximo mes.'
+                        : `Tu plan incluye ${usage.limit} citas al mes.`)
+                    : usage.isAtLimit
+                      ? 'Tu link no aceptará nuevas citas hasta el próximo mes. Toca para mejorar.'
+                      : 'Plan Básico — Toca para ver Premium con citas ilimitadas'}
                 </Text>
               </View>
               <MaterialIcons name="arrow-forward-ios" size={14} color={usage.isAtLimit ? '#EF4444' : usage.isNearLimit ? '#F59E0B' : '#10B981'} />
@@ -610,21 +614,24 @@ export default function BookingLinkScreen() {
               ))}
             </View>
 
+            {/* iOS (Guideline 3.1.1): sin CTA de venta — solo cerrar */}
             <TouchableOpacity
               style={st.upgradePrimaryBtn}
-              onPress={handleGoToUpgrade}
+              onPress={Platform.OS === 'ios' ? () => setUpgradeModalVisible(false) : handleGoToUpgrade}
               activeOpacity={0.85}
             >
-              <Text style={st.upgradePrimaryBtnText}>Ver planes Premium y Luxury</Text>
+              <Text style={st.upgradePrimaryBtnText}>{Platform.OS === 'ios' ? 'Entendido' : 'Ver planes Premium y Luxury'}</Text>
             </TouchableOpacity>
 
-            <TouchableOpacity
-              style={st.upgradeSecondaryBtn}
-              onPress={() => setUpgradeModalVisible(false)}
-              activeOpacity={0.7}
-            >
-              <Text style={st.upgradeSecondaryBtnText}>Tal vez después</Text>
-            </TouchableOpacity>
+            {Platform.OS !== 'ios' && (
+              <TouchableOpacity
+                style={st.upgradeSecondaryBtn}
+                onPress={() => setUpgradeModalVisible(false)}
+                activeOpacity={0.7}
+              >
+                <Text style={st.upgradeSecondaryBtnText}>Tal vez después</Text>
+              </TouchableOpacity>
+            )}
           </View>
         </View>
       </Modal>

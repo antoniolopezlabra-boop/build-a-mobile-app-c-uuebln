@@ -2,7 +2,7 @@
 import React, { useState, useEffect } from 'react';
 import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity,
-  ActivityIndicator, Switch, Image,
+  ActivityIndicator, Switch, Image, Platform,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
@@ -233,8 +233,9 @@ export default function SettingsScreen() {
               <Text style={[s.planName, { color: tc.text }]}>Plan {planDisplay}</Text>
               <View style={[s.planBadge, { backgroundColor: planBg }]}><Text style={[s.planBadgeText, { color: planColor }]}>{planDisplay.toUpperCase()}</Text></View>
             </View>
-            <Text style={[s.planPrice, { color: tc.textMuted }]}>{planPrice}</Text>
-            {!isPremium && <Text style={s.planUpgrade}>{isGratuito ? 'Activa recordatorios y reportes →' : 'Activa equipo, email marketing y más →'}</Text>}
+            {/* iOS (Guideline 3.1.1): sin precio ni texto de upgrade */}
+            {Platform.OS !== 'ios' && <Text style={[s.planPrice, { color: tc.textMuted }]}>{planPrice}</Text>}
+            {Platform.OS !== 'ios' && !isPremium && <Text style={s.planUpgrade}>{isGratuito ? 'Activa recordatorios y reportes →' : 'Activa equipo, email marketing y más →'}</Text>}
           </View>
           <MaterialIcons name="arrow-forward-ios" size={16} color={planColor} />
         </TouchableOpacity>

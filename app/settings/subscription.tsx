@@ -309,7 +309,7 @@ export default function SubscriptionScreen() {
                     : '#64748B'
                 }
               ]}>{currentPlanLabel}</Text>
-              <Text style={s.currentPrice}>{priceLabel}</Text>
+              {!isIOS && <Text style={s.currentPrice}>{priceLabel}</Text>}
             </View>
           </View>
 
@@ -396,7 +396,7 @@ export default function SubscriptionScreen() {
             <Text style={s.manageHint}>Cambiar método de pago, ver facturas o cancelar tu suscripción</Text>
           )}
 
-          {isGratuito && (
+          {!isIOS && isGratuito && (
             <View style={s.upgradeBanner}>
               <Text style={s.upgradeBannerText}>
                 💡 Tu Plan Básico permite hasta 10 citas al mes. Actualiza al Plan Premium para citas ilimitadas.
@@ -405,6 +405,10 @@ export default function SubscriptionScreen() {
           )}
         </View>
 
+        {/* iOS (Guideline 3.1.1): TODO el catálogo de planes (nombres, precios,
+            cards y sección VIP) queda fuera del build de iOS. Apple rechazó el
+            build 19 por mostrar precios de suscripción sin ofrecer IAP. */}
+        {!isIOS && (<>
         <Text style={s.sectionLabel}>PLANES DISPONIBLES</Text>
 
         {/* Plan Básico ($0) */}
@@ -549,6 +553,7 @@ export default function SubscriptionScreen() {
             </TouchableOpacity>
           )}
         </View>
+        </>)}
 
         {!isIOS && (
           <View style={s.secureNote}>
@@ -557,15 +562,28 @@ export default function SubscriptionScreen() {
           </View>
         )}
 
-        {/* iOS (Guideline 3.1.1): nota informativa, sin compra ni enlaces externos */}
+        {/* iOS (Guideline 3.1.1): SOLO información de la cuenta — funciones que
+            incluye el plan actual. Sin precios, sin catálogo de planes, sin CTAs
+            y sin referencias a compra externa (la nota anterior que dirigía a
+            vylta.lat fue causa directa del rechazo del build 19). */}
         {isIOS && (
-          <View style={s.secureNote}>
-            <MaterialIcons name="info-outline" size={14} color="#94A3B8" />
-            <Text style={s.secureNoteText}>
-              {isGratuito
-                ? 'Tu plan actual es Gratuito. Para activar Premium o Luxury, administra tu suscripción desde tu cuenta de VYLTA en vylta.lat.'
-                : 'Administra o cancela tu suscripción desde tu cuenta de VYLTA en vylta.lat.'}
-            </Text>
+          <View style={s.planCard}>
+            <Text style={s.planName}>Tu plan incluye</Text>
+            <View style={[s.features, { marginTop: 14 }]}>
+              {PLAN_FEATURES[
+                (isPremium || isVipPremium) ? 'Premium'
+                  : (isBasico || isVipBasico) ? 'Basico'
+                  : 'Gratuito'
+              ].map((f, i) => {
+                const isLimit = f.startsWith('Sin');
+                return (
+                  <View key={i} style={s.featureRow}>
+                    <MaterialIcons name={isLimit ? 'close' : 'check'} size={16} color={isLimit ? '#94A3B8' : colors.primary} />
+                    <Text style={s.featureText}>{f}</Text>
+                  </View>
+                );
+              })}
+            </View>
           </View>
         )}
       </ScrollView>

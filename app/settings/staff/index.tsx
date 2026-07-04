@@ -1,7 +1,7 @@
 import React, { useState, useCallback } from 'react';
 import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity,
-  ActivityIndicator, Alert,
+  ActivityIndicator, Alert, Platform,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
@@ -137,8 +137,11 @@ export default function StaffListScreen() {
             <MaterialIcons name="group" size={40} color="#6366F1" />
           </View>
           <Text style={[st.paywallTitle, { color: tc.text }]}>Gestión de equipo</Text>
+          {/* iOS (Guideline 3.1.1): texto neutro, sin referencia a plan de pago */}
           <Text style={[st.paywallDesc, { color: tc.textMuted }]}>
-            Registra hasta {maxStaff} colaboradores, asigna citas a cada uno y gestiona sus horarios individuales desde el Plan Premium.
+            {Platform.OS === 'ios'
+              ? 'La gestión de equipo no está incluida en tu plan actual.'
+              : `Registra hasta ${maxStaff} colaboradores, asigna citas a cada uno y gestiona sus horarios individuales desde el Plan Premium.`}
           </Text>
           <View style={st.paywallFeatures}>
             {[
@@ -153,13 +156,15 @@ export default function StaffListScreen() {
               </View>
             ))}
           </View>
-          <TouchableOpacity
-            style={st.paywallBtn}
-            onPress={() => router.push('/settings/subscription')}
-          >
-            <MaterialIcons name="star" size={18} color="#fff" />
-            <Text style={st.paywallBtnText}>Ver Plan Premium</Text>
-          </TouchableOpacity>
+          {Platform.OS !== 'ios' && (
+            <TouchableOpacity
+              style={st.paywallBtn}
+              onPress={() => router.push('/settings/subscription')}
+            >
+              <MaterialIcons name="star" size={18} color="#fff" />
+              <Text style={st.paywallBtnText}>Ver Plan Premium</Text>
+            </TouchableOpacity>
+          )}
         </View>
       </SafeAreaView>
     );

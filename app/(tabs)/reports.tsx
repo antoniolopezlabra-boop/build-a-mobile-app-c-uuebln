@@ -5,7 +5,7 @@ import { useRouter } from 'expo-router';
 import { usePlan } from '@/contexts/PlanContext';
 import { useAuth } from '@/contexts/AuthContext';
 import { useTheme } from '@/contexts/ThemeContext';
-import { View, Text, ScrollView, ActivityIndicator, StyleSheet, TouchableOpacity, RefreshControl, Modal } from 'react-native';
+import { View, Text, ScrollView, ActivityIndicator, StyleSheet, TouchableOpacity, RefreshControl, Modal, Platform } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { supabase } from '@/lib/supabase';
 import { getCurrentUserId } from '@/utils/api';
@@ -664,13 +664,18 @@ export default function ReportsScreen() {
           <View style={[s.paywallIconWrap, { backgroundColor: isDark ? '#1E293B' : '#F1F5F9' }]}>
             <Text style={{ fontSize: 36 }}>📊</Text>
           </View>
-          <Text style={[s.paywallTitle, { color: tc.text }]}>Reportes en Plan Premium</Text>
+          {/* iOS (Guideline 3.1.1): texto neutro y sin CTA de venta */}
+          <Text style={[s.paywallTitle, { color: tc.text }]}>{Platform.OS === 'ios' ? 'Reportes' : 'Reportes en Plan Premium'}</Text>
           <Text style={[s.paywallDesc, { color: tc.textMuted }]}>
-            Accede a reportes de ingresos, citas completadas y clientes con el Plan Premium o Luxury.
+            {Platform.OS === 'ios'
+              ? 'Los reportes no están incluidos en tu plan actual.'
+              : 'Accede a reportes de ingresos, citas completadas y clientes con el Plan Premium o Luxury.'}
           </Text>
-          <TouchableOpacity style={s.paywallBtn} onPress={() => router.push('/settings/subscription')}>
-            <Text style={s.paywallBtnText}>Ver planes</Text>
-          </TouchableOpacity>
+          {Platform.OS !== 'ios' && (
+            <TouchableOpacity style={s.paywallBtn} onPress={() => router.push('/settings/subscription')}>
+              <Text style={s.paywallBtnText}>Ver planes</Text>
+            </TouchableOpacity>
+          )}
         </View>
       </SafeAreaView>
     );

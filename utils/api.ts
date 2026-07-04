@@ -1,3 +1,4 @@
+import { Platform } from 'react-native';
 import { getTodayString, getTomorrowString, getDateStringDaysFromNow, toLocalDateString, addDays, getMonthStartString, getMonthEndString } from '@/utils/dateUtils';
 import { supabase } from '@/lib/supabase';
 import { logger } from '@/utils/logger';
@@ -123,8 +124,11 @@ async function enforceGratuitoMonthlyLimit(userId: string): Promise<void> {
     .lte('date', monthEnd);
 
   if ((count ?? 0) >= GRATUITO_MONTHLY_LIMIT) {
+    // iOS (Guideline 3.1.1): sin invitación a comprar/actualizar plan.
     const err: any = new Error(
-      `Alcanzaste el límite de ${GRATUITO_MONTHLY_LIMIT} citas del plan Gratuito este mes. Actualiza al Plan Premium para citas ilimitadas.`
+      Platform.OS === 'ios'
+        ? `Alcanzaste el límite de ${GRATUITO_MONTHLY_LIMIT} citas de tu plan este mes.`
+        : `Alcanzaste el límite de ${GRATUITO_MONTHLY_LIMIT} citas del plan Gratuito este mes. Actualiza al Plan Premium para citas ilimitadas.`
     );
     err.code = 'PLAN_LIMIT_REACHED';
     throw err;

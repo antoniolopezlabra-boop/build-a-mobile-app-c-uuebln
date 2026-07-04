@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity,
-  ActivityIndicator, Switch,
+  ActivityIndicator, Switch, Platform,
 } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
@@ -199,11 +199,16 @@ export default function BookingBlocksScreen() {
         <View style={styles.paywall}>
           <View style={styles.paywallIcon}><IconSymbol android_material_icon_name="view-week" size={40} color="#6366F1" /></View>
           <Text style={styles.paywallTitle}>Recepción por bloques</Text>
-          <Text style={styles.paywallDesc}>Recibe citas solo en ventanas de tiempo fijas (ej. 10–12, 12–14), sin horarios intermedios. Disponible en los planes Premium y Luxury.</Text>
-          <TouchableOpacity style={styles.paywallBtn} onPress={() => router.push('/settings/subscription')}>
-            <IconSymbol android_material_icon_name="star" size={18} color="#fff" />
-            <Text style={styles.paywallBtnText}>Ver planes</Text>
-          </TouchableOpacity>
+          {/* iOS (Guideline 3.1.1): texto neutro y sin CTA de venta */}
+          <Text style={styles.paywallDesc}>{Platform.OS === 'ios'
+            ? 'Recibe citas solo en ventanas de tiempo fijas (ej. 10–12, 12–14), sin horarios intermedios. No incluido en tu plan actual.'
+            : 'Recibe citas solo en ventanas de tiempo fijas (ej. 10–12, 12–14), sin horarios intermedios. Disponible en los planes Premium y Luxury.'}</Text>
+          {Platform.OS !== 'ios' && (
+            <TouchableOpacity style={styles.paywallBtn} onPress={() => router.push('/settings/subscription')}>
+              <IconSymbol android_material_icon_name="star" size={18} color="#fff" />
+              <Text style={styles.paywallBtnText}>Ver planes</Text>
+            </TouchableOpacity>
+          )}
         </View>
       </SafeAreaView>
     );

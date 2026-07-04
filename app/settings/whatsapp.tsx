@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity,
-  ActivityIndicator, Switch, Alert,
+  ActivityIndicator, Switch, Alert, Platform,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
@@ -191,7 +191,16 @@ function ActiveScreen({ isGratuito, canFollowUp }: {
           )}
         </View>
 
-        {!canFollowUp && (
+        {/* iOS (Guideline 3.1.1): nota pasiva, sin CTA de upgrade */}
+        {!canFollowUp && Platform.OS === 'ios' && (
+          <View style={s.followupOnNote}>
+            <MaterialIcons name="info-outline" size={14} color="#94A3B8" />
+            <Text style={[s.followupOnText, { color: '#94A3B8' }]}>
+              No incluido en tu plan actual.
+            </Text>
+          </View>
+        )}
+        {!canFollowUp && Platform.OS !== 'ios' && (
           <TouchableOpacity
             style={s.followupUpgradeBtn}
             onPress={() => router.push('/settings/subscription')}

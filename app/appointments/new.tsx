@@ -742,9 +742,14 @@ function NewAppointmentInner() {
     : usage.isNearLimit
       ? `Solo ${usage.remaining} cita${usage.remaining !== 1 ? 's' : ''} restante${usage.remaining !== 1 ? 's' : ''}`
       : `${usage.used} de ${usage.limit} citas usadas este mes`;
-  const usageDesc = usage.isAtLimit
-    ? 'No puedes crear más citas este mes. Toca para mejorar a Premium.'
-    : 'Plan Básico — Mejora a Premium para citas ilimitadas';
+  // iOS (Guideline 3.1.1): sin lenguaje de venta/upgrade — solo estado del plan.
+  const usageDesc = Platform.OS === 'ios'
+    ? (usage.isAtLimit
+        ? 'No puedes crear más citas este mes con tu plan actual.'
+        : `Tu plan incluye ${usage.limit} citas al mes.`)
+    : usage.isAtLimit
+      ? 'No puedes crear más citas este mes. Toca para mejorar a Premium.'
+      : 'Plan Básico — Mejora a Premium para citas ilimitadas';
 
   const hasInvalidByDuration = totalServiceDuration > 0 && timeSlots.some(s => s.unavailableReason);
   const canSave = !!selectedClient && !!service.trim() && selectedBlocks.length > 0 && !dayIsClosed;

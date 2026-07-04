@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity,
-  ActivityIndicator, Image, RefreshControl, Alert, AppState,
+  ActivityIndicator, Image, RefreshControl, Alert, AppState, Platform,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, usePathname } from 'expo-router';
@@ -277,11 +277,16 @@ export default function HomeScreen() {
       ? `Solo te quedan ${usage.remaining} citas`
       : `${usage.used} de ${usage.limit} citas usadas este mes`;
 
-  const usageDesc = usage.isAtLimit
-    ? 'Mejora a Plan Premium para citas ilimitadas y WhatsApp automático'
-    : usage.isNearLimit
-      ? 'Te estás acercando al límite. Considera actualizar a Premium.'
-      : 'Plan Básico · Mejora a Premium para citas ilimitadas';
+  // iOS (Guideline 3.1.1): sin lenguaje de venta/upgrade — solo estado del plan.
+  const usageDesc = Platform.OS === 'ios'
+    ? (usage.isAtLimit
+        ? 'Alcanzaste el límite mensual de citas de tu plan.'
+        : `Tu plan incluye ${usage.limit} citas al mes.`)
+    : usage.isAtLimit
+      ? 'Mejora a Plan Premium para citas ilimitadas y WhatsApp automático'
+      : usage.isNearLimit
+        ? 'Te estás acercando al límite. Considera actualizar a Premium.'
+        : 'Plan Básico · Mejora a Premium para citas ilimitadas';
 
   // Header: nombre + logo del NEGOCIO (homologado con la web)
   const businessName = authLoading ? '' : (businessProfile?.businessName?.trim() || 'Tu negocio');
