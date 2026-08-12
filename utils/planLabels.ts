@@ -78,3 +78,34 @@ export function getPlanEmoji(internalType: string | null | undefined): string {
 export function getUpgradeTargetName(internalType: string | null | undefined): DisplayPlanName {
   return getPlanDisplayName(internalType);
 }
+
+/**
+ * Estados de suscripción (Stripe) que NO otorgan un plan de pago.
+ * El stripe-webhook solo baja plan_type→Gratuito en `customer.subscription.deleted`;
+ * un pago fallido (past_due) deja plan_type pagado con status='expired', lo que daría
+ * features premium GRATIS. Estos estados terminales degradan el plan efectivo.
+ */
+const INACTIVE_STATUSES = [
+  'expired',
+  'cancelled',
+  'canceled',
+  'past_due',
+  'unpaid',
+  'incomplete_expired',
+  'paused',
+];
+
+/**
+ * Plan EFECTIVO considerando el status de la suscripción.
+ * Si el status es terminal (no active/trialing/trial), degrada a 'Gratuito'.
+ * status null/active/trial/desconocido → conserva plan_type (conservador:
+ * NUNCA lockea a un usuario cuyo status no sea explícitamente terminal).
+ */
+export function getEffectivePlanType(
+  internalType: string | null | undefined,
+  status: string | null | undefined,
+): string {
+  const s = (status || '').toLowerCase().trim();
+  if (INACTIVE_STATUSES.includes(s)) return 'Gratuito';
+  return internalType ?? 'Gratuito';
+}

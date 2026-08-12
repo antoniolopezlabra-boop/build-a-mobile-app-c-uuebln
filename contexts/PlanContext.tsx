@@ -1,6 +1,7 @@
 import React, { createContext, useContext, useEffect, useRef, useState } from 'react';
 import { useAuth } from './AuthContext';
 import { logger } from '@/utils/logger';
+import { getEffectivePlanType } from '@/utils/planLabels';
 
 export type PlanType = 'Gratuito' | 'Básico' | 'Basico' | 'Premium' | 'VipBasico' | 'VipPremium';
 export type PlanStatus = 'active' | 'trial' | 'expired' | 'cancelled';
@@ -160,16 +161,25 @@ export function PlanProvider({ children }: { children: React.ReactNode }) {
   }, [user?.id, authLoading]);
 
   // ─── Plan derivados básicos ──────────────────
-  const isGratuito = plan.planType === 'Gratuito';
-  const isVipBasico  = plan.planType === 'VipBasico';
-  const isVipPremium = plan.planType === 'VipPremium';
-  const isVip = plan.isVip || isVipBasico || isVipPremium;
+  // ⚡ FIX Ago 2026 (downgrade automático): derivamos permisos del plan EFECTIVO,
+  // que degrada a 'Gratuito' cuando la suscripción está en estado terminal
+  // (expired/cancelled/past_due/unpaid). El stripe-webhook solo baja plan_type en
+  // `customer.subscription.deleted`; un pago fallido dejaba plan_type pagado con
+  // status='expired' → el usuario conservaba features premium GRATIS. Conservador:
+  // status active/trial/null NUNCA degrada (no lockea a quien sí paga).
+  const effectivePlanType = getEffectivePlanType(plan.planType, plan.status);
+  const isPlanInactive = effectivePlanType === 'Gratuito' && plan.planType !== 'Gratuito';
+
+  const isGratuito = effectivePlanType === 'Gratuito';
+  const isVipBasico  = effectivePlanType === 'VipBasico';
+  const isVipPremium = effectivePlanType === 'VipPremium';
+  const isVip = (plan.isVip && !isPlanInactive) || isVipBasico || isVipPremium;
 
   // IMPORTANTE: VipBasico tiene los MISMOS permisos que Basico (Premium mensual)
   //             VipPremium tiene los MISMOS permisos que Premium (Luxury mensual)
   // Por eso isBasico y isPremium consideran sus equivalentes VIP.
-  const isBasico  = plan.planType === 'Basico' || plan.planType === 'Básico' || isVipBasico;
-  const isPremium = plan.planType === 'Premium' || isVipPremium;
+  const isBasico  = effectivePlanType === 'Basico' || effectivePlanType === 'Básico' || isVipBasico;
+  const isPremium = effectivePlanType === 'Premium' || isVipPremium;
 
   const isPaidPlan = !isGratuito;
 
