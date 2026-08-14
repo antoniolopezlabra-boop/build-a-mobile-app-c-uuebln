@@ -181,14 +181,30 @@ export default function SupportChatScreen() {
       throw new Error('Tu sesión expiró. Vuelve a iniciar sesión.');
     }
 
-    const res = await fetch(`${SUPABASE_URL}/functions/v1/ai-chat`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${session.access_token}`,
-      },
-      body: JSON.stringify({ messages: apiMessages }),
-    });
+    // Timeout duro (ago 2026): fetch en RN no expira solo. Tras volver de
+    // background el socket puede estar muerto y la promesa quedaría colgada
+    // para siempre, dejando el chat "pensando" sin salida.
+    const aiController = new AbortController();
+    const aiTimer = setTimeout(() => aiController.abort(), 45_000);
+    let res: Response;
+    try {
+      res = await fetch(`${SUPABASE_URL}/functions/v1/ai-chat`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${session.access_token}`,
+        },
+        body: JSON.stringify({ messages: apiMessages }),
+        signal: aiController.signal,
+      });
+    } catch (e: any) {
+      if (e?.name === 'AbortError') {
+        throw new Error('La respuesta tardó demasiado. Revisa tu conexión e inténtalo de nuevo.');
+      }
+      throw e;
+    } finally {
+      clearTimeout(aiTimer);
+    }
 
     if (!res.ok) {
       const err = await res.json().catch(() => ({}));
