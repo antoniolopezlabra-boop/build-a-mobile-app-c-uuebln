@@ -15,6 +15,7 @@ import MaterialIcons from '@expo/vector-icons/MaterialIcons';
 
 interface Client {
   id: string; name: string; phone: string;
+
   email?: string | null; notes?: string | null;
   lastVisit?: string | null; totalVisits: number;
   isActive?: boolean; birthday?: string | null; createdAt: string;
@@ -26,6 +27,10 @@ interface ClientStats {
 interface Appointment {
   id: string; date: string; startTime: string;
   endTime: string; service: string; status: string;
+}
+interface LoyaltyProgress {
+  total_visits: number; visits_in_cycle: number; visits_required: number;
+  reward_percent: number; redemptions: number; is_eligible: boolean; enabled: boolean;
 }
 
 export default function ClientDetailScreen() {
@@ -41,6 +46,54 @@ export default function ClientDetailScreen() {
   const [deleteModal, setDeleteModal] = useState(false);
   const [deleting, setDeleting] = useState(false);
 
+  // ─── Tarjeta de lealtad (Ago 2026) ───────────────────────────────
+  // Progreso calculado en BD (RPC get_loyalty_progress) a partir del
+  // teléfono del cliente. Solo se muestra si el negocio activó la función.
+  const [loyalty, setLoyalty] = useState<LoyaltyProgress | null>(null);
+  const [redeeming, setRedeeming] = useState(false);
+  const [redeemModal, setRedeemModal] = useState(false);
+
+  const loadLoyalty = async (phone?: string | null) => {
+    if (!phone) { setLoyalty(null); return; }
+    try {
+      const { data: auth } = await supabase.auth.getUser();
+      if (!auth?.user?.id) return;
+      const { data, error } = await supabase.rpc('get_loyalty_progress', {
+        p_user_id: auth.user.id,
+        p_phone: phone,
+      });
+      if (error) return;
+      const row = Array.isArray(data) ? data[0] : data;
+      if (row?.enabled) setLoyalty(row as LoyaltyProgress);
+      else setLoyalty(null);
+    } catch {
+      // Función no desplegada aún — simplemente no mostramos la tarjeta
+    }
+  };
+
+  const confirmRedeem = async () => {
+    if (!client || !loyalty) return;
+    setRedeemModal(false);
+    setRedeeming(true);
+    try {
+      const { data: auth } = await supabase.auth.getUser();
+      const { error } = await supabase.from('loyalty_redemptions').insert({
+        user_id: auth?.user?.id,
+        client_phone: (client.phone || '').replace(/\D/g, '').slice(-10),
+        client_id: client.id,
+        client_name: client.name,
+        reward_percent: loyalty.reward_percent,
+        visits_required: loyalty.visits_required,
+      });
+      if (error) throw error;
+      await loadLoyalty(client.phone);
+    } catch (e: any) {
+      setErrorModal({ visible: true, message: e?.message ?? 'No se pudo registrar el canje.' });
+    } finally {
+      setRedeeming(false);
+    }
+  };
+
   useEffect(() => { if (id) loadClientData(); }, [id]);
 
   const loadClientData = async () => {
@@ -55,6 +108,7 @@ export default function ClientDetailScreen() {
       ]);
       setStats(statsData);
       setAppointments(appointmentsData);
+      loadLoyalty(clientData.phone);
     } catch {
       setErrorModal({ visible: true, message: 'Error al cargar los datos del cliente' });
     } finally {
@@ -209,7 +263,65 @@ export default function ClientDetailScreen() {
         </TouchableOpacity>
       </View>
 
+      <ConfirmModal
+        visible={redeemModal}
+        title="🎁 Canjear recompensa"
+        message={loyalty
+          ? `${client.name} completó ${loyalty.visits_required} visitas.\n\n¿Aplicar ${loyalty.reward_percent}% de descuento y reiniciar su tarjeta?`
+          : ''}
+        buttons={[
+          { text: 'Cancelar', onPress: () => setRedeemModal(false), style: 'cancel' },
+          { text: 'Sí, canjear', onPress: confirmRedeem, style: 'default' },
+        ]}
+        onDismiss={() => setRedeemModal(false)}
+      />
+
       <ScrollView contentContainerStyle={styles.scrollContent}>
+        {/* ─── Tarjeta de lealtad ─── */}
+        {loyalty && (
+          <View style={[styles.loyaltyCard, loyalty.is_eligible && styles.loyaltyCardWin]}>
+            <View style={styles.loyaltyHead}>
+              <MaterialIcons name="card-giftcard" size={18} color={loyalty.is_eligible ? '#fff' : '#B45309'} />
+              <Text style={[styles.loyaltyTitle, loyalty.is_eligible && { color: '#fff' }]}>
+                {loyalty.is_eligible ? '¡Recompensa lista!' : 'Tarjeta de lealtad'}
+              </Text>
+              <Text style={[styles.loyaltyCount, loyalty.is_eligible && { color: '#FEF3C7' }]}>
+                {Math.min(loyalty.visits_in_cycle, loyalty.visits_required)}/{loyalty.visits_required}
+              </Text>
+            </View>
+
+            <View style={styles.loyaltyDots}>
+              {Array.from({ length: Math.min(loyalty.visits_required, 12) }).map((_, i) => {
+                const done = i < Math.min(loyalty.visits_in_cycle, loyalty.visits_required);
+                return (
+                  <View key={i} style={[
+                    styles.loyaltyDot,
+                    done && styles.loyaltyDotDone,
+                    loyalty.is_eligible && styles.loyaltyDotWin,
+                  ]}>
+                    {done && <MaterialIcons name="check" size={10} color={loyalty.is_eligible ? '#B45309' : '#fff'} />}
+                  </View>
+                );
+              })}
+            </View>
+
+            {loyalty.is_eligible ? (
+              <TouchableOpacity style={styles.loyaltyBtn} onPress={() => setRedeemModal(true)} disabled={redeeming}>
+                {redeeming
+                  ? <ActivityIndicator size="small" color="#B45309" />
+                  : <Text style={styles.loyaltyBtnText}>Canjear {loyalty.reward_percent}% de descuento</Text>}
+              </TouchableOpacity>
+            ) : (
+              <Text style={styles.loyaltyHint}>
+                {loyalty.visits_required - loyalty.visits_in_cycle} visita
+                {loyalty.visits_required - loyalty.visits_in_cycle !== 1 ? 's' : ''} más para
+                ganar {loyalty.reward_percent}% de descuento
+                {loyalty.redemptions > 0 ? ` · ${loyalty.redemptions} canjeada${loyalty.redemptions !== 1 ? 's' : ''}` : ''}
+              </Text>
+            )}
+          </View>
+        )}
+
         <View style={styles.clientCard}>
           <View style={styles.clientAvatar}>
             <Text style={styles.clientAvatarText}>{initials}</Text>
@@ -340,6 +452,28 @@ export default function ClientDetailScreen() {
 }
 
 const styles = StyleSheet.create({
+  // ─── Tarjeta de lealtad ───
+  loyaltyCard: {
+    backgroundColor: '#FFFBEB', borderRadius: 16, padding: 14, marginBottom: 12,
+    borderWidth: 1, borderColor: '#FDE68A',
+  },
+  loyaltyCardWin: { backgroundColor: '#F59E0B', borderColor: '#D97706' },
+  loyaltyHead: { flexDirection: 'row', alignItems: 'center', gap: 7, marginBottom: 10 },
+  loyaltyTitle: { flex: 1, fontSize: 13.5, fontWeight: '700', color: '#78350F' },
+  loyaltyCount: { fontSize: 13, fontWeight: '800', color: '#B45309' },
+  loyaltyDots: { flexDirection: 'row', flexWrap: 'wrap', gap: 5, marginBottom: 10 },
+  loyaltyDot: {
+    width: 20, height: 20, borderRadius: 10, backgroundColor: '#FEF3C7',
+    borderWidth: 1, borderColor: '#FDE68A', justifyContent: 'center', alignItems: 'center',
+  },
+  loyaltyDotDone: { backgroundColor: '#F59E0B', borderColor: '#D97706' },
+  loyaltyDotWin: { backgroundColor: '#FEF3C7', borderColor: '#FCD34D' },
+  loyaltyHint: { fontSize: 11.5, color: '#92400E', lineHeight: 16 },
+  loyaltyBtn: {
+    backgroundColor: '#fff', borderRadius: 10, paddingVertical: 10, alignItems: 'center',
+  },
+  loyaltyBtnText: { fontSize: 13.5, fontWeight: '700', color: '#B45309' },
+
   container: { flex: 1, backgroundColor: colors.background },
   loadingContainer: { flex: 1, justifyContent: 'center', alignItems: 'center' },
   errorContainer: { flex: 1, justifyContent: 'center', alignItems: 'center', padding: 20 },

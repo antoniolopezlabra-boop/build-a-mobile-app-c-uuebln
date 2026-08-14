@@ -107,6 +107,8 @@ export default function SettingsScreen() {
   const [allowOverlapping, setAllowOverlapping] = useState(false);
   const [savingOverlap, setSavingOverlap]       = useState(false);
   const [birthdayEnabled, setBirthdayEnabled]   = useState(false);
+  const [loyaltyEnabled, setLoyaltyEnabled]     = useState(false);
+  const [loyaltyVisits, setLoyaltyVisits]       = useState(10);
   const [bookingLinkActive, setBookingLinkActive] = useState(false);
   const [subscription, setSubscription]         = useState<Subscription | null>(null);
   const [loading, setLoading]                   = useState(true);
@@ -114,6 +116,8 @@ export default function SettingsScreen() {
   const [timeBlocksCount, setTimeBlocksCount]   = useState(0);
 
   const canUseAISupport = isBasico || isPremium;
+  // Tarjetas de lealtad: Premium ($399) y Luxury ($799)
+  const canUseLoyalty = isBasico || isPremium;
   const canUseBlocks = isBasico || isPremium;
 
   useEffect(() => { loadSettings(); }, []);
@@ -133,11 +137,13 @@ export default function SettingsScreen() {
       if (whatsappData) setCached('settings_whatsapp', whatsappData);
       const { data: bpData } = await supabase
         .from('business_profiles')
-        .select('allow_overlapping, birthday_reminders_enabled')
+        .select('allow_overlapping, birthday_reminders_enabled, loyalty_enabled, loyalty_visits_required')
         .eq('user_id', user?.id).single();
       if (bpData) {
         setAllowOverlapping(bpData.allow_overlapping || false);
         setBirthdayEnabled(bpData.birthday_reminders_enabled || false);
+        setLoyaltyEnabled((bpData as any).loyalty_enabled || false);
+        setLoyaltyVisits((bpData as any).loyalty_visits_required ?? 10);
       }
       const { data: blData } = await supabase
         .from('booking_links').select('is_active').eq('user_id', user?.id).single();
@@ -255,6 +261,7 @@ export default function SettingsScreen() {
         </SettingGroup>
 
         <SettingGroup title="AUTOMATIZACIONES">
+          <SettingRow iconName="card-giftcard" iconColor={canUseLoyalty ? '#F59E0B' : '#CBD5E1'} iconBg={canUseLoyalty ? '#FFFBEB' : '#F8FAFC'} label="Tarjetas de lealtad" sublabel={canUseLoyalty ? (loyaltyEnabled ? `Activo — recompensa cada ${loyaltyVisits} visitas` : 'Desactivado — premia a tus clientes frecuentes') : 'Disponible en Plan Premium'} badge={!canUseLoyalty ? <View style={s.premiumChip}><Text style={s.premiumChipText}>PREMIUM</Text></View> : undefined} right={<View style={s.statusRight}>{loyaltyEnabled && <View style={[s.statusDot, { backgroundColor: '#F59E0B' }]} />}<MaterialIcons name="arrow-forward-ios" size={16} color={tc.border} /></View>} onPress={() => canUseLoyalty ? router.push('/settings/loyalty' as any) : router.push('/settings/subscription')} />
           <SettingRow iconName="cake" iconColor="#EC4899" iconBg="#FDF2F8" label="Cumpleaños automáticos" sublabel={birthdayEnabled ? 'Activado — envía emails el día del cumpleaños' : 'Desactivado'} badge={!isPremium ? <View style={s.luxuryChip}><Text style={s.luxuryChipText}>LUXURY</Text></View> : undefined} right={<View style={s.statusRight}>{birthdayEnabled && <View style={[s.statusDot, { backgroundColor: '#EC4899' }]} />}<MaterialIcons name="arrow-forward-ios" size={16} color={tc.border} /></View>} onPress={() => isPremium ? router.push('/settings/birthday') : router.push('/settings/subscription')} />
           <SettingRow iconName="email" iconColor="#6366F1" iconBg="#EEF2FF" label="Email Marketing" sublabel="Envía campañas y promociones a tus clientes" badge={!isPremium ? <View style={s.luxuryChip}><Text style={s.luxuryChipText}>LUXURY</Text></View> : undefined} onPress={() => isPremium ? router.push('/marketing') : router.push('/settings/subscription')} />
           <SettingRow iconName="person-search" iconColor="#F59E0B" iconBg="#FFFBEB" label="Recuperar clientes inactivos" sublabel="Detecta y reactiva clientes sin visita reciente" badge={!isPremium ? <View style={s.luxuryChip}><Text style={s.luxuryChipText}>LUXURY</Text></View> : undefined} onPress={() => isPremium ? router.push('/clients/inactive') : router.push('/settings/subscription')} />
