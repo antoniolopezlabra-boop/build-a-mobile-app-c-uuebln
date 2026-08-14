@@ -276,7 +276,7 @@ export default function SubscriptionScreen() {
         <TouchableOpacity onPress={() => router.back()} style={s.back}>
           <IconSymbol android_material_icon_name="arrow-back" size={24} color={colors.text} />
         </TouchableOpacity>
-        <Text style={s.title}>Plan y Suscripción</Text>
+        <Text style={s.title}>{isIOS ? 'Mi Plan' : 'Plan y Suscripción'}</Text>
         <View style={{ width: 32 }} />
       </View>
 
@@ -340,8 +340,10 @@ export default function SubscriptionScreen() {
             </View>
           )}
 
-          {/* Detalles de suscripción — solo para planes de pago */}
-          {hasPaidPlan && subDetails && (
+          {/* Detalles de suscripción (Suscrito desde / Próximo cobro / Estado) —
+              OCULTO en iOS. Guideline 2.1(b): mostrar datos de suscripción (fechas
+              de cobro, estado) sin ofrecer IAP provocó el rechazo del build 20. */}
+          {!isIOS && hasPaidPlan && subDetails && (
             <View style={s.detailsSection}>
               <View style={s.detailsDivider} />
 
