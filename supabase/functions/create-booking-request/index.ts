@@ -124,8 +124,18 @@ serve(async (req) => {
     //   - Phone: 3/día               → evita spam con un solo número
     //
     // Si alguna se excede → HTTP 429 con Retry-After.
+    // ⚡ Llamada interna desde confirm-prepaid-booking (cita YA PAGADA):
+    // saltamos el rate limiting. Si no, un cliente que ya pagó podría quedarse
+    // sin cita por haber agotado su cuota de intentos. La llave viaja en un
+    // header y solo la conocen nuestras propias funciones.
+    const internalKey = req.headers.get('x-vylta-internal-key')
+    const expectedInternalKey = Deno.env.get('VYLTA_INTERNAL_KEY')
+    const isInternalCall = !!expectedInternalKey && internalKey === expectedInternalKey
+
     const clientIp = getClientIp(req)
-    const rateCheck = await checkRateLimits(supabase, [
+    const rateCheck = isInternalCall
+      ? { allowed: true as const, message: '', retryAfterSeconds: 0 }
+      : await checkRateLimits(supabase, [
       { dimension: 'ip',    identifier: clientIp,    window: 'minute', limit: 5  },
       { dimension: 'ip',    identifier: clientIp,    window: 'hour',   limit: 20 },
       { dimension: 'slug',  identifier: slug,        window: 'hour',   limit: 30 },

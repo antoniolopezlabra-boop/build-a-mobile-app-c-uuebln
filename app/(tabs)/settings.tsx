@@ -108,6 +108,8 @@ export default function SettingsScreen() {
   const [savingOverlap, setSavingOverlap]       = useState(false);
   const [birthdayEnabled, setBirthdayEnabled]   = useState(false);
   const [loyaltyEnabled, setLoyaltyEnabled]     = useState(false);
+  const [prepayEnabled, setPrepayEnabled]       = useState(false);
+  const [prepayPercent, setPrepayPercent]       = useState(50);
   const [loyaltyVisits, setLoyaltyVisits]       = useState(10);
   const [bookingLinkActive, setBookingLinkActive] = useState(false);
   const [subscription, setSubscription]         = useState<Subscription | null>(null);
@@ -118,6 +120,8 @@ export default function SettingsScreen() {
   const canUseAISupport = isBasico || isPremium;
   // Tarjetas de lealtad: Premium ($399) y Luxury ($799)
   const canUseLoyalty = isBasico || isPremium;
+  // Cobros anticipados: Premium ($399) y Luxury ($799)
+  const canUsePrepay = isBasico || isPremium;
   const canUseBlocks = isBasico || isPremium;
 
   useEffect(() => { loadSettings(); }, []);
@@ -137,13 +141,15 @@ export default function SettingsScreen() {
       if (whatsappData) setCached('settings_whatsapp', whatsappData);
       const { data: bpData } = await supabase
         .from('business_profiles')
-        .select('allow_overlapping, birthday_reminders_enabled, loyalty_enabled, loyalty_visits_required')
+        .select('allow_overlapping, birthday_reminders_enabled, loyalty_enabled, loyalty_visits_required, prepay_enabled, prepay_percent')
         .eq('user_id', user?.id).single();
       if (bpData) {
         setAllowOverlapping(bpData.allow_overlapping || false);
         setBirthdayEnabled(bpData.birthday_reminders_enabled || false);
         setLoyaltyEnabled((bpData as any).loyalty_enabled || false);
         setLoyaltyVisits((bpData as any).loyalty_visits_required ?? 10);
+        setPrepayEnabled((bpData as any).prepay_enabled || false);
+        setPrepayPercent((bpData as any).prepay_percent ?? 50);
       }
       const { data: blData } = await supabase
         .from('booking_links').select('is_active').eq('user_id', user?.id).single();
@@ -258,6 +264,10 @@ export default function SettingsScreen() {
 
         <SettingGroup title="CAPTACIÓN DE CLIENTES">
           <SettingRow iconName="link" iconColor="#10B981" iconBg="#ECFDF5" label="Link de cita pública" sublabel={canUseBookingLink ? (bookingLinkActive ? 'Activo — clientes pueden agendar en línea' : 'Inactivo — toca para configurar') : 'Disponible en Plan Premium'} badge={!canUseBookingLink ? <View style={s.premiumChip}><Text style={s.premiumChipText}>PREMIUM</Text></View> : undefined} right={canUseBookingLink ? (<View style={[s.waBadge, { backgroundColor: bookingLinkActive ? '#ECFDF5' : '#F1F5F9' }]}><View style={[s.waDot, { backgroundColor: bookingLinkActive ? '#10B981' : '#94A3B8' }]} /><Text style={[s.waText, { color: bookingLinkActive ? '#10B981' : '#64748B' }]}>{bookingLinkActive ? 'Activo' : 'Inactivo'}</Text></View>) : undefined} onPress={() => canUseBookingLink ? router.push('/settings/booking-link') : router.push('/settings/subscription')} />
+        </SettingGroup>
+
+        <SettingGroup title="COBROS">
+          <SettingRow iconName="payments" iconColor={canUsePrepay ? '#6366F1' : '#CBD5E1'} iconBg={canUsePrepay ? '#EEF2FF' : '#F8FAFC'} label="Cobros anticipados" sublabel={canUsePrepay ? (prepayEnabled ? `Activo — anticipo del ${prepayPercent}%` : 'Cobra por adelantado y reduce ausencias') : 'Disponible en Plan Premium'} badge={!canUsePrepay ? <View style={s.premiumChip}><Text style={s.premiumChipText}>PREMIUM</Text></View> : undefined} right={<View style={s.statusRight}>{prepayEnabled && <View style={[s.statusDot, { backgroundColor: '#6366F1' }]} />}<MaterialIcons name="arrow-forward-ios" size={16} color={tc.border} /></View>} onPress={() => canUsePrepay ? router.push('/settings/prepay' as any) : router.push('/settings/subscription')} />
         </SettingGroup>
 
         <SettingGroup title="AUTOMATIZACIONES">

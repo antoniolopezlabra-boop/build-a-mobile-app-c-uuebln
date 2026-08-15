@@ -46,7 +46,7 @@ const WEB_ALLOWED_ORIGINS = [
 
 // Common headers permitidos en todas las funciones (Authorization para JWT,
 // apikey para anon key, content-type para JSON, x-client-info para Supabase JS).
-const COMMON_ALLOWED_HEADERS = 'authorization, x-client-info, apikey, content-type';
+const COMMON_ALLOWED_HEADERS = 'authorization, x-client-info, apikey, content-type, x-vylta-internal-key';
 
 // ── Helpers públicos ─────────────────────────────────────────────────
 
