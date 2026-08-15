@@ -188,7 +188,7 @@ CÓMO LO VIVE EL CLIENTE FINAL:
 5. Se confirma su cita y recibe el WhatsApp de confirmación de siempre, además del comprobante de pago por correo desde Stripe.
 Si no completa el pago en 10 minutos, el horario se libera automáticamente para otros clientes.
 
-COMISIONES: Stripe cobra aproximadamente 3.6% + $3 MXN por transacción, y VYLTA cobra 1% del anticipo. Se descuentan automáticamente; el negocio recibe el resto.
+COMISIONES: Stripe cobra aproximadamente 3.6% + $3 MXN por transacción, y VYLTA cobra 2% del anticipo. Se descuentan automáticamente; el negocio recibe el resto.
 
 NOTAS IMPORTANTES:
 - Solo aplica a citas agendadas desde el LINK PÚBLICO. Las citas que el dueño crea manualmente en la app no piden pago.

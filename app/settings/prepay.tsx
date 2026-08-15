@@ -333,7 +333,7 @@ export default function PrepayScreen() {
             <View style={s.infoBox}>
               <MaterialIcons name="info-outline" size={16} color="#64748B" />
               <Text style={s.infoText}>
-                Comisiones: Stripe cobra ~3.6% + $3 MXN por transacción y VYLTA 1%.
+                Comisiones: Stripe cobra ~3.6% + $3 MXN por transacción y VYLTA 2%.
                 El horario se aparta 10 minutos mientras el cliente completa su pago;
                 si no paga, se libera automáticamente.
               </Text>
